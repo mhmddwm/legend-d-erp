@@ -17,7 +17,7 @@ def list_accounts(db: Session = Depends(get_db)):
     for acc in accounts:
         result.append(AccountOut(
             code=acc.code, name_ar=acc.name_ar, name_en=acc.name_en,
-            account_type=acc.account_type, parent_code=acc.parent_code,
+            account_type=acc.account_type, nature=acc.nature, parent_code=acc.parent_code,
             opening_balance=float(acc.opening_balance),
             balance=account_rollup_balance(db, acc.code)
         ))
@@ -37,7 +37,7 @@ def create_account(payload: AccountIn, db: Session = Depends(get_db)):
     db.refresh(acc)
     return AccountOut(
         code=acc.code, name_ar=acc.name_ar, name_en=acc.name_en,
-        account_type=acc.account_type, parent_code=acc.parent_code,
+        account_type=acc.account_type, nature=acc.nature, parent_code=acc.parent_code,
         opening_balance=float(acc.opening_balance), balance=float(acc.opening_balance)
     )
 
@@ -58,7 +58,7 @@ def update_account(code: str, payload: AccountUpdate, db: Session = Depends(get_
     db.refresh(acc)
     return AccountOut(
         code=acc.code, name_ar=acc.name_ar, name_en=acc.name_en,
-        account_type=acc.account_type, parent_code=acc.parent_code,
+        account_type=acc.account_type, nature=acc.nature, parent_code=acc.parent_code,
         opening_balance=float(acc.opening_balance),
         balance=account_rollup_balance(db, acc.code)
     )

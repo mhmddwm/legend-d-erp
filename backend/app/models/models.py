@@ -13,6 +13,7 @@ class Account(Base):
     name_ar = Column(String(200), nullable=False)
     name_en = Column(String(200))
     account_type = Column(String(20), nullable=False)
+    nature = Column(String(10), nullable=False, default="مدين")
     parent_code = Column(String(20), ForeignKey("accounts.code"))
     opening_balance = Column(Numeric(18, 2), nullable=False, default=0)
     is_active = Column(Boolean, nullable=False, default=True)

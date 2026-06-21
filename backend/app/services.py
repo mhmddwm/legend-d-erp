@@ -16,6 +16,7 @@ def account_direct_balance(db: Session, code: str) -> float:
         return 0.0
 
     debit_nature = acc.account_type in ("assets", "expenses")
+
     opening = float(acc.opening_balance or 0)
 
     debit_sum = db.query(func.coalesce(func.sum(JournalEntry.amount), 0)).filter(

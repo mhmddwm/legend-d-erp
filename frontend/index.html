@@ -136,14 +136,21 @@
     <div class="formcard">
       <h3 id="accFormTitle">إضافة حساب جديد</h3>
       <input type="hidden" id="accEditCode">
-      <div class="frow">
+     <div class="frow">
         <div class="field"><label>كود الحساب</label><input id="accCode" placeholder="مثال: 1111"></div>
         <div class="field" style="grid-column:span 2"><label>اسم الحساب (عربي)</label><input id="accNameAr" placeholder="مثال: النقدية في الصندوق"></div>
+        <div class="field" style="grid-column:span 2"><label>اسم الحساب (إنجليزي - اختياري)</label><input id="accNameEn" placeholder="e.g. Cash in Hand"></div>
         <div class="field"><label>نوع الحساب</label>
-          <select id="accType">
+          <select id="accType" onchange="suggestNature()">
             <option value="assets">الأصول</option><option value="liabilities">الخصوم</option>
             <option value="equity">حقوق الملكية</option><option value="revenue">الإيرادات</option>
             <option value="expenses">المصروفات</option>
+          </select>
+        </div>
+        <div class="field"><label>طبيعة الحساب</label>
+          <select id="accNature">
+            <option value="مدين">مدين</option>
+            <option value="دائن">دائن</option>
           </select>
         </div>
         <div class="field"><label>الحساب الأب (اختياري)</label><select id="accParent"><option value="">— بدون أب (حساب رئيسي) —</option></select></div>
@@ -668,10 +675,13 @@ function cancelAccEdit(){
   document.getElementById('accCode').value='';
   document.getElementById('accCode').disabled=false;
   document.getElementById('accNameAr').value='';
+  document.getElementById('accNameEn').value='';
   document.getElementById('accOpening').value='';
+  suggestNature();
   document.getElementById('accFormTitle').textContent='إضافة حساب جديد';
   document.getElementById('accSubmitBtn').textContent='إضافة الحساب';
   document.getElementById('accCancelBtn').style.display='none';
+}
 }
 
 async function deleteAccount(code){

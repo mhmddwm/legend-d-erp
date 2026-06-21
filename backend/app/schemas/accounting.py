@@ -8,6 +8,7 @@ class AccountIn(BaseModel):
     name_ar: str
     name_en: Optional[str] = None
     account_type: str = Field(pattern="^(assets|liabilities|equity|revenue|expenses)$")
+    nature: str = Field(default="مدين", pattern="^(مدين|دائن)$")
     parent_code: Optional[str] = None
     opening_balance: float = 0
 
@@ -15,6 +16,7 @@ class AccountIn(BaseModel):
 class AccountUpdate(BaseModel):
     name_ar: Optional[str] = None
     name_en: Optional[str] = None
+    nature: Optional[str] = Field(default=None, pattern="^(مدين|دائن)$")
     parent_code: Optional[str] = None
     opening_balance: Optional[float] = None
 
@@ -24,6 +26,7 @@ class AccountOut(BaseModel):
     name_ar: str
     name_en: Optional[str]
     account_type: str
+    nature: str
     parent_code: Optional[str]
     opening_balance: float
     balance: float = 0  # الرصيد المحسوب (افتتاحي + قيود + فروع)
