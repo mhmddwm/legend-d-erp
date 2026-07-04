@@ -1,0 +1,17 @@
+name: Frontend Static Check
+
+on:
+  push:
+    branches: [ main, master, develop ]
+  pull_request:
+
+jobs:
+  static-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check required files
+        run: |
+          test -f frontend/index.html
+          test -f LEGENDD.manifest.json
+          test -f ROADMAP.md

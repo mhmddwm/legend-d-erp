@@ -1,0 +1,19 @@
+{
+  "name": "LEGEND D ERP SYS",
+  "version": "PF-01.2",
+  "core_engines": [
+    "Localization Engine"
+  ],
+  "languages": [
+    {
+      "code": "ar",
+      "dir": "rtl",
+      "name": "العربية"
+    },
+    {
+      "code": "en",
+      "dir": "ltr",
+      "name": "English"
+    }
+  ]
+}

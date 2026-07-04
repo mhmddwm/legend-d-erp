@@ -5,7 +5,6 @@ from sqlalchemy import (
 from sqlalchemy.orm import relationship
 from app.database import Base
 
-
 class Account(Base):
     __tablename__ = "accounts"
 
@@ -14,11 +13,18 @@ class Account(Base):
     name_en = Column(String(200))
     account_type = Column(String(20), nullable=False)
     nature = Column(String(10), nullable=False, default="مدين")
-    parent_code = Column(String(20), ForeignKey("accounts.code"))
+    
+    # حقل الربط بالحساب الأب
+    parent_code = Column(String(20), ForeignKey("accounts.code"), nullable=True)
+    
     opening_balance = Column(Numeric(18, 2), nullable=False, default=0)
     is_active = Column(Boolean, nullable=False, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
+    # إضافة علاقة الشجرة
+    sub_accounts = relationship("Account", backref="parent", remote_side=[code])
+
+# --- باقي الكلاسات كما هي دون تغيير ---
 
 class JournalEntry(Base):
     __tablename__ = "journal_entries"
