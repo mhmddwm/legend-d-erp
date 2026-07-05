@@ -1,14 +1,15 @@
 import os
 from pathlib import Path
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-import uvicorn
 
 from app.routers import accounting, inventory, purchasing, localization
 
-app = FastAPI()
+app = FastAPI(title="ERP System")
 
+# ================= CORS =================
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -17,6 +18,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ================= ROUTERS =================
 app.include_router(localization.router)
 app.include_router(accounting.router)
 app.include_router(accounting.journal_router)
@@ -28,16 +30,21 @@ app.include_router(purchasing.grn_router)
 app.include_router(purchasing.pinv_router)
 app.include_router(purchasing.prt_router)
 
+# ================= FRONTEND =================
 BASE_DIR = Path(__file__).resolve().parent.parent
 FRONTEND_DIR = BASE_DIR / "frontend"
 
-app.mount(
-    "/",
-    StaticFiles(directory=str(FRONTEND_DIR), html=True),
-    name="frontend"
-)
+if FRONTEND_DIR.exists():
+    app.mount(
+        "/",
+        StaticFiles(directory=str(FRONTEND_DIR), html=True),
+        name="frontend"
+    )
 
+# ================= LOCAL RUN ONLY =================
 if __name__ == "__main__":
+    import uvicorn
+
     uvicorn.run(
         "app.main:app",
         host="0.0.0.0",
