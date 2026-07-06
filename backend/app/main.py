@@ -5,7 +5,13 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from app.routers import accounting, inventory, purchasing, localization
+from app.routers import (
+    accounting,
+    inventory,
+    purchasing,
+    localization,
+    users
+)
 
 app = FastAPI(title="ERP System")
 
@@ -30,6 +36,14 @@ app.include_router(purchasing.grn_router)
 app.include_router(purchasing.pinv_router)
 app.include_router(purchasing.prt_router)
 
+# users router (NEW)
+app.include_router(users.router)
+
+# ================= ROOT =================
+@app.get("/")
+def home():
+    return {"message": "ERP API is running"}
+
 # ================= FRONTEND =================
 BASE_DIR = Path(__file__).resolve().parent.parent
 FRONTEND_DIR = BASE_DIR / "frontend"
@@ -41,7 +55,7 @@ if FRONTEND_DIR.exists():
         name="frontend"
     )
 
-# ================= LOCAL RUN ONLY =================
+# ================= LOCAL RUN =================
 if __name__ == "__main__":
     import uvicorn
 
@@ -50,6 +64,3 @@ if __name__ == "__main__":
         host="0.0.0.0",
         port=int(os.environ.get("PORT", 8000))
     )
-@app.get("/")
-def home():
-    return {"message": "ERP API is running"}    
