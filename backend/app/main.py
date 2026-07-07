@@ -10,7 +10,9 @@ from app.routers import (
     inventory,
     purchasing,
     localization,
-    users
+    suppliers,
+    users,
+    items
 )
 
 app = FastAPI(title="ERP System")
@@ -36,6 +38,9 @@ app.include_router(purchasing.grn_router)
 app.include_router(purchasing.pinv_router)
 app.include_router(purchasing.prt_router)
 
+# Users & Suppliers
+app.include_router(users.router)
+app.include_router(suppliers.router)
 # users router (NEW)
 app.include_router(users.router)
 
