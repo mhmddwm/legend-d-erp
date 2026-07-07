@@ -28,19 +28,23 @@ app.add_middleware(
 
 # ================= ROUTERS =================
 app.include_router(localization.router)
+
 app.include_router(accounting.router)
 app.include_router(accounting.journal_router)
+
 app.include_router(inventory.router)
 app.include_router(inventory.stock_router)
 app.include_router(inventory.supplier_router)
+
 app.include_router(purchasing.po_router)
 app.include_router(purchasing.grn_router)
 app.include_router(purchasing.pinv_router)
 app.include_router(purchasing.prt_router)
 
-# Users & Suppliers
+# Users, Suppliers & Items
 app.include_router(users.router)
 app.include_router(suppliers.router)
+app.include_router(items.router)
 
 # ================= ROOT =================
 @app.get("/")
