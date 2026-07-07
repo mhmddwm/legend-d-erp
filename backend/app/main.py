@@ -41,8 +41,6 @@ app.include_router(purchasing.prt_router)
 # Users & Suppliers
 app.include_router(users.router)
 app.include_router(suppliers.router)
-# users router (NEW)
-app.include_router(users.router)
 
 # ================= ROOT =================
 @app.get("/")
