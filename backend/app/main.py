@@ -10,14 +10,18 @@ from app.routers import (
     inventory,
     purchasing,
     localization,
-    suppliers,
     users,
     items
 )
 
-app = FastAPI(title="ERP System")
+
+app = FastAPI(
+    title="ERP System"
+)
+
 
 # ================= CORS =================
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -26,44 +30,77 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 # ================= ROUTERS =================
+
+# Localization
 app.include_router(localization.router)
 
+
+# Accounting
 app.include_router(accounting.router)
 app.include_router(accounting.journal_router)
 
+
+# Inventory
 app.include_router(inventory.router)
 app.include_router(inventory.stock_router)
-app.include_router(inventory.supplier_router)
 
+
+# Purchasing
 app.include_router(purchasing.po_router)
 app.include_router(purchasing.grn_router)
 app.include_router(purchasing.pinv_router)
 app.include_router(purchasing.prt_router)
 
-# Users, Suppliers & Items
+
+# Users
 app.include_router(users.router)
-app.include_router(suppliers.router)
+
+
+# Items
 app.include_router(items.router)
 
+
+# Suppliers
+# موجود داخل inventory.py ومتوافق مع models.py
+app.include_router(inventory.supplier_router)
+
+
+
 # ================= ROOT =================
+
 @app.get("/")
 def home():
-    return {"message": "ERP API is running"}
+    return {
+        "message": "ERP API is running"
+    }
+
+
 
 # ================= FRONTEND =================
+
 BASE_DIR = Path(__file__).resolve().parent.parent
+
 FRONTEND_DIR = BASE_DIR / "frontend"
+
 
 if FRONTEND_DIR.exists():
     app.mount(
         "/",
-        StaticFiles(directory=str(FRONTEND_DIR), html=True),
+        StaticFiles(
+            directory=str(FRONTEND_DIR),
+            html=True
+        ),
         name="frontend"
     )
 
+
+
 # ================= LOCAL RUN =================
+
 if __name__ == "__main__":
+
     import uvicorn
 
     uvicorn.run(
