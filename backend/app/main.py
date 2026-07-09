@@ -10,8 +10,7 @@ from app.routers import (
     inventory,
     purchasing,
     localization,
-    users,
-    items
+    users
 )
 
 
@@ -45,6 +44,7 @@ app.include_router(accounting.journal_router)
 # Inventory
 app.include_router(inventory.router)
 app.include_router(inventory.stock_router)
+app.include_router(inventory.supplier_router)
 
 
 # Purchasing
@@ -56,15 +56,6 @@ app.include_router(purchasing.prt_router)
 
 # Users
 app.include_router(users.router)
-
-
-# Items
-app.include_router(items.router)
-
-
-# Suppliers
-# موجود داخل inventory.py ومتوافق مع models.py
-app.include_router(inventory.supplier_router)
 
 
 
