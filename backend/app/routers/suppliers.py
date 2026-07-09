@@ -17,18 +17,20 @@ def get_suppliers(db: Session = Depends(get_db)):
 # CREATE SUPPLIER
 @router.post("/suppliers")
 def create_supplier(
-    name: str,
     code: str,
-    phone: str,
-    email: str,
+    name: str,
+    phone: str = None,
+    email: str = None,
+    notes: str = None,
     db: Session = Depends(get_db)
 ):
 
     supplier = Supplier(
-        name=name,
         code=code,
+        name=name,
         phone=phone,
-        email=email
+        email=email,
+        notes=notes
     )
 
     db.add(supplier)

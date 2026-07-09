@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models.item import Item
+from app.models.models import Item
 
 
 router = APIRouter()
@@ -17,16 +17,16 @@ def get_items(db: Session = Depends(get_db)):
 # CREATE ITEM
 @router.post("/items")
 def create_item(
+    code: str,
     name: str,
-    sku: str,
-    unit: str,
-    price: float,
+    unit: str = "حبة",
+    price: float = 0,
     db: Session = Depends(get_db)
 ):
 
     item = Item(
+        code=code,
         name=name,
-        sku=sku,
         unit=unit,
         price=price
     )
