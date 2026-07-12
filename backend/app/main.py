@@ -10,7 +10,8 @@ from app.routers import (
     inventory,
     purchasing,
     localization,
-    users
+    users,
+    warehouse
 )
 
 
@@ -56,6 +57,10 @@ app.include_router(purchasing.prt_router)
 
 # Users
 app.include_router(users.router)
+
+
+# Warehouses
+app.include_router(warehouse.router)
 
 
 

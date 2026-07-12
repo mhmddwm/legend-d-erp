@@ -1,0 +1,1 @@
+from app.models.warehouse import Warehouse
