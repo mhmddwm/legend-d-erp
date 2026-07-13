@@ -5,13 +5,15 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
+
 from app.routers import (
     accounting,
     inventory,
     purchasing,
     localization,
     users,
-    warehouse
+    warehouse,
+    warehouse_locations
 )
 
 
@@ -61,6 +63,12 @@ app.include_router(users.router)
 
 # Warehouses
 app.include_router(warehouse.router)
+
+
+# Warehouse Locations
+app.include_router(
+    warehouse_locations.router
+)
 
 
 
