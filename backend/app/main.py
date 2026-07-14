@@ -5,7 +5,6 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-
 from app.routers import (
     accounting,
     inventory,
@@ -71,25 +70,35 @@ app.include_router(
 )
 
 
+# ================= API HEALTH CHECK =================
 
-# ================= ROOT =================
-
-@app.get("/")
-def home():
+@app.get("/api")
+def api_home():
     return {
         "message": "ERP API is running"
     }
 
 
-
 # ================= FRONTEND =================
 
-BASE_DIR = Path(__file__).resolve().parent.parent
+# Project Structure:
+#
+# ROOT
+# ├── backend
+# │    └── app
+# │         └── main.py
+# │
+# └── frontend
+#      └── index.html
+
+
+BASE_DIR = Path(__file__).resolve().parents[2]
 
 FRONTEND_DIR = BASE_DIR / "frontend"
 
 
 if FRONTEND_DIR.exists():
+
     app.mount(
         "/",
         StaticFiles(
@@ -98,7 +107,6 @@ if FRONTEND_DIR.exists():
         ),
         name="frontend"
     )
-
 
 
 # ================= LOCAL RUN =================
