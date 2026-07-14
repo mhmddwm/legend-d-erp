@@ -27,7 +27,7 @@ from app.schemas.inventory import (
     SupplierOut,
     SupplierUpdate,
 )
-from app.schemas.purchase import (
+from app.schemas.purchasing import (
     GoodsReceiptIn,
     GoodsReceiptOut,
     PurchaseInvoiceIn,
