@@ -1,366 +1,965 @@
+from datetime import date
+
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import func
 from sqlalchemy.orm import Session
+
 from app.database import get_db
 from app.models.models import (
-    Item, StockMove, Supplier, PurchaseOrder, PurchaseOrderLine,
-    GoodsReceipt, GoodsReceiptLine, PurchaseInvoice, PurchaseInvoiceLine,
-    PurchaseReturn, PurchaseReturnLine, JournalEntry, Account
+    GoodsReceipt,
+    GoodsReceiptLine,
+    Item,
+    PurchaseInvoice,
+    PurchaseInvoiceLine,
+    PurchaseOrder,
+    PurchaseOrderLine,
+    PurchaseReturn,
+    PurchaseReturnLine,
+    StockMove,
+    Supplier,
 )
-from app.schemas.purchasing import (
-    PurchaseOrderIn, PurchaseOrderOut,
-    GoodsReceiptIn, GoodsReceiptOut,
-    PurchaseInvoiceIn, PurchaseInvoiceOut,
-    PurchaseReturnIn, PurchaseReturnOut,
+from app.schemas.inventory import (
+    ItemIn,
+    ItemOut,
+    ItemUpdate,
+    StockMoveOut,
+    SupplierIn,
+    SupplierOut,
+    SupplierUpdate,
 )
-from app.services import next_sequence
+from app.schemas.purchase import (
+    GoodsReceiptIn,
+    GoodsReceiptOut,
+    PurchaseInvoiceIn,
+    PurchaseInvoiceOut,
+    PurchaseOrderIn,
+    PurchaseOrderOut,
+    PurchaseReturnIn,
+    PurchaseReturnOut,
+)
 
-ACC_INVENTORY = "123"
-ACC_PAYABLE = "211"
 
+router = APIRouter(prefix="/api/items", tags=["Items"])
+stock_router = APIRouter(prefix="/api/stock-moves", tags=["StockMoves"])
+supplier_router = APIRouter(prefix="/api/suppliers", tags=["Suppliers"])
 po_router = APIRouter(prefix="/api/purchase-orders", tags=["PurchaseOrders"])
-grn_router = APIRouter(prefix="/api/goods-receipts", tags=["GoodsReceipts"])
-pinv_router = APIRouter(prefix="/api/purchase-invoices", tags=["PurchaseInvoices"])
-prt_router = APIRouter(prefix="/api/purchase-returns", tags=["PurchaseReturns"])
+grn_router = APIRouter(prefix="/api/grn", tags=["GoodsReceipts"])
+pinv_router = APIRouter(
+    prefix="/api/purchase-invoices",
+    tags=["PurchaseInvoices"],
+)
+prt_router = APIRouter(
+    prefix="/api/purchase-returns",
+    tags=["PurchaseReturns"],
+)
 
 
-# ============================================================
+# =========================================================
 # HELPERS
-# ============================================================
+# =========================================================
+def _to_float(value) -> float:
+    return float(value or 0)
 
-def _post_auto_entry(db: Session, entry_date, debit: str, credit: str,
-                     amount: float, description: str, source_type: str, source_ref: str):
-    for code in (debit, credit):
-        if not db.query(Account).filter(Account.code == code).first():
-            raise HTTPException(500, f"حساب مفقود في دليل الحسابات: {code}. تأكد من وجود حساب {code}")
-    entry = JournalEntry(
-        entry_date=entry_date,
-        debit_account=debit,
-        credit_account=credit,
-        amount=amount,
-        description=description,
-        source_type=source_type,
-        source_ref=source_ref,
+
+def _validate_non_negative(value, field_name: str) -> float:
+    number = _to_float(value)
+    if number < 0:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{field_name} لا يمكن أن تكون قيمة سالبة",
+        )
+    return number
+
+
+def _validate_positive(value, field_name: str) -> float:
+    number = _to_float(value)
+    if number <= 0:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{field_name} يجب أن تكون أكبر من صفر",
+        )
+    return number
+
+
+def _validate_lines(lines, document_name: str) -> None:
+    if not lines:
+        raise HTTPException(
+            status_code=400,
+            detail=f"يجب إضافة بند واحد على الأقل إلى {document_name}",
+        )
+
+    item_codes = [line.item_code for line in lines]
+    if len(item_codes) != len(set(item_codes)):
+        raise HTTPException(
+            status_code=400,
+            detail=f"لا يمكن تكرار الصنف داخل {document_name}",
+        )
+
+
+def _item_has_transactions(db: Session, item_code: str) -> bool:
+    checks = (
+        db.query(StockMove.id).filter(StockMove.item_code == item_code).first(),
+        db.query(PurchaseOrderLine)
+        .filter(PurchaseOrderLine.item_code == item_code)
+        .first(),
+        db.query(GoodsReceiptLine)
+        .filter(GoodsReceiptLine.item_code == item_code)
+        .first(),
+        db.query(PurchaseInvoiceLine)
+        .filter(PurchaseInvoiceLine.item_code == item_code)
+        .first(),
+        db.query(PurchaseReturnLine)
+        .filter(PurchaseReturnLine.item_code == item_code)
+        .first(),
     )
-    db.add(entry)
+    return any(checks)
 
 
-def _update_item_wac(item: Item, incoming_qty: float, incoming_cost: float):
-    """تحديث متوسط التكلفة المرجّح (Weighted Average Cost) للصنف."""
-    old_qty = float(item.qty)
-    old_cost = float(item.avg_cost)
-    new_qty = old_qty + incoming_qty
-    if new_qty > 0:
-        item.avg_cost = ((old_qty * old_cost) + (incoming_qty * incoming_cost)) / new_qty
-    item.qty = new_qty
+def _supplier_has_transactions(db: Session, supplier_code: str) -> bool:
+    checks = (
+        db.query(PurchaseOrder)
+        .filter(PurchaseOrder.supplier_code == supplier_code)
+        .first(),
+        db.query(GoodsReceipt)
+        .filter(GoodsReceipt.supplier_code == supplier_code)
+        .first(),
+        db.query(PurchaseInvoice)
+        .filter(PurchaseInvoice.supplier_code == supplier_code)
+        .first(),
+        db.query(PurchaseReturn)
+        .filter(PurchaseReturn.supplier_code == supplier_code)
+        .first(),
+    )
+    return any(checks)
 
 
-def _update_po_status(db: Session, po_number: str):
-    po = db.query(PurchaseOrder).filter(PurchaseOrder.po_number == po_number).first()
-    if not po:
-        return
-    po_lines = db.query(PurchaseOrderLine).filter(PurchaseOrderLine.po_number == po_number).all()
-    grns = db.query(GoodsReceipt).filter(GoodsReceipt.po_number == po_number).all()
+def calc_payable(db: Session, supplier_code: str) -> float:
+    """
+    الرصيد الحالي = فواتير الشراء المرحلة - مرتجعات الشراء.
+    لا يشمل سندات السداد لعدم وجود نموذج مدفوعات في الكود الحالي.
+    """
+    invoiced = (
+        db.query(func.coalesce(func.sum(PurchaseInvoice.total), 0))
+        .filter(
+            PurchaseInvoice.supplier_code == supplier_code,
+            PurchaseInvoice.status == "posted",
+        )
+        .scalar()
+    )
 
-    received_map = {}
-    for g in grns:
-        for l in g.lines:
-            received_map[l.item_code] = received_map.get(l.item_code, 0) + float(l.qty)
+    returned = (
+        db.query(func.coalesce(func.sum(PurchaseReturn.total), 0))
+        .filter(PurchaseReturn.supplier_code == supplier_code)
+        .scalar()
+    )
 
-    fully = all(received_map.get(l.item_code, 0) >= float(l.qty) for l in po_lines)
-    any_rcv = any(received_map.get(l.item_code, 0) > 0 for l in po_lines)
-    po.status = "received" if fully else ("partial" if any_rcv else "draft")
+    return _to_float(invoiced) - _to_float(returned)
 
 
-# ============================================================
+# =========================================================
+# ITEMS
+# =========================================================
+@router.get("", response_model=list[ItemOut])
+def list_items(db: Session = Depends(get_db)):
+    return (
+        db.query(Item)
+        .filter(Item.is_active.is_(True))
+        .order_by(Item.code.asc())
+        .all()
+    )
+
+
+@router.post("", response_model=ItemOut, status_code=201)
+def create_item(payload: ItemIn, db: Session = Depends(get_db)):
+    code = payload.code.strip()
+
+    if not code:
+        raise HTTPException(status_code=400, detail="كود الصنف مطلوب")
+
+    if db.query(Item).filter(Item.code == code).first():
+        raise HTTPException(status_code=400, detail="كود الصنف مستخدم من قبل")
+
+    opening_qty = _validate_non_negative(payload.opening_qty, "الرصيد الافتتاحي")
+    default_cost = _validate_non_negative(payload.default_cost, "التكلفة الافتراضية")
+    price = _validate_non_negative(payload.price, "سعر البيع")
+    reorder_level = _validate_non_negative(
+        payload.reorder_level,
+        "حد إعادة الطلب",
+    )
+
+    try:
+        item = Item(
+            code=code,
+            name=payload.name,
+            unit=payload.unit,
+            default_cost=default_cost,
+            price=price,
+            qty=opening_qty,
+            avg_cost=default_cost if opening_qty > 0 else 0,
+            reorder_level=reorder_level,
+        )
+        db.add(item)
+
+        if opening_qty > 0:
+            db.add(
+                StockMove(
+                    move_date=date.today(),
+                    item_code=code,
+                    move_type="افتتاحي",
+                    reference="رصيد افتتاحي",
+                    qty=opening_qty,
+                    unit_cost=default_cost,
+                    balance_after=opening_qty,
+                )
+            )
+
+        db.commit()
+        db.refresh(item)
+        return item
+
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception:
+        db.rollback()
+        raise
+
+
+@router.put("/{code}", response_model=ItemOut)
+def update_item(
+    code: str,
+    payload: ItemUpdate,
+    db: Session = Depends(get_db),
+):
+    item = db.query(Item).filter(Item.code == code).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="الصنف غير موجود")
+
+    data = payload.model_dump(exclude_unset=True)
+    new_code = data.pop("code", None)
+
+    if new_code:
+        new_code = new_code.strip()
+        if not new_code:
+            raise HTTPException(status_code=400, detail="كود الصنف مطلوب")
+
+    if new_code and new_code != code:
+        if db.query(Item).filter(Item.code == new_code).first():
+            raise HTTPException(
+                status_code=400,
+                detail="كود الصنف الجديد مستخدم من قبل",
+            )
+
+        if _item_has_transactions(db, code):
+            raise HTTPException(
+                status_code=400,
+                detail="لا يمكن تغيير كود صنف مرتبط بحركات أو مستندات",
+            )
+
+    numeric_fields = {
+        "default_cost": "التكلفة الافتراضية",
+        "price": "سعر البيع",
+        "qty": "الكمية",
+        "avg_cost": "متوسط التكلفة",
+        "reorder_level": "حد إعادة الطلب",
+    }
+
+    for field, label in numeric_fields.items():
+        if field in data:
+            data[field] = _validate_non_negative(data[field], label)
+
+    try:
+        for key, value in data.items():
+            setattr(item, key, value)
+
+        if new_code and new_code != code:
+            item.code = new_code
+
+        db.commit()
+        db.refresh(item)
+        return item
+
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception:
+        db.rollback()
+        raise
+
+
+@router.delete("/{code}", status_code=204)
+def delete_item(code: str, db: Session = Depends(get_db)):
+    item = db.query(Item).filter(Item.code == code).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="الصنف غير موجود")
+
+    if _item_has_transactions(db, code):
+        raise HTTPException(
+            status_code=400,
+            detail="لا يمكن حذف صنف مرتبط بحركات أو مستندات",
+        )
+
+    try:
+        db.delete(item)
+        db.commit()
+        return None
+    except Exception:
+        db.rollback()
+        raise
+
+
+# =========================================================
+# STOCK MOVES
+# =========================================================
+@stock_router.get("", response_model=list[StockMoveOut])
+def list_stock_moves(
+    item_code: str | None = None,
+    db: Session = Depends(get_db),
+):
+    query = db.query(StockMove).order_by(
+        StockMove.move_date.desc(),
+        StockMove.id.desc(),
+    )
+
+    if item_code:
+        query = query.filter(StockMove.item_code == item_code)
+
+    return query.all()
+
+
+# =========================================================
+# SUPPLIERS
+# =========================================================
+@supplier_router.get("", response_model=list[SupplierOut])
+def list_suppliers(db: Session = Depends(get_db)):
+    suppliers = (
+        db.query(Supplier)
+        .filter(Supplier.is_active.is_(True))
+        .order_by(Supplier.code.asc())
+        .all()
+    )
+
+    return [
+        SupplierOut(
+            code=supplier.code,
+            name=supplier.name,
+            phone=supplier.phone,
+            email=supplier.email,
+            notes=supplier.notes,
+            payable_balance=calc_payable(db, supplier.code),
+        )
+        for supplier in suppliers
+    ]
+
+
+@supplier_router.post("", response_model=SupplierOut, status_code=201)
+def create_supplier(
+    payload: SupplierIn,
+    db: Session = Depends(get_db),
+):
+    code = payload.code.strip()
+
+    if not code:
+        raise HTTPException(status_code=400, detail="كود المورد مطلوب")
+
+    if db.query(Supplier).filter(Supplier.code == code).first():
+        raise HTTPException(status_code=400, detail="كود المورد مستخدم من قبل")
+
+    try:
+        data = payload.model_dump()
+        data["code"] = code
+
+        supplier = Supplier(**data)
+        db.add(supplier)
+        db.commit()
+        db.refresh(supplier)
+
+        return SupplierOut(
+            code=supplier.code,
+            name=supplier.name,
+            phone=supplier.phone,
+            email=supplier.email,
+            notes=supplier.notes,
+            payable_balance=0,
+        )
+
+    except Exception:
+        db.rollback()
+        raise
+
+
+@supplier_router.put("/{code}", response_model=SupplierOut)
+def update_supplier(
+    code: str,
+    payload: SupplierUpdate,
+    db: Session = Depends(get_db),
+):
+    supplier = db.query(Supplier).filter(Supplier.code == code).first()
+    if not supplier:
+        raise HTTPException(status_code=404, detail="المورد غير موجود")
+
+    data = payload.model_dump(exclude_unset=True)
+    new_code = data.pop("code", None)
+
+    if new_code:
+        new_code = new_code.strip()
+        if not new_code:
+            raise HTTPException(status_code=400, detail="كود المورد مطلوب")
+
+    if new_code and new_code != code:
+        if db.query(Supplier).filter(Supplier.code == new_code).first():
+            raise HTTPException(
+                status_code=400,
+                detail="الكود الجديد مستخدم من قبل",
+            )
+
+        if _supplier_has_transactions(db, code):
+            raise HTTPException(
+                status_code=400,
+                detail="لا يمكن تغيير كود مورد مرتبط بمستندات شراء",
+            )
+
+    try:
+        for key, value in data.items():
+            setattr(supplier, key, value)
+
+        if new_code and new_code != code:
+            supplier.code = new_code
+
+        db.commit()
+        db.refresh(supplier)
+
+        return SupplierOut(
+            code=supplier.code,
+            name=supplier.name,
+            phone=supplier.phone,
+            email=supplier.email,
+            notes=supplier.notes,
+            payable_balance=calc_payable(db, supplier.code),
+        )
+
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception:
+        db.rollback()
+        raise
+
+
+@supplier_router.delete("/{code}", status_code=204)
+def delete_supplier(code: str, db: Session = Depends(get_db)):
+    supplier = db.query(Supplier).filter(Supplier.code == code).first()
+    if not supplier:
+        raise HTTPException(status_code=404, detail="المورد غير موجود")
+
+    if _supplier_has_transactions(db, code):
+        raise HTTPException(
+            status_code=400,
+            detail="لا يمكن حذف مورد مرتبط بمستندات شراء",
+        )
+
+    try:
+        db.delete(supplier)
+        db.commit()
+        return None
+    except Exception:
+        db.rollback()
+        raise
+
+
+# =========================================================
 # PURCHASE ORDERS
-# ============================================================
-
+# =========================================================
 @po_router.get("", response_model=list[PurchaseOrderOut])
-def list_pos(db: Session = Depends(get_db)):
-    pos = db.query(PurchaseOrder).order_by(PurchaseOrder.po_date.desc()).all()
-    result = []
-    for po in pos:
-        lines = db.query(PurchaseOrderLine).filter(PurchaseOrderLine.po_number == po.po_number).all()
-        result.append(PurchaseOrderOut(
-            po_number=po.po_number, po_date=po.po_date,
-            supplier_code=po.supplier_code, status=po.status,
-            total=float(po.total), lines=lines
-        ))
-    return result
+def list_purchase_orders(db: Session = Depends(get_db)):
+    return (
+        db.query(PurchaseOrder)
+        .order_by(
+            PurchaseOrder.po_date.desc(),
+            PurchaseOrder.po_number.desc(),
+        )
+        .all()
+    )
 
 
 @po_router.post("", response_model=PurchaseOrderOut, status_code=201)
-def create_po(payload: PurchaseOrderIn, db: Session = Depends(get_db)):
-    if not db.query(Supplier).filter(Supplier.code == payload.supplier_code).first():
-        raise HTTPException(400, "المورد غير موجود")
-    if not payload.lines:
-        raise HTTPException(400, "يجب إضافة صنف واحد على الأقل")
+def create_purchase_order(
+    payload: PurchaseOrderIn,
+    db: Session = Depends(get_db),
+):
+    _validate_lines(payload.lines, "طلب الشراء")
 
-    po_number = next_sequence(db, PurchaseOrder, "po_number", "PO")
-    total = sum(float(l.qty) * float(l.unit_price) for l in payload.lines)
-
-    po = PurchaseOrder(
-        po_number=po_number, po_date=payload.po_date,
-        supplier_code=payload.supplier_code, total=total
+    supplier = (
+        db.query(Supplier)
+        .filter(
+            Supplier.code == payload.supplier_code,
+            Supplier.is_active.is_(True),
+        )
+        .first()
     )
-    db.add(po)
+    if not supplier:
+        raise HTTPException(
+            status_code=404,
+            detail="المورد غير موجود أو غير نشط",
+        )
 
-    for l in payload.lines:
-        if not db.query(Item).filter(Item.code == l.item_code).first():
-            raise HTTPException(400, f"الصنف {l.item_code} غير موجود")
-        db.add(PurchaseOrderLine(
-            po_number=po_number, item_code=l.item_code,
-            qty=l.qty, unit_price=l.unit_price
-        ))
+    prepared_lines = []
+    for line in payload.lines:
+        item = (
+            db.query(Item)
+            .filter(
+                Item.code == line.item_code,
+                Item.is_active.is_(True),
+            )
+            .first()
+        )
+        if not item:
+            raise HTTPException(
+                status_code=404,
+                detail=f"الصنف {line.item_code} غير موجود أو غير نشط",
+            )
 
-    db.commit()
-    lines = db.query(PurchaseOrderLine).filter(PurchaseOrderLine.po_number == po_number).all()
-    return PurchaseOrderOut(
-        po_number=po.po_number, po_date=po.po_date,
-        supplier_code=po.supplier_code, status=po.status,
-        total=float(po.total), lines=lines
-    )
+        qty = _validate_positive(line.qty, "الكمية")
+        unit_price = _validate_non_negative(line.unit_price, "سعر الوحدة")
+        prepared_lines.append((item.code, qty, unit_price))
+
+    try:
+        purchase_order = PurchaseOrder(
+            po_date=payload.po_date,
+            supplier_code=payload.supplier_code,
+            status="draft",
+            total=0,
+        )
+        db.add(purchase_order)
+        db.flush()
+
+        total = 0.0
+        for item_code, qty, unit_price in prepared_lines:
+            db.add(
+                PurchaseOrderLine(
+                    po_number=purchase_order.po_number,
+                    item_code=item_code,
+                    qty=qty,
+                    unit_price=unit_price,
+                )
+            )
+            total += qty * unit_price
+
+        purchase_order.total = total
+        db.commit()
+        db.refresh(purchase_order)
+        return purchase_order
+
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception:
+        db.rollback()
+        raise
 
 
-# ============================================================
-# GOODS RECEIPTS
-# ============================================================
-
+# =========================================================
+# GOODS RECEIPT (GRN)
+# =========================================================
 @grn_router.get("", response_model=list[GoodsReceiptOut])
-def list_grns(db: Session = Depends(get_db)):
-    grns = db.query(GoodsReceipt).order_by(GoodsReceipt.grn_date.desc()).all()
-    result = []
-    for g in grns:
-        lines = db.query(GoodsReceiptLine).filter(GoodsReceiptLine.grn_number == g.grn_number).all()
-        result.append(GoodsReceiptOut(
-            grn_number=g.grn_number, grn_date=g.grn_date,
-            supplier_code=g.supplier_code, po_number=g.po_number,
-            reference=g.reference, total=float(g.total),
-            invoice_status=g.invoice_status, lines=lines
-        ))
-    return result
+def list_grn(db: Session = Depends(get_db)):
+    return (
+        db.query(GoodsReceipt)
+        .order_by(
+            GoodsReceipt.grn_date.desc(),
+            GoodsReceipt.grn_number.desc(),
+        )
+        .all()
+    )
 
 
 @grn_router.post("", response_model=GoodsReceiptOut, status_code=201)
-def create_grn(payload: GoodsReceiptIn, db: Session = Depends(get_db)):
-    if not db.query(Supplier).filter(Supplier.code == payload.supplier_code).first():
-        raise HTTPException(400, "المورد غير موجود")
-    if not payload.lines:
-        raise HTTPException(400, "يجب إضافة صنف واحد على الأقل")
+def create_grn(
+    payload: GoodsReceiptIn,
+    db: Session = Depends(get_db),
+):
+    _validate_lines(payload.lines, "إذن الاستلام")
 
-    grn_number = next_sequence(db, GoodsReceipt, "grn_number", "GRN")
-    total = sum(float(l.qty) * float(l.unit_cost) for l in payload.lines)
-
-    grn = GoodsReceipt(
-        grn_number=grn_number, grn_date=payload.grn_date,
-        supplier_code=payload.supplier_code, po_number=payload.po_number,
-        reference=payload.reference, total=total
+    supplier = (
+        db.query(Supplier)
+        .filter(
+            Supplier.code == payload.supplier_code,
+            Supplier.is_active.is_(True),
+        )
+        .first()
     )
-    db.add(grn)
+    if not supplier:
+        raise HTTPException(
+            status_code=404,
+            detail="المورد غير موجود أو غير نشط",
+        )
 
-    for l in payload.lines:
-        item = db.query(Item).filter(Item.code == l.item_code).first()
-        if not item:
-            raise HTTPException(400, f"الصنف {l.item_code} غير موجود")
-
-        # تحديث المخزون ومتوسط التكلفة
-        _update_item_wac(item, float(l.qty), float(l.unit_cost))
-
-        db.add(StockMove(
-            move_date=payload.grn_date,
-            item_code=l.item_code,
-            move_type="استلام",
-            reference=f"استلام بضاعة {grn_number}" + (f" — {payload.po_number}" if payload.po_number else ""),
-            qty=float(l.qty),
-            unit_cost=float(l.unit_cost),
-            balance_after=float(item.qty),
-        ))
-
-        db.add(GoodsReceiptLine(
-            grn_number=grn_number, item_code=l.item_code,
-            qty=l.qty, unit_cost=l.unit_cost
-        ))
-
-    # تحديث حالة طلب الشراء إن وُجد
-    db.flush()  # نحتاج flush لتسجيل grn قبل حساب الحالة
+    purchase_order = None
     if payload.po_number:
-        _update_po_status(db, payload.po_number)
+        purchase_order = (
+            db.query(PurchaseOrder)
+            .filter(PurchaseOrder.po_number == payload.po_number)
+            .first()
+        )
+        if not purchase_order:
+            raise HTTPException(
+                status_code=404,
+                detail=f"طلب الشراء {payload.po_number} غير موجود",
+            )
 
-    db.commit()
-    lines = db.query(GoodsReceiptLine).filter(GoodsReceiptLine.grn_number == grn_number).all()
-    return GoodsReceiptOut(
-        grn_number=grn.grn_number, grn_date=grn.grn_date,
-        supplier_code=grn.supplier_code, po_number=grn.po_number,
-        reference=grn.reference, total=float(grn.total),
-        invoice_status=grn.invoice_status, lines=lines
-    )
+        if purchase_order.supplier_code != payload.supplier_code:
+            raise HTTPException(
+                status_code=400,
+                detail="المورد في إذن الاستلام لا يطابق مورد طلب الشراء",
+            )
+
+    prepared_lines = []
+    for line in payload.lines:
+        item = (
+            db.query(Item)
+            .filter(
+                Item.code == line.item_code,
+                Item.is_active.is_(True),
+            )
+            .first()
+        )
+        if not item:
+            raise HTTPException(
+                status_code=404,
+                detail=f"الصنف {line.item_code} غير موجود أو غير نشط",
+            )
+
+        qty = _validate_positive(line.qty, "الكمية المستلمة")
+        unit_cost = _validate_non_negative(line.unit_cost, "تكلفة الوحدة")
+
+        if purchase_order:
+            po_line = (
+                db.query(PurchaseOrderLine)
+                .filter(
+                    PurchaseOrderLine.po_number == purchase_order.po_number,
+                    PurchaseOrderLine.item_code == item.code,
+                )
+                .first()
+            )
+            if not po_line:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"الصنف {item.code} غير موجود في طلب الشراء",
+                )
+
+        prepared_lines.append((item, qty, unit_cost))
+
+    try:
+        grn = GoodsReceipt(
+            grn_date=payload.grn_date,
+            supplier_code=payload.supplier_code,
+            po_number=payload.po_number,
+            reference=payload.reference,
+            total=0,
+            invoice_status="not_invoiced",
+        )
+        db.add(grn)
+        db.flush()
+
+        total = 0.0
+        for item, qty, unit_cost in prepared_lines:
+            old_qty = _to_float(item.qty)
+            old_avg_cost = _to_float(item.avg_cost)
+            new_qty = old_qty + qty
+
+            new_avg_cost = (
+                ((old_avg_cost * old_qty) + (unit_cost * qty)) / new_qty
+                if new_qty > 0
+                else 0
+            )
+
+            db.add(
+                GoodsReceiptLine(
+                    grn_number=grn.grn_number,
+                    item_code=item.code,
+                    qty=qty,
+                    unit_cost=unit_cost,
+                )
+            )
+
+            item.qty = new_qty
+            item.avg_cost = new_avg_cost
+
+            db.add(
+                StockMove(
+                    move_date=payload.grn_date,
+                    item_code=item.code,
+                    move_type="استلام مشتريات",
+                    reference=f"GRN-{grn.grn_number}",
+                    qty=qty,
+                    unit_cost=unit_cost,
+                    balance_after=new_qty,
+                )
+            )
+
+            total += qty * unit_cost
+
+        grn.total = total
+
+        if purchase_order:
+            purchase_order.status = "received"
+
+        db.commit()
+        db.refresh(grn)
+        return grn
+
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception:
+        db.rollback()
+        raise
 
 
-# ============================================================
-# PURCHASE INVOICES
-# ============================================================
-
+# =========================================================
+# PURCHASE INVOICE
+# =========================================================
 @pinv_router.get("", response_model=list[PurchaseInvoiceOut])
-def list_invoices(db: Session = Depends(get_db)):
-    invs = db.query(PurchaseInvoice).order_by(PurchaseInvoice.inv_date.desc()).all()
-    result = []
-    for inv in invs:
-        lines = db.query(PurchaseInvoiceLine).filter(PurchaseInvoiceLine.inv_number == inv.inv_number).all()
-        result.append(PurchaseInvoiceOut(
-            inv_number=inv.inv_number, inv_date=inv.inv_date,
-            supplier_code=inv.supplier_code, grn_number=inv.grn_number,
-            supplier_inv_number=inv.supplier_inv_number,
-            total=float(inv.total), status=inv.status, lines=lines
-        ))
-    return result
+def list_purchase_invoices(db: Session = Depends(get_db)):
+    return (
+        db.query(PurchaseInvoice)
+        .order_by(
+            PurchaseInvoice.inv_date.desc(),
+            PurchaseInvoice.inv_number.desc(),
+        )
+        .all()
+    )
 
 
 @pinv_router.post("", response_model=PurchaseInvoiceOut, status_code=201)
-def create_invoice(payload: PurchaseInvoiceIn, db: Session = Depends(get_db)):
-    grn = db.query(GoodsReceipt).filter(GoodsReceipt.grn_number == payload.grn_number).first()
+def create_purchase_invoice(
+    payload: PurchaseInvoiceIn,
+    db: Session = Depends(get_db),
+):
+    grn = (
+        db.query(GoodsReceipt)
+        .filter(GoodsReceipt.grn_number == payload.grn_number)
+        .first()
+    )
     if not grn:
-        raise HTTPException(400, "عملية الاستلام غير موجودة")
+        raise HTTPException(
+            status_code=404,
+            detail=f"إذن الاستلام {payload.grn_number} غير موجود",
+        )
+
     if grn.invoice_status == "invoiced":
-        raise HTTPException(400, "تم فوترة هذا الاستلام مسبقًا")
+        raise HTTPException(
+            status_code=400,
+            detail="تم إنشاء فاتورة لهذا إذن الاستلام من قبل",
+        )
 
-    grn_lines = db.query(GoodsReceiptLine).filter(GoodsReceiptLine.grn_number == payload.grn_number).all()
-    total = sum(float(l.qty) * float(l.unit_cost) for l in grn_lines)
-
-    inv_number = next_sequence(db, PurchaseInvoice, "inv_number", "PINV")
-    inv = PurchaseInvoice(
-        inv_number=inv_number, inv_date=payload.inv_date,
-        supplier_code=grn.supplier_code, grn_number=payload.grn_number,
-        supplier_inv_number=payload.supplier_inv_number, total=total
+    grn_lines = (
+        db.query(GoodsReceiptLine)
+        .filter(GoodsReceiptLine.grn_number == grn.grn_number)
+        .all()
     )
-    db.add(inv)
+    if not grn_lines:
+        raise HTTPException(
+            status_code=400,
+            detail="إذن الاستلام لا يحتوي على أصناف",
+        )
 
-    for l in grn_lines:
-        db.add(PurchaseInvoiceLine(
-            inv_number=inv_number, item_code=l.item_code,
-            qty=l.qty, unit_cost=l.unit_cost
-        ))
+    try:
+        invoice = PurchaseInvoice(
+            inv_date=payload.inv_date,
+            grn_number=grn.grn_number,
+            supplier_code=grn.supplier_code,
+            supplier_inv_number=payload.supplier_inv_number,
+            total=0,
+            status="posted",
+        )
+        db.add(invoice)
+        db.flush()
 
-    # تحديث حالة الاستلام
-    grn.invoice_status = "invoiced"
+        total = 0.0
+        for line in grn_lines:
+            qty = _to_float(line.qty)
+            unit_cost = _to_float(line.unit_cost)
 
-    # قيد محاسبي تلقائي: مدين المخزون / دائن الموردون
-    supplier = db.query(Supplier).filter(Supplier.code == grn.supplier_code).first()
-    sup_name = supplier.name if supplier else ""
-    _post_auto_entry(
-        db, payload.inv_date,
-        ACC_INVENTORY, ACC_PAYABLE, total,
-        f"فاتورة مشتريات {inv_number} — {sup_name}" +
-        (f" (فاتورة المورد: {payload.supplier_inv_number})" if payload.supplier_inv_number else ""),
-        "purchase_invoice", inv_number
-    )
+            db.add(
+                PurchaseInvoiceLine(
+                    inv_number=invoice.inv_number,
+                    item_code=line.item_code,
+                    qty=qty,
+                    unit_cost=unit_cost,
+                )
+            )
+            total += qty * unit_cost
 
-    db.commit()
-    lines = db.query(PurchaseInvoiceLine).filter(PurchaseInvoiceLine.inv_number == inv_number).all()
-    return PurchaseInvoiceOut(
-        inv_number=inv.inv_number, inv_date=inv.inv_date,
-        supplier_code=inv.supplier_code, grn_number=inv.grn_number,
-        supplier_inv_number=inv.supplier_inv_number,
-        total=float(inv.total), status=inv.status, lines=lines
-    )
+        invoice.total = total
+        grn.invoice_status = "invoiced"
+
+        db.commit()
+        db.refresh(invoice)
+        return invoice
+
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception:
+        db.rollback()
+        raise
 
 
-# ============================================================
-# PURCHASE RETURNS
-# ============================================================
-
+# =========================================================
+# PURCHASE RETURN
+# =========================================================
 @prt_router.get("", response_model=list[PurchaseReturnOut])
-def list_returns(db: Session = Depends(get_db)):
-    returns = db.query(PurchaseReturn).order_by(PurchaseReturn.rt_date.desc()).all()
-    result = []
-    for rt in returns:
-        lines = db.query(PurchaseReturnLine).filter(PurchaseReturnLine.rt_number == rt.rt_number).all()
-        result.append(PurchaseReturnOut(
-            rt_number=rt.rt_number, rt_date=rt.rt_date,
-            supplier_code=rt.supplier_code, inv_number=rt.inv_number,
-            total=float(rt.total), lines=lines
-        ))
-    return result
+def list_purchase_returns(db: Session = Depends(get_db)):
+    return (
+        db.query(PurchaseReturn)
+        .order_by(
+            PurchaseReturn.rt_date.desc(),
+            PurchaseReturn.rt_number.desc(),
+        )
+        .all()
+    )
 
 
 @prt_router.post("", response_model=PurchaseReturnOut, status_code=201)
-def create_return(payload: PurchaseReturnIn, db: Session = Depends(get_db)):
-    inv = db.query(PurchaseInvoice).filter(PurchaseInvoice.inv_number == payload.inv_number).first()
-    if not inv:
-        raise HTTPException(400, "فاتورة المشتريات غير موجودة")
+def create_purchase_return(
+    payload: PurchaseReturnIn,
+    db: Session = Depends(get_db),
+):
+    _validate_lines(payload.lines, "مرتجع الشراء")
 
-    # بناء خريطة تكلفة الوحدة من سطور الفاتورة
-    inv_lines = db.query(PurchaseInvoiceLine).filter(
-        PurchaseInvoiceLine.inv_number == payload.inv_number
-    ).all()
-    cost_map = {l.item_code: float(l.unit_cost) for l in inv_lines}
-
-    # التحقق من عدم تجاوز الكميات المُرجَعة سابقاً
-    prev_returns = db.query(PurchaseReturn).filter(PurchaseReturn.inv_number == payload.inv_number).all()
-    prev_qty_map = {}
-    for pr in prev_returns:
-        for l in db.query(PurchaseReturnLine).filter(PurchaseReturnLine.rt_number == pr.rt_number).all():
-            prev_qty_map[l.item_code] = prev_qty_map.get(l.item_code, 0) + float(l.qty)
-
-    orig_qty_map = {l.item_code: float(l.qty) for l in inv_lines}
-
-    valid_lines = []
-    for l in payload.lines:
-        if l.item_code not in cost_map:
-            raise HTTPException(400, f"الصنف {l.item_code} ليس في الفاتورة الأصلية")
-        available = orig_qty_map.get(l.item_code, 0) - prev_qty_map.get(l.item_code, 0)
-        if float(l.qty) > available:
-            raise HTTPException(400, f"كمية المرتجع ({l.qty}) تتجاوز الكمية المتاحة ({available}) للصنف {l.item_code}")
-        valid_lines.append(l)
-
-    if not valid_lines:
-        raise HTTPException(400, "لا توجد كميات صالحة للإرجاع")
-
-    rt_number = next_sequence(db, PurchaseReturn, "rt_number", "PRT")
-    total = sum(float(l.qty) * cost_map[l.item_code] for l in valid_lines)
-
-    rt = PurchaseReturn(
-        rt_number=rt_number, rt_date=payload.rt_date,
-        supplier_code=inv.supplier_code, inv_number=payload.inv_number, total=total
+    invoice = (
+        db.query(PurchaseInvoice)
+        .filter(PurchaseInvoice.inv_number == payload.inv_number)
+        .first()
     )
-    db.add(rt)
+    if not invoice:
+        raise HTTPException(
+            status_code=404,
+            detail=f"فاتورة الشراء {payload.inv_number} غير موجودة",
+        )
 
-    for l in valid_lines:
-        unit_cost = cost_map[l.item_code]
-        item = db.query(Item).filter(Item.code == l.item_code).first()
+    prepared_lines = []
+
+    for line in payload.lines:
+        qty = _validate_positive(line.qty, "كمية المرتجع")
+
+        invoice_line = (
+            db.query(PurchaseInvoiceLine)
+            .filter(
+                PurchaseInvoiceLine.inv_number == invoice.inv_number,
+                PurchaseInvoiceLine.item_code == line.item_code,
+            )
+            .first()
+        )
+        if not invoice_line:
+            raise HTTPException(
+                status_code=400,
+                detail=f"الصنف {line.item_code} غير موجود في فاتورة الشراء",
+            )
+
+        previously_returned = (
+            db.query(func.coalesce(func.sum(PurchaseReturnLine.qty), 0))
+            .join(
+                PurchaseReturn,
+                PurchaseReturn.rt_number == PurchaseReturnLine.rt_number,
+            )
+            .filter(
+                PurchaseReturn.inv_number == invoice.inv_number,
+                PurchaseReturnLine.item_code == line.item_code,
+            )
+            .scalar()
+        )
+
+        invoice_qty = _to_float(invoice_line.qty)
+        remaining_returnable = invoice_qty - _to_float(previously_returned)
+
+        if qty > remaining_returnable:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"كمية مرتجع الصنف {line.item_code} أكبر من الكمية "
+                    f"المتبقية القابلة للإرجاع ({remaining_returnable})"
+                ),
+            )
+
+        item = (
+            db.query(Item)
+            .filter(
+                Item.code == line.item_code,
+                Item.is_active.is_(True),
+            )
+            .first()
+        )
         if not item:
-            raise HTTPException(400, f"الصنف {l.item_code} غير موجود")
+            raise HTTPException(
+                status_code=404,
+                detail=f"الصنف {line.item_code} غير موجود أو غير نشط",
+            )
 
-        item.qty = float(item.qty) - float(l.qty)
+        current_qty = _to_float(item.qty)
+        if qty > current_qty:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"الرصيد المتاح للصنف {line.item_code} هو "
+                    f"{current_qty} فقط"
+                ),
+            )
 
-        db.add(StockMove(
-            move_date=payload.rt_date,
-            item_code=l.item_code,
-            move_type="مرتجع مشتريات",
-            reference=f"مرتجع على فاتورة {payload.inv_number}",
-            qty=-float(l.qty),
-            unit_cost=unit_cost,
-            balance_after=float(item.qty),
-        ))
+        unit_cost = _to_float(invoice_line.unit_cost)
+        prepared_lines.append((item, qty, unit_cost))
 
-        db.add(PurchaseReturnLine(
-            rt_number=rt_number, item_code=l.item_code,
-            qty=l.qty, unit_cost=unit_cost
-        ))
+    try:
+        purchase_return = PurchaseReturn(
+            rt_date=payload.rt_date,
+            inv_number=invoice.inv_number,
+            supplier_code=invoice.supplier_code,
+            total=0,
+        )
+        db.add(purchase_return)
+        db.flush()
 
-    # قيد عكسي: مدين الموردون / دائن المخزون
-    supplier = db.query(Supplier).filter(Supplier.code == inv.supplier_code).first()
-    sup_name = supplier.name if supplier else ""
-    _post_auto_entry(
-        db, payload.rt_date,
-        ACC_PAYABLE, ACC_INVENTORY, total,
-        f"مرتجع مشتريات {rt_number} على فاتورة {payload.inv_number} — {sup_name}",
-        "purchase_return", rt_number
-    )
+        total = 0.0
+        for item, qty, unit_cost in prepared_lines:
+            new_qty = _to_float(item.qty) - qty
 
-    db.commit()
-    lines = db.query(PurchaseReturnLine).filter(PurchaseReturnLine.rt_number == rt_number).all()
-    return PurchaseReturnOut(
-        rt_number=rt.rt_number, rt_date=rt.rt_date,
-        supplier_code=rt.supplier_code, inv_number=rt.inv_number,
-        total=float(rt.total), lines=lines
-    )
+            db.add(
+                PurchaseReturnLine(
+                    rt_number=purchase_return.rt_number,
+                    item_code=item.code,
+                    qty=qty,
+                    unit_cost=unit_cost,
+                )
+            )
+
+            item.qty = new_qty
+            if new_qty == 0:
+                item.avg_cost = 0
+
+            db.add(
+                StockMove(
+                    move_date=payload.rt_date,
+                    item_code=item.code,
+                    move_type="مرتجع مشتريات",
+                    reference=f"PRT-{purchase_return.rt_number}",
+                    qty=-qty,
+                    unit_cost=unit_cost,
+                    balance_after=new_qty,
+                )
+            )
+
+            total += qty * unit_cost
+
+        purchase_return.total = total
+
+        db.commit()
+        db.refresh(purchase_return)
+        return purchase_return
+
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception:
+        db.rollback()
+        raise

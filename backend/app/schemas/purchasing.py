@@ -16,7 +16,7 @@ class PurchaseOrderIn(BaseModel):
 
 
 class POLineOut(BaseModel):
-    item_code: str
+    item_id: int
     qty: float
     unit_price: float
 
@@ -36,6 +36,7 @@ class PurchaseOrderOut(BaseModel):
         from_attributes = True
 
 
+
 class GRNLineIn(BaseModel):
     item_code: str
     qty: float = Field(gt=0)
@@ -50,8 +51,9 @@ class GoodsReceiptIn(BaseModel):
     lines: List[GRNLineIn]
 
 
+
 class GRNLineOut(BaseModel):
-    item_code: str
+    item_id: int
     qty: float
     unit_cost: float
 
@@ -73,14 +75,16 @@ class GoodsReceiptOut(BaseModel):
         from_attributes = True
 
 
+
 class PurchaseInvoiceIn(BaseModel):
     inv_date: date
     grn_number: str
     supplier_inv_number: Optional[str] = None
 
 
+
 class PInvLineOut(BaseModel):
-    item_code: str
+    item_id: int
     qty: float
     unit_cost: float
 
@@ -102,9 +106,11 @@ class PurchaseInvoiceOut(BaseModel):
         from_attributes = True
 
 
+
 class ReturnLineIn(BaseModel):
     item_code: str
     qty: float = Field(gt=0)
+
 
 
 class PurchaseReturnIn(BaseModel):
@@ -113,13 +119,15 @@ class PurchaseReturnIn(BaseModel):
     lines: List[ReturnLineIn]
 
 
+
 class PRTLineOut(BaseModel):
-    item_code: str
+    item_id: int
     qty: float
     unit_cost: float
 
     class Config:
         from_attributes = True
+
 
 
 class PurchaseReturnOut(BaseModel):

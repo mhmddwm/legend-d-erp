@@ -23,6 +23,7 @@ class ItemUpdate(BaseModel):
 
 
 class ItemOut(BaseModel):
+    id: int
     code: str
     name: str
     unit: str
@@ -39,9 +40,12 @@ class ItemOut(BaseModel):
 class StockMoveOut(BaseModel):
     id: int
     move_date: date
-    item_code: str
+
+    item_id: int
+
     move_type: str
     reference: Optional[str]
+
     qty: float
     unit_cost: float
     balance_after: float
