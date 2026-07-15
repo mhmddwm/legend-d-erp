@@ -97,4 +97,50 @@ def delete_account(code: str, db: Session = Depends(get_db)):
     db.commit()
     return None
 
-# [بقية كود Journal Entries كما هو...]
+
+# ============================================================
+# القيود المحاسبية (Journal Entries)
+# ============================================================
+
+@journal_router.get("", response_model=list[JournalEntryOut])
+def list_journal_entries(db: Session = Depends(get_db)):
+    return (
+        db.query(JournalEntry)
+        .order_by(JournalEntry.entry_date.desc(), JournalEntry.id.desc())
+        .all()
+    )
+
+
+@journal_router.post("", response_model=JournalEntryOut, status_code=201)
+def create_journal_entry(payload: JournalEntryIn, db: Session = Depends(get_db)):
+    if payload.debit_account == payload.credit_account:
+        raise HTTPException(400, "لا يمكن أن يكون حساب المدين هو نفسه حساب الدائن")
+    if not db.query(Account).filter(Account.code == payload.debit_account).first():
+        raise HTTPException(404, "حساب المدين غير موجود")
+    if not db.query(Account).filter(Account.code == payload.credit_account).first():
+        raise HTTPException(404, "حساب الدائن غير موجود")
+
+    entry = JournalEntry(
+        entry_date=payload.entry_date,
+        debit_account=payload.debit_account,
+        credit_account=payload.credit_account,
+        amount=payload.amount,
+        description=payload.description,
+        source_type="manual",
+    )
+    db.add(entry)
+    db.commit()
+    db.refresh(entry)
+    return entry
+
+
+@journal_router.delete("/{entry_id}", status_code=204)
+def delete_journal_entry(entry_id: int, db: Session = Depends(get_db)):
+    entry = db.query(JournalEntry).get(entry_id)
+    if not entry:
+        raise HTTPException(404, "القيد غير موجود")
+    if entry.source_type != "manual":
+        raise HTTPException(400, "لا يمكن حذف قيد مُولَّد تلقائياً من عملية أخرى (مشتريات/مستودعات...)")
+    db.delete(entry)
+    db.commit()
+    return None

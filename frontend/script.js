@@ -3,7 +3,14 @@
 // ============================================================
 // الإعدادات الأساسية
 // ============================================================
-const API = (["127.0.0.1", "localhost"].includes(location.hostname)) ? "http://127.0.0.1:8080" : "";
+// محلياً (على جهازك): يشير لباك إند 127.0.0.1:8080.
+// عند النشر (Render وغيره): الفرونت والباك إند يخدمان من نفس origin
+// (main.py يشغّل الفرونت كملفات ثابتة ضمن نفس تطبيق FastAPI)، لذلك
+// نستخدم مسار نسبي (نفس العنوان الحالي) بدل عنوان محلي ثابت لا يعمل
+// إلا على جهاز المطوّر.
+const API = (["127.0.0.1", "localhost"].includes(location.hostname))
+  ? "http://127.0.0.1:8080"
+  : "";
 const TYPE_LABELS = {
   assets:'أصول', liabilities:'خصوم',
   equity:'حقوق ملكية', revenue:'إيرادات', expenses:'مصروفات'
@@ -139,7 +146,7 @@ accounts = await safeLoad(
 
 entries = await safeLoad(
 "القيود",
-"/api/journals"
+"/api/journal"
 );
 
 
@@ -187,7 +194,7 @@ purchaseOrders = await safeLoad(
 
 grns = await safeLoad(
 "الاستلامات",
-"/api/goods-receipts"
+"/api/grn"
 );
 
 
@@ -1360,7 +1367,7 @@ async function submitGRN(){
   if(!valid.length){err.textContent='يرجى إضافة صنف واحد على الأقل'; return;}
   err.textContent='';
   try{
-    await api('POST','/api/goods-receipts',{
+    await api('POST','/api/grn',{
       grn_date,supplier_code,po_number,reference,
       lines:valid.map(l=>({item_code:l.itemCode,qty:l.qty,unit_cost:l.cost}))
     });
