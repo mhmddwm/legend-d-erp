@@ -594,6 +594,24 @@ function renderSuppliers(){
 // ===============================
 window.poState = window.poState || {page:1,pageSize:20,search:'',status:'',sort:'new',selected:[]};
 
+// دالة عرض حالة أمر الشراء كـ badge — كانت مفقودة من الملف وتسبب توقف
+// renderAll() بالكامل (ReferenceError) رغم وصول البيانات بنجاح من الباك إند.
+function getPObadge(p){
+  const labels = {
+    draft:    {text:'مسودة',        color:'#9aa0a6'},
+    rfq:      {text:'طلب عرض سعر',   color:'#f0ad4e'},
+    pending:  {text:'قيد الاعتماد',  color:'#f0ad4e'},
+    approved: {text:'معتمد',        color:'#2e7d32'},
+    ordered:  {text:'مرسل للمورد',  color:'#1976d2'},
+    received: {text:'مستلم',        color:'#2e7d32'},
+    closed:   {text:'مغلق',         color:'#616161'},
+    cancelled:{text:'ملغي',         color:'#c62828'},
+  };
+  const st = p && p.status;
+  const info = labels[st] || {text: st || '-', color:'#9aa0a6'};
+  return `<span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:12px;background:${info.color}22;color:${info.color};border:1px solid ${info.color}55;">${info.text}</span>`;
+}
+
 function renderPOs(){
 
   const body = document.getElementById('poBody');
