@@ -715,6 +715,18 @@ function refreshJournalAccounts(){
   if(credit) credit.innerHTML=options;
 }
 
+// كانت مفقودة: تعبئة قوائم اختيار المورد بفورمي "أمر الشراء" و"استلام البضاعة"
+// (poSupplier / grnSupplier) من قائمة الموردين المحمّلة — كان الكود يقرأ
+// قيمتها بأماكن ثانية بدون ما تُعبّى أبداً.
+function refreshSelects(){
+  const options='<option value="">— اختر مورد —</option>'+
+    (suppliers||[]).map(s=>`<option value="${s.code}">${s.code} — ${s.name}</option>`).join('');
+  const poSup=document.getElementById('poSupplier');
+  const grnSup=document.getElementById('grnSupplier');
+  if(poSup){ const cur=poSup.value; poSup.innerHTML=options; poSup.value=cur; }
+  if(grnSup){ const cur=grnSup.value; grnSup.innerHTML=options; grnSup.value=cur; }
+}
+
 // ============================================================
 // إجراءات الحسابات
 // ============================================================
