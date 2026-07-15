@@ -2963,6 +2963,8 @@ window.formatDate = function(d){
 
 // prevent missing function crashes
 window.renderGRNs = window.renderGRNs || function(){};
+window.renderInvoices = window.renderInvoices || function(){};
+window.renderReturns = window.renderReturns || function(){};
 window.rfqDecisionScores = window.rfqDecisionScores || function(){};
 window.taxRateById = window.taxRateById || function(){ return 0; };
 
