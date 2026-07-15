@@ -375,8 +375,7 @@ window.rfqToPOButton = function(rfqNumber){
 
 
 /* ===== LEGEND D API INTEGRATION PATCH v1 ===== */
-const API_URL = "http://localhost:8000";
-
+const API_URL = (["127.0.0.1", "localhost"].includes(location.hostname)) ? "http://127.0.0.1:8080" : "";
 window.aiApproveRFQ = async function(rfqId){
   try{
     const res = await fetch(`${API_URL}/api/rfq/ai-approve`,{
