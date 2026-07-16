@@ -506,14 +506,44 @@ table.grid td.muted{color:var(--muted);font-size:12px;}
 .totals-box .row span:first-child{color:var(--muted);}
 .totals-box .row span:last-child{font-family:monospace,'Cairo';}
 
-/* Accounts tree levels */
+/* Accounts tree levels — نسخة عصرية */
 .acc-level-0 td:first-child{font-weight:900;font-size:14px;color:var(--ink);}
 .acc-level-1 td:first-child{padding-right:22px;font-weight:700;}
-.acc-level-2 td:first-child{padding-right:40px;}
+.acc-level-2 td:first-child{padding-right:40px;color:var(--ink-2);}
 .acc-level-3 td:first-child{padding-right:58px;color:var(--muted);}
-.account-main-link{cursor:pointer;color:var(--accent);}
-.account-arrow{display:inline-block;width:20px;text-align:center;cursor:pointer;}
-.acc-add-bar{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;}
+.account-main-link{cursor:pointer;color:var(--accent);transition:color .15s;}
+.account-main-link:hover{color:var(--accent-hover);text-decoration:underline;}
+
+.account-arrow{
+  display:inline-flex;align-items:center;justify-content:center;
+  width:22px;height:22px;border-radius:6px;cursor:pointer;
+  color:var(--muted);vertical-align:middle;transition:background .15s;
+}
+.account-arrow:hover{background:var(--accent-light);color:var(--accent);}
+.account-arrow svg{width:11px;height:11px;transition:transform .2s ease;}
+.account-arrow.open svg{transform:rotate(90deg);}
+
+.acc-actions-btn{
+  width:30px;height:30px;border:1px solid var(--line);border-radius:8px;
+  background:var(--bg-card);cursor:pointer;display:inline-flex;
+  align-items:center;justify-content:center;color:var(--muted);font-size:16px;
+  transition:background .15s,border-color .15s,color .15s;
+}
+.acc-actions-btn:hover{background:var(--accent-light);border-color:var(--accent);color:var(--accent);}
+
+.acc-actions-menu{
+  position:fixed;min-width:180px;background:var(--bg-card);
+  border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow-lg);
+  padding:6px;z-index:9999;display:none;
+}
+.acc-actions-menu.show{display:block;}
+.acc-actions-menu button{
+  width:100%;text-align:right;padding:9px 10px;border:none;background:none;
+  border-radius:6px;font-size:13px;color:var(--ink);cursor:pointer;
+  display:block;font-family:inherit;transition:background .12s;
+}
+.acc-actions-menu button:hover{background:var(--accent-light);color:var(--accent);}
+.acc-actions-menu button.danger:hover{background:var(--coral-bg);color:var(--coral);}.acc-add-bar{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;}
 .acc-add-bar h2{font-size:17px;font-weight:700;color:var(--ink-2);}
 .account-form-box{margin-bottom:22px;}
 

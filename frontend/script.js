@@ -568,29 +568,23 @@ function renderTree() {
         // إخفاء الأبناء افتراضياً (إلا إذا كان الحساب رئيسياً في الأعلى)
         if (acc.parent_code) tr.style.display = 'none'; 
 
-        tr.innerHTML = `
+tr.innerHTML = `
           <td>${acc.code || ''}</td>
           <td style="padding-right:${padding}px">
-            ${hasChildren ? `<span class="account-arrow" onclick="toggleAccountChildren('${acc.code}', this)" style="cursor:pointer; display:inline-block; width:20px;">▶</span>` : ''}
-            <strong class="account-main-link" style="cursor:pointer;" onclick="openAccountPage('${acc.code}')">
-              ${level > 0 ? '↳ ' : ''}${acc.name_ar || ''}
-            </strong>
+            ${hasChildren ? `<span class="account-arrow" onclick="toggleAccountChildren('${acc.code}', this)">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"></polyline></svg>
+            </span>` : `<span style="display:inline-block;width:22px;"></span>`}
+            <strong class="account-main-link" onclick="openAccountPage('${acc.code}')">${acc.name_ar || ''}</strong>
             ${acc.name_en ? `<div style="font-size:11px;color:#777">${acc.name_en}</div>` : ''}
           </td>
           <td>${typeof TYPE_LABELS !== 'undefined' ? (TYPE_LABELS[acc.account_type] || '') : (acc.account_type || '')}</td>
           <td>${acc.parent_code || '-'}</td>
           <td class="num">${typeof fmt !== 'undefined' ? fmt(acc.opening_balance) : (acc.opening_balance || 0)}</td>
           <td class="num">${typeof fmt !== 'undefined' ? fmt(acc.current_balance) : (acc.current_balance || 0)}</td>
-          <td>
-            <select onchange="accountAction(this.value,'${acc.code}');this.selectedIndex=0;">
-              <option value="">الإجراءات</option>
-              <option value="edit">تعديل</option>
-              <option value="child">إنشاء حساب فرعي</option>
-              <option value="delete">حذف الحساب</option>
-            </select>
+          <td style="text-align:center;">
+            <button type="button" class="acc-actions-btn" onclick="toggleAccActionsMenu(event,'${acc.code}')" title="الإجراءات">⋮</button>
           </td>
         `;
-
         body.appendChild(tr);
         addChildren(acc.code, level + 1); // بناء الأبناء تكرارياً
       });
@@ -604,23 +598,20 @@ function renderTree() {
 // ============================================================
 function toggleAccountChildren(code, arrow) {
   const rows = document.querySelectorAll('.account-row');
-  const open = arrow && arrow.textContent.trim() === '▼';
-  
+  const open = arrow && arrow.classList.contains('open');
+
   if (arrow) {
-    arrow.textContent = open ? '▶' : '▼';
+    arrow.classList.toggle('open', !open);
   }
 
-  // دالة داخلية للتعامل مع الأبناء والأحفاد
   function toggleChildren(parentCode, show) {
     rows.forEach(row => {
       if (String(row.dataset.parent) === String(parentCode)) {
         row.style.display = show ? 'table-row' : 'none';
-        
-        // إذا كنا نغلق الحساب، يجب إغلاق كل ما تحته (الأحفاد)
         if (!show) {
           const childArrow = row.querySelector('.account-arrow');
           if (childArrow) {
-            childArrow.textContent = '▶';
+            childArrow.classList.remove('open');
             toggleChildren(row.dataset.code, false);
           }
         }
@@ -631,6 +622,53 @@ function toggleAccountChildren(code, arrow) {
   toggleChildren(code, !open);
 }
 
+// ============================================================
+// قائمة إجراءات الحساب (تستبدل الـ select القديم)
+// ============================================================
+let accMenuCurrentCode = null;
+
+function ensureAccActionsMenu(){
+  let menu = document.getElementById('accActionsMenu');
+  if(!menu){
+    menu = document.createElement('div');
+    menu.id = 'accActionsMenu';
+    menu.className = 'acc-actions-menu';
+    menu.innerHTML = `
+      <button onclick="accMenuRun('edit')">✏️ تعديل</button>
+      <button onclick="accMenuRun('child')">➕ إنشاء حساب فرعي</button>
+      <button class="danger" onclick="accMenuRun('delete')">🗑️ حذف الحساب</button>
+    `;
+    document.body.appendChild(menu);
+  }
+  return menu;
+}
+
+function toggleAccActionsMenu(e, code){
+  e.stopPropagation();
+  const menu = ensureAccActionsMenu();
+  const wasOpenForThis = menu.classList.contains('show') && accMenuCurrentCode === code;
+  closeAccActionsMenu();
+  if (wasOpenForThis) return;
+
+  const rect = e.currentTarget.getBoundingClientRect();
+  menu.style.top = (rect.bottom + 6) + 'px';
+  menu.style.left = Math.max(8, rect.left - 150) + 'px';
+  menu.classList.add('show');
+  accMenuCurrentCode = code;
+}
+
+function closeAccActionsMenu(){
+  const menu = document.getElementById('accActionsMenu');
+  if (menu) menu.classList.remove('show');
+  accMenuCurrentCode = null;
+}
+
+function accMenuRun(action){
+  if (accMenuCurrentCode) accountAction(action, accMenuCurrentCode);
+  closeAccActionsMenu();
+}
+
+document.addEventListener('click', closeAccActionsMenu);
 function openAccountPage(code){
   const acc=(window.accounts||[]).find(a=>a.code===code);
   if(!acc) return;
