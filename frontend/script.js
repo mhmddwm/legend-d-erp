@@ -21,6 +21,7 @@ const TYPE_LABELS = {
 // ============================================================
 let accounts=[], entries=[], items=[], stockMoves=[];
 let suppliers=[], purchaseOrders=[], grns=[], invoices=[], returns_=[];
+let warehouses=[], stockIssueRequests=[], stockTransfersList=[], warehouseStockBalances=[];
 let poLines=[], grnLines=[], prtCurrentLines=[];
 let lineCounter=0;
 
@@ -210,6 +211,30 @@ returns_ = await safeLoad(
 );
 
 
+warehouses = await safeLoad(
+"المستودعات",
+"/api/warehouses"
+);
+
+
+stockIssueRequests = await safeLoad(
+"طلبات صرف المخزون",
+"/api/stock-issue-requests"
+);
+
+
+stockTransfersList = await safeLoad(
+"تحويلات المستودعات",
+"/api/stock-transfers"
+);
+
+
+warehouseStockBalances = await safeLoad(
+"رصيد المستودعات",
+"/api/warehouse-stock"
+);
+
+
 
 window.accounts = accounts;
 
@@ -290,7 +315,222 @@ function renderAll(){
 
   renderReturns();
 
+  renderWarehousesScreen();
+
 }
+
+// ============================================================
+// مديول المستودعات (Warehouse Management) — PF-06.1 frontend
+// ============================================================
+function whEsc(s){ return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+const WH_VALUATION_LABELS = {WAC:'المتوسط المرجّح', FIFO:'وارد أولاً صادر أولاً', STANDARD:'تكلفة معيارية'};
+const WH_ISSUE_STATUS_LABELS = {pending:'بانتظار الاعتماد', approved:'معتمد', rejected:'مرفوض', cancelled:'ملغي'};
+const WH_TRANSFER_STATUS_LABELS = {draft:'مسودة', pending_approval:'بانتظار اعتماد الشحن', in_transit:'في الطريق', received:'مستلم', cancelled:'ملغي'};
+
+function renderWarehousesScreen(){
+  renderWarehousesList();
+  renderWarehouseIssueFilterOptions();
+  renderStockIssueRequests();
+  renderStockTransfersList();
+  renderWarehouseStockBalances();
+}
+
+function whName(id){
+  const w = (warehouses||[]).find(x=>x.id===id);
+  return w ? `${w.code} — ${w.name}` : ('#'+id);
+}
+
+function whItemName(id){
+  const it = (items||[]).find(x=>x.id===id);
+  return it ? `${it.code} — ${it.name}` : ('#'+id);
+}
+
+function whActorId(){
+  const v = document.getElementById('whActorUserId')?.value;
+  return v ? parseInt(v,10) : null;
+}
+
+function renderWarehousesList(){
+  const body = document.getElementById('warehousesBody');
+  const empty = document.getElementById('warehousesEmpty');
+  if(!body) return;
+  const list = warehouses || [];
+  body.innerHTML = list.map(w=>`
+    <tr>
+      <td>${whEsc(w.code)}</td>
+      <td>${whEsc(w.name)}</td>
+      <td>${whEsc(w.location||'-')}</td>
+      <td>${whEsc(w.manager||'-')}</td>
+      <td>${WH_VALUATION_LABELS[w.valuation_method] || w.valuation_method || 'المتوسط المرجّح'}</td>
+      <td>${w.is_active===false?'موقف':'نشط'}</td>
+      <td><button class="btn secondary" onclick="deleteWarehouse(${w.id})">حذف</button></td>
+    </tr>
+  `).join('');
+  if(empty) empty.style.display = list.length ? 'none' : 'block';
+}
+
+function renderWarehouseIssueFilterOptions(){
+  const sel = document.getElementById('whIssueFilter');
+  if(!sel) return;
+  const current = sel.value;
+  sel.innerHTML = '<option value="">كل المستودعات</option>' +
+    (warehouses||[]).map(w=>`<option value="${w.id}">${whEsc(w.code)} — ${whEsc(w.name)}</option>`).join('');
+  sel.value = current;
+}
+
+function renderStockIssueRequests(){
+  const body = document.getElementById('stockIssueBody');
+  const empty = document.getElementById('stockIssueEmpty');
+  if(!body) return;
+  const filterWh = document.getElementById('whIssueFilter')?.value;
+  let list = stockIssueRequests || [];
+  if(filterWh) list = list.filter(r=>String(r.warehouse_id)===String(filterWh));
+  list = [...list].sort((a,b)=> new Date(b.requested_at||0)-new Date(a.requested_at||0));
+
+  body.innerHTML = list.map(r=>{
+    const linesText = (r.lines||[]).map(l=>`${whItemName(l.item_id)} × ${l.qty_requested}`).join('، ');
+    const actions = r.status==='pending' ? `
+      <button class="btn" onclick="approveStockIssue(${r.id})">اعتماد</button>
+      <button class="btn secondary" onclick="rejectStockIssue(${r.id})">رفض</button>
+    ` : '';
+    return `
+      <tr>
+        <td>${whEsc(r.request_number)}</td>
+        <td>${whName(r.warehouse_id)}</td>
+        <td>${whEsc(r.request_type)}</td>
+        <td>${whEsc(r.source_ref||'-')}</td>
+        <td title="${whEsc(linesText)}">${(r.lines||[]).length} صنف</td>
+        <td>${WH_ISSUE_STATUS_LABELS[r.status]||r.status}</td>
+        <td>${whEsc((r.requested_at||'').slice(0,16).replace('T',' '))}</td>
+        <td>${actions}</td>
+      </tr>
+    `;
+  }).join('');
+  if(empty) empty.style.display = list.length ? 'none' : 'block';
+}
+
+async function approveStockIssue(id){
+  const actor = whActorId();
+  if(!actor){ alert('أدخل رقم المستخدم المنفّذ أولاً (حقل "تنفيذ العملية باسم")'); return; }
+  try{
+    await api('POST', `/api/stock-issue-requests/${id}/approve`, {actor_user_id: actor});
+    await loadAll();
+  }catch(e){ alert(e.message); }
+}
+
+async function rejectStockIssue(id){
+  const actor = whActorId();
+  if(!actor){ alert('أدخل رقم المستخدم المنفّذ أولاً (حقل "تنفيذ العملية باسم")'); return; }
+  const notes = prompt('سبب الرفض (اختياري):') || '';
+  try{
+    await api('POST', `/api/stock-issue-requests/${id}/reject`, {actor_user_id: actor, notes});
+    await loadAll();
+  }catch(e){ alert(e.message); }
+}
+
+function renderStockTransfersList(){
+  const body = document.getElementById('stockTransfersBody');
+  const empty = document.getElementById('stockTransfersEmpty');
+  if(!body) return;
+  const list = [...(stockTransfersList||[])].sort((a,b)=> new Date(b.created_at||0)-new Date(a.created_at||0));
+
+  body.innerHTML = list.map(t=>{
+    const linesText = (t.lines||[]).map(l=>`${whItemName(l.item_id)} × ${l.qty}`).join('، ');
+    let actions = '';
+    if(t.status==='pending_approval'){
+      actions = `<button class="btn" onclick="approveTransferShip(${t.id})">اعتماد الشحن (المصدر)</button>`;
+    } else if(t.status==='in_transit'){
+      actions = `<button class="btn" onclick="approveTransferReceive(${t.id})">تأكيد الاستلام (الوجهة)</button>`;
+    }
+    return `
+      <tr>
+        <td>${whEsc(t.transfer_number)}</td>
+        <td>${whName(t.from_warehouse_id)}</td>
+        <td>${whName(t.to_warehouse_id)}</td>
+        <td title="${whEsc(linesText)}">${(t.lines||[]).length} صنف</td>
+        <td>${WH_TRANSFER_STATUS_LABELS[t.status]||t.status}</td>
+        <td>${actions}</td>
+      </tr>
+    `;
+  }).join('');
+  if(empty) empty.style.display = list.length ? 'none' : 'block';
+}
+
+async function approveTransferShip(id){
+  const actor = whActorId();
+  if(!actor){ alert('أدخل رقم المستخدم المنفّذ أولاً (حقل "تنفيذ العملية باسم")'); return; }
+  try{
+    await api('POST', `/api/stock-transfers/${id}/approve`, {actor_user_id: actor});
+    await loadAll();
+  }catch(e){ alert(e.message); }
+}
+
+async function approveTransferReceive(id){
+  const actor = whActorId();
+  if(!actor){ alert('أدخل رقم المستخدم المنفّذ أولاً (حقل "تنفيذ العملية باسم")'); return; }
+  try{
+    await api('POST', `/api/stock-transfers/${id}/receive`, {actor_user_id: actor});
+    await loadAll();
+  }catch(e){ alert(e.message); }
+}
+
+function renderWarehouseStockBalances(){
+  const body = document.getElementById('warehouseStockBody');
+  const empty = document.getElementById('warehouseStockEmpty');
+  if(!body) return;
+  const list = (warehouseStockBalances||[]).filter(r=> Math.abs(parseFloat(r.quantity)||0) > 0.0001 );
+
+  body.innerHTML = list.map(r=>{
+    const qty = parseFloat(r.quantity)||0;
+    const cost = parseFloat(r.avg_cost)||0;
+    return `
+      <tr>
+        <td>${whName(r.warehouse_id)}</td>
+        <td>${whItemName(r.item_id)}</td>
+        <td>${qty.toLocaleString('en',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
+        <td>${cost.toLocaleString('en',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
+        <td>${(qty*cost).toLocaleString('en',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
+      </tr>
+    `;
+  }).join('');
+  if(empty) empty.style.display = list.length ? 'none' : 'block';
+}
+
+async function submitWarehouse(){
+  const errEl = document.getElementById('whErr');
+  if(errEl) errEl.textContent = '';
+  const code = document.getElementById('whCode').value.trim();
+  const name = document.getElementById('whName').value.trim();
+  const location = document.getElementById('whLocation').value.trim();
+  const manager = document.getElementById('whManager').value.trim();
+  if(!code || !name){
+    if(errEl) errEl.textContent = 'رمز المستودع والاسم مطلوبان';
+    return;
+  }
+  const params = new URLSearchParams({code, name});
+  if(location) params.set('location', location);
+  if(manager) params.set('manager', manager);
+  try{
+    await api('POST', `/api/warehouses?${params.toString()}`);
+    document.getElementById('whCode').value='';
+    document.getElementById('whName').value='';
+    document.getElementById('whLocation').value='';
+    document.getElementById('whManager').value='';
+    await loadAll();
+  }catch(e){
+    if(errEl) errEl.textContent = e.message;
+  }
+}
+
+async function deleteWarehouse(id){
+  if(!confirm('تأكيد حذف هذا المستودع؟')) return;
+  try{
+    await api('DELETE', `/api/warehouses/${id}`);
+    await loadAll();
+  }catch(e){ alert(e.message); }
+}
+
 // ============================================================
 // دليل الحسابات
 // ============================================================

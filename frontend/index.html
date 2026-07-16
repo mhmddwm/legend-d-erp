@@ -1970,7 +1970,75 @@ html[dir="ltr"] .brand-center{direction:ltr;}
   <div class="panel" id="panel-inventory_reports"><div class="formcard"><h3>تقارير المخزون</h3><div class="empty-msg">جاهزة للتطوير</div></div></div>
   <div class="panel" id="panel-activity_reports"><div class="formcard"><h3>تقارير النشاطات</h3><div class="empty-msg">جاهزة للتطوير</div></div></div>
   <div class="panel" id="panel-services"><div class="formcard"><h3>الخدمات</h3><div class="empty-msg">جاهزة للتطوير</div></div></div>
-  <div class="panel" id="panel-warehouses"><div class="formcard"><h3>المستودعات</h3><div class="empty-msg">جاهزة للتطوير</div></div></div>
+  <div class="panel" id="panel-warehouses">
+
+    <!-- ========== قائمة المستودعات ========== -->
+    <div class="formcard">
+      <h3>المستودعات</h3>
+      <div class="frow two">
+        <div class="field"><label>رمز المستودع</label><input id="whCode" placeholder="مثال: WH-01"></div>
+        <div class="field"><label>اسم المستودع</label><input id="whName" placeholder="اسم المستودع"></div>
+      </div>
+      <div class="frow two">
+        <div class="field"><label>الموقع (اختياري)</label><input id="whLocation" placeholder="مدينة / عنوان"></div>
+        <div class="field"><label>المسؤول (اختياري)</label><input id="whManager" placeholder="اسم أمين/مدير المستودع"></div>
+      </div>
+      <button class="btn" onclick="submitWarehouse()">+ إضافة مستودع</button>
+      <div class="err" id="whErr"></div>
+    </div>
+    <div class="gridcard"><div class="scrollx">
+      <table class="grid">
+        <thead><tr><th>الرمز</th><th>الاسم</th><th>الموقع</th><th>المسؤول</th><th>طريقة التقييم</th><th>الحالة</th><th></th></tr></thead>
+        <tbody id="warehousesBody"></tbody>
+      </table>
+      <div class="empty-msg" id="warehousesEmpty" style="display:none">لا توجد مستودعات بعد — أضف أول مستودع من الأعلى</div>
+    </div></div>
+
+    <!-- ========== طلبات صرف بانتظار اعتماد أمين المستودع ========== -->
+    <div class="formcard" style="margin-top:22px">
+      <h3>طلبات الصرف — بانتظار اعتماد أمين المستودع</h3>
+      <div class="frow two">
+        <div class="field"><label>تنفيذ العملية باسم (رقم المستخدم)</label>
+          <input id="whActorUserId" type="number" placeholder="رقم المستخدم صاحب دور أمين/مدير المستودع"></div>
+        <div class="field"><label>عرض حسب المستودع</label>
+          <select id="whIssueFilter" onchange="renderStockIssueRequests()"><option value="">كل المستودعات</option></select></div>
+      </div>
+      <div class="hint">النظام حالياً بدون تسجيل دخول حقيقي، لذلك أدخل هنا رقم المستخدم الذي يملك صلاحية "أمين مستودع" أو "مدير مستودع" على هذا المستودع تحديدًا، ثم اعتمد أو ارفض الطلب أدناه.</div>
+    </div>
+    <div class="gridcard"><div class="scrollx">
+      <table class="grid">
+        <thead><tr><th>الرقم</th><th>المستودع</th><th>النوع</th><th>المرجع</th><th>الأصناف</th><th>الحالة</th><th>تاريخ الطلب</th><th></th></tr></thead>
+        <tbody id="stockIssueBody"></tbody>
+      </table>
+      <div class="empty-msg" id="stockIssueEmpty" style="display:none">لا توجد طلبات صرف حالياً</div>
+    </div></div>
+
+    <!-- ========== التحويلات بين المستودعات ========== -->
+    <div class="formcard" style="margin-top:22px">
+      <h3>التحويلات بين المستودعات</h3>
+      <div class="hint">اعتماد الشحن يتم من أمين مستودع المصدر، واعتماد الاستلام يتم من أمين مستودع الوجهة — استخدم نفس حقل "رقم المستخدم" أعلاه لكليهما.</div>
+    </div>
+    <div class="gridcard"><div class="scrollx">
+      <table class="grid">
+        <thead><tr><th>الرقم</th><th>من مستودع</th><th>إلى مستودع</th><th>الأصناف</th><th>الحالة</th><th></th></tr></thead>
+        <tbody id="stockTransfersBody"></tbody>
+      </table>
+      <div class="empty-msg" id="stockTransfersEmpty" style="display:none">لا توجد تحويلات حالياً</div>
+    </div></div>
+
+    <!-- ========== رصيد المخزون حسب المستودع ========== -->
+    <div class="formcard" style="margin-top:22px">
+      <h3>رصيد المخزون حسب المستودع</h3>
+    </div>
+    <div class="gridcard"><div class="scrollx">
+      <table class="grid">
+        <thead><tr><th>المستودع</th><th>الصنف</th><th>الكمية</th><th>متوسط التكلفة</th><th>القيمة</th></tr></thead>
+        <tbody id="warehouseStockBody"></tbody>
+      </table>
+      <div class="empty-msg" id="warehouseStockEmpty" style="display:none">لا يوجد رصيد مسجّل بعد</div>
+    </div></div>
+
+  </div>
   <div class="panel" id="panel-prices"><div class="formcard"><h3>قوائم الأسعار</h3><div class="empty-msg">جاهزة للتطوير</div></div></div>
   <div class="panel" id="panel-tracking"><div class="formcard"><h3>تتبع المنتجات</h3><div class="empty-msg">جاهزة للتطوير</div></div></div>
   
