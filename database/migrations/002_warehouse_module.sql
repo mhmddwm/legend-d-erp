@@ -227,9 +227,9 @@ BEGIN
 
     SELECT code INTO expenses_parent FROM accounts WHERE code = '5';
 
-    IF NOT EXISTS (SELECT 1 FROM accounts WHERE code = '124') THEN
+ IF NOT EXISTS (SELECT 1 FROM accounts WHERE code = '1131') THEN
         INSERT INTO accounts (code, name_ar, name_en, account_type, parent_code, opening_balance)
-        VALUES ('124', 'مخزون بضاعة في الطريق (تحويل)', 'Stock in Transit', 'assets', assets_parent, 0);
+        VALUES ('1131', 'مخزون بضاعة في الطريق (تحويل)', 'Stock in Transit', 'assets', '113', 0);
     END IF;
 
     IF NOT EXISTS (SELECT 1 FROM accounts WHERE code = '52') THEN

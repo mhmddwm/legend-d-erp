@@ -164,7 +164,7 @@ INSERT INTO accounts (code, name_ar, name_en, account_type, parent_code, opening
 ('11',  'الأصول المتداولة',   'Current Assets','assets',      '1',  0),
 ('111', 'النقدية والبنوك',    'Cash & Banks',  'assets',      '11', 0),
 ('12',  'الأصول الثابتة',     'Fixed Assets',  'assets',      '1',  0),
-('123', 'المخزون',           'Inventory',     'assets',      '11', 0),
+('113', 'المخزون',           'Inventory',     'assets',      '11', 0),
 ('2',   'الخصوم',            'Liabilities',   'liabilities', NULL, 0),
 ('21',  'الخصوم المتداولة',   'Current Liabilities','liabilities','2', 0),
 ('211', 'الموردون',          'Accounts Payable','liabilities','21', 0),
