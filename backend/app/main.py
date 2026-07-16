@@ -15,11 +15,9 @@ from app.routers import (
     warehouse_locations
 )
 
-
 app = FastAPI(
     title="ERP System"
 )
-
 
 # ================= CORS =================
 
@@ -40,6 +38,7 @@ app.include_router(localization.router)
 
 # Accounting
 app.include_router(accounting.router)
+# تم التأكد من ربط راوتر القيود اليومية الذي سنعتمد عليه في البحث المتقدم
 app.include_router(accounting.journal_router)
 
 
@@ -65,9 +64,7 @@ app.include_router(warehouse.router)
 
 
 # Warehouse Locations
-app.include_router(
-    warehouse_locations.router
-)
+app.include_router(warehouse_locations.router)
 
 
 # ================= API HEALTH CHECK =================
@@ -75,30 +72,17 @@ app.include_router(
 @app.get("/api")
 def api_home():
     return {
-        "message": "ERP API is running"
+        "message": "ERP API is running",
+        "system": "LEGEND D ERP"
     }
 
 
 # ================= FRONTEND =================
 
-# Project Structure:
-#
-# ROOT
-# ├── backend
-# │    └── app
-# │         └── main.py
-# │
-# └── frontend
-#      └── index.html
-
-
 BASE_DIR = Path(__file__).resolve().parents[2]
-
 FRONTEND_DIR = BASE_DIR / "frontend"
 
-
 if FRONTEND_DIR.exists():
-
     app.mount(
         "/",
         StaticFiles(
@@ -112,11 +96,10 @@ if FRONTEND_DIR.exists():
 # ================= LOCAL RUN =================
 
 if __name__ == "__main__":
-
     import uvicorn
-
     uvicorn.run(
         "app.main:app",
         host="0.0.0.0",
-        port=int(os.environ.get("PORT", 8000))
+        port=int(os.environ.get("PORT", 8000)),
+        reload=True  # تم تفعيل الـ reload لتسهيل التطوير البرمجي
     )

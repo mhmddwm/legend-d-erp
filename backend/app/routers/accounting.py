@@ -1,6 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
+from typing import Optional
+from datetime import date
 from app.database import get_db
 from app.models.models import Account, JournalEntry
 from app.schemas.accounting import AccountIn, AccountUpdate, AccountOut, JournalEntryIn, JournalEntryOut
@@ -8,6 +10,10 @@ from app.services import account_rollup_balance
 
 router = APIRouter(prefix="/api/accounts", tags=["Accounts"])
 journal_router = APIRouter(prefix="/api/journal", tags=["Journal"])
+
+# ============================================================
+# الحسابات (Accounts)
+# ============================================================
 
 @router.get("", response_model=list[AccountOut])
 def list_accounts(db: Session = Depends(get_db)):
@@ -31,7 +37,6 @@ def create_account(payload: AccountIn, db: Session = Depends(get_db)):
     if db.query(Account).filter(Account.code == payload.code).first():
         raise HTTPException(400, "كود الحساب مستخدم من قبل")
     
-    # التحقق من وجود الحساب الأب إذا تم إرساله
     if payload.parent_code and not db.query(Account).filter(Account.code == payload.parent_code).first():
         raise HTTPException(400, "الحساب الأب غير موجود")
 
@@ -59,11 +64,9 @@ def update_account(code: str, payload: AccountUpdate, db: Session = Depends(get_
 
     data = payload.model_dump(exclude_unset=True)
     
-    # منع الدوائر المنطقية (حساب يكون أباً لنفسه)
     if "parent_code" in data and data["parent_code"] == code:
         raise HTTPException(400, "لا يمكن أن يكون الحساب أبًا لنفسه")
     
-    # التحقق من وجود الحساب الأب الجديد إذا تم تغييره
     if "parent_code" in data and data["parent_code"] and not db.query(Account).filter(Account.code == data["parent_code"]).first():
         raise HTTPException(400, "الحساب الأب الجديد غير موجود")
 
@@ -79,8 +82,6 @@ def update_account(code: str, payload: AccountUpdate, db: Session = Depends(get_
         balance=account_rollup_balance(db, acc.code)
     )
 
-# --- باقي العمليات (Delete & Journal) تبقى كما هي لأنها سليمة ---
-# (تم الاحتفاظ بنفس المنطق الذي كتبته أنت لمنع الحذف)
 @router.delete("/{code}", status_code=204)
 def delete_account(code: str, db: Session = Depends(get_db)):
     acc = db.query(Account).filter(Account.code == code).first()
@@ -99,17 +100,38 @@ def delete_account(code: str, db: Session = Depends(get_db)):
 
 
 # ============================================================
-# القيود المحاسبية (Journal Entries)
+# القيود المحاسبية (Journal Entries) مع البحث المتقدم
 # ============================================================
 
 @journal_router.get("", response_model=list[JournalEntryOut])
-def list_journal_entries(db: Session = Depends(get_db)):
-    return (
-        db.query(JournalEntry)
-        .order_by(JournalEntry.entry_date.desc(), JournalEntry.id.desc())
-        .all()
-    )
+def list_journal_entries(
+    entry_no: Optional[int] = Query(None),
+    account: Optional[str] = Query(None),
+    user: Optional[str] = Query(None),
+    date_from: Optional[date] = Query(None),
+    date_to: Optional[date] = Query(None),
+    amount_min: Optional[float] = Query(None),
+    amount_max: Optional[float] = Query(None),
+    db: Session = Depends(get_db)
+):
+    query = db.query(JournalEntry)
 
+    if entry_no:
+        query = query.filter(JournalEntry.id == entry_no)
+    if account:
+        query = query.filter(or_(JournalEntry.debit_account == account, JournalEntry.credit_account == account))
+    if user:
+        query = query.filter(JournalEntry.created_by == user)
+    if date_from:
+        query = query.filter(JournalEntry.entry_date >= date_from)
+    if date_to:
+        query = query.filter(JournalEntry.entry_date <= date_to)
+    if amount_min is not None:
+        query = query.filter(JournalEntry.amount >= amount_min)
+    if amount_max is not None:
+        query = query.filter(JournalEntry.amount <= amount_max)
+
+    return query.order_by(JournalEntry.entry_date.desc(), JournalEntry.id.desc()).all()
 
 @journal_router.post("", response_model=JournalEntryOut, status_code=201)
 def create_journal_entry(payload: JournalEntryIn, db: Session = Depends(get_db)):
@@ -133,14 +155,13 @@ def create_journal_entry(payload: JournalEntryIn, db: Session = Depends(get_db))
     db.refresh(entry)
     return entry
 
-
 @journal_router.delete("/{entry_id}", status_code=204)
 def delete_journal_entry(entry_id: int, db: Session = Depends(get_db)):
     entry = db.query(JournalEntry).get(entry_id)
     if not entry:
         raise HTTPException(404, "القيد غير موجود")
     if entry.source_type != "manual":
-        raise HTTPException(400, "لا يمكن حذف قيد مُولَّد تلقائياً من عملية أخرى (مشتريات/مستودعات...)")
+        raise HTTPException(400, "لا يمكن حذف قيد مُولَّد تلقائياً")
     db.delete(entry)
     db.commit()
     return None
