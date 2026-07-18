@@ -2146,14 +2146,43 @@ html[dir="ltr"] .brand-center{direction:ltr;}
             <input type="date" id="dateFrom" title="من تاريخ">
             <input type="date" id="dateTo" title="إلى تاريخ">
             <button onclick="applyFilters()" class="btn-search">بحث</button>
+<!-- بداية شاشة القيود اليومية -->
+<div class="panel" id="panel-journal_entries" style="display: none;">
+    <!-- 1. قسم الإدخال الجديد -->
+    <div class="formcard" style="margin-bottom: 30px; border: 1px solid #ddd; padding: 15px;">
+        <h3>تسجيل قيد يومي جديد</h3>
+        <div style="margin-bottom: 15px;">
+            <input type="date" id="journalDate">
+            <input type="text" id="journalRef" placeholder="رقم المرجع">
         </div>
+        <table id="journalLinesTable" style="width: 100%;">
+            <thead>
+                <tr><th>الحساب</th><th>مدين</th><th>دائن</th><th>البيان</th><th>إجراء</th></tr>
+            </thead>
+            <tbody id="journalLinesBody">
+                <tr>
+                    <td><input type="text" class="acc-input" placeholder="رقم الحساب"></td>
+                    <td><input type="number" class="debit-input" value="0"></td>
+                    <td><input type="number" class="credit-input" value="0"></td>
+                    <td><input type="text" class="desc-input" placeholder="البيان"></td>
+                    <td><button onclick="removeRow(this)">حذف</button></td>
+                </tr>
+            </tbody>
+        </table>
+        <button onclick="addRow()">إضافة سطر جديد</button>
+        <button onclick="saveJournal()" class="btn-save">حفظ وترحيل</button>
+    </div>
 
-        <!-- الجدول -->
+    <!-- 2. قسم عرض البيانات -->
+    <div class="data-section">
+        <h3>القيود المسجلة</h3>
+        <div class="filter-section" style="margin-bottom: 10px;">
+            <input type="number" id="filterEntryNo" placeholder="رقم القيد">
+            <button onclick="applyFilters()" class="btn-search">تحديث / بحث</button>
+        </div>
         <table id="journalTable" style="width: 100%; border-collapse: collapse;">
             <thead>
-                <tr>
-                    <th>رقم القيد</th><th>التاريخ</th><th>مدين</th><th>دائن</th><th>المبلغ</th><th>البيان</th>
-                </tr>
+                <tr><th>رقم القيد</th><th>التاريخ</th><th>مدين</th><th>دائن</th><th>المبلغ</th><th>البيان</th></tr>
             </thead>
             <tbody id="journalTableBody">
                 <!-- البيانات ستظهر هنا -->
@@ -2161,13 +2190,16 @@ html[dir="ltr"] .brand-center{direction:ltr;}
         </table>
     </div>
 </div>
-  <div class="panel" id="panel-account_settings_general"><div class="formcard"><h3>إعدادات الحساب</h3><div class="empty-msg">جاهزة للتطوير</div></div></div>
-  <div class="panel" id="panel-sequence_settings">
-  <div class="sequence-page">
-    <aside class="sequence-list-card">
-      <div class="sequence-list-head">
-        <div>
-          <h3>إعدادات الترقيم المتسلسل</h3>
+<!-- نهاية شاشة القيود اليومية -->
+
+<!-- الأقسام التالية -->
+<div class="panel" id="panel-account_settings_general"><div class="formcard"><h3>إعدادات الحساب</h3><div class="empty-msg">جاهزة للتطوير</div></div></div>
+<div class="panel" id="panel-sequence_settings">
+    <div class="sequence-page">
+        <aside class="sequence-list-card">
+            <div class="sequence-list-head">
+                <div>
+                            <h3>إعدادات الترقيم المتسلسل</h3>
           <p>اختر المستند للتحكم في طريقة إنشاء أرقامه</p>
         </div>
         <span id="sequenceItemsCount">0 بند</span>
