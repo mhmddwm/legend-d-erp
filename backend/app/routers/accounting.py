@@ -1,11 +1,14 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import or_
 from typing import Optional
 from datetime import date
 from app.database import get_db
-from app.models.models import Account, JournalEntry
-from app.schemas.accounting import AccountIn, AccountUpdate, AccountOut, JournalEntryIn, JournalEntryOut
+from app.models.models import Account, JournalEntry, JournalEntryLine
+from app.schemas.accounting import (
+    AccountIn, AccountUpdate, AccountOut,
+    JournalEntryIn, JournalEntryOut,
+)
 from app.services import account_rollup_balance
 
 router = APIRouter(prefix="/api/accounts", tags=["Accounts"])
@@ -105,52 +108,113 @@ def delete_account(code: str, db: Session = Depends(get_db)):
 
 @journal_router.get("", response_model=list[JournalEntryOut])
 def list_journal_entries(
-    entry_no: Optional[int] = Query(None),
-    account: Optional[str] = Query(None),
-    user: Optional[str] = Query(None),
-    date_from: Optional[date] = Query(None),
-    date_to: Optional[date] = Query(None),
-    amount_min: Optional[float] = Query(None),
-    amount_max: Optional[float] = Query(None),
+    entry_no: Optional[int] = Query(None, description="رقم القيد"),
+    account: Optional[str] = Query(None, description="كود أو اسم الحساب (في أي سطر من أسطر القيد)"),
+    created_by: Optional[str] = Query(None, description="منشئ القيد (بحث جزئي)"),
+    description: Optional[str] = Query(None, description="بحث بوصف القيد (بحث جزئي)"),
+    date_from: Optional[date] = Query(None, description="تاريخ القيد من"),
+    date_to: Optional[date] = Query(None, description="تاريخ القيد إلى"),
+    created_from: Optional[date] = Query(None, description="تاريخ الإنشاء من"),
+    created_to: Optional[date] = Query(None, description="تاريخ الإنشاء إلى"),
+    amount_from: Optional[float] = Query(None, description="المبلغ من"),
+    amount_to: Optional[float] = Query(None, description="المبلغ إلى"),
     db: Session = Depends(get_db)
 ):
-    query = db.query(JournalEntry)
+    query = db.query(JournalEntry).options(joinedload(JournalEntry.lines))
 
     if entry_no:
         query = query.filter(JournalEntry.id == entry_no)
+
     if account:
-        query = query.filter(or_(JournalEntry.debit_account == account, JournalEntry.credit_account == account))
-    if user:
-        query = query.filter(JournalEntry.created_by == user)
+        # يطابق كود الحساب أو اسمه (عربي/إنجليزي) في أي سطر من أسطر القيد
+        matching_codes = [
+            a.code for a in db.query(Account).filter(
+                or_(
+                    Account.code.ilike(f"%{account}%"),
+                    Account.name_ar.ilike(f"%{account}%"),
+                    Account.name_en.ilike(f"%{account}%"),
+                )
+            ).all()
+        ]
+        matching_entry_ids = [
+            row[0] for row in db.query(JournalEntryLine.entry_id).filter(
+                JournalEntryLine.account_code.in_(matching_codes)
+            ).distinct().all()
+        ]
+        query = query.filter(JournalEntry.id.in_(matching_entry_ids))
+
+    if created_by:
+        query = query.filter(JournalEntry.created_by_name.ilike(f"%{created_by}%"))
+
+    if description:
+        query = query.filter(JournalEntry.description.ilike(f"%{description}%"))
+
     if date_from:
         query = query.filter(JournalEntry.entry_date >= date_from)
     if date_to:
         query = query.filter(JournalEntry.entry_date <= date_to)
-    if amount_min is not None:
-        query = query.filter(JournalEntry.amount >= amount_min)
-    if amount_max is not None:
-        query = query.filter(JournalEntry.amount <= amount_max)
+
+    if created_from:
+        query = query.filter(JournalEntry.created_at >= created_from)
+    if created_to:
+        query = query.filter(JournalEntry.created_at <= created_to)
+
+    if amount_from is not None:
+        query = query.filter(JournalEntry.total_amount >= amount_from)
+    if amount_to is not None:
+        query = query.filter(JournalEntry.total_amount <= amount_to)
 
     return query.order_by(JournalEntry.entry_date.desc(), JournalEntry.id.desc()).all()
 
 @journal_router.post("", response_model=JournalEntryOut, status_code=201)
 def create_journal_entry(payload: JournalEntryIn, db: Session = Depends(get_db)):
-    if payload.debit_account == payload.credit_account:
-        raise HTTPException(400, "لا يمكن أن يكون حساب المدين هو نفسه حساب الدائن")
-    if not db.query(Account).filter(Account.code == payload.debit_account).first():
-        raise HTTPException(404, "حساب المدين غير موجود")
-    if not db.query(Account).filter(Account.code == payload.credit_account).first():
-        raise HTTPException(404, "حساب الدائن غير موجود")
+    if len(payload.lines) < 2:
+        raise HTTPException(400, "يجب أن يحتوي القيد على سطرين على الأقل")
+
+    total_debit = 0.0
+    total_credit = 0.0
+    for line in payload.lines:
+        if (line.debit and line.credit) or (not line.debit and not line.credit):
+            raise HTTPException(400, "كل سطر يجب أن يكون له مبلغ مدين أو دائن فقط، وليس كلاهما ولا لا شيء")
+        if not db.query(Account).filter(Account.code == line.account_code).first():
+            raise HTTPException(404, f"الحساب {line.account_code} غير موجود")
+        total_debit += line.debit
+        total_credit += line.credit
+
+    if round(total_debit, 2) != round(total_credit, 2):
+        raise HTTPException(400, f"القيد غير متوازن: إجمالي المدين {total_debit:.2f} لا يساوي إجمالي الدائن {total_credit:.2f}")
+    if total_debit <= 0:
+        raise HTTPException(400, "لا يمكن ترحيل قيد بإجمالي صفر")
 
     entry = JournalEntry(
         entry_date=payload.entry_date,
-        debit_account=payload.debit_account,
-        credit_account=payload.credit_account,
-        amount=payload.amount,
         description=payload.description,
+        created_by_name=payload.created_by_name,
         source_type="manual",
+        total_amount=total_debit,
     )
+    # حقول التوافق مع النموذج القديم (سطرين بسيطين فقط) لعرضها في الشاشات القديمة إن وُجدت
+    if len(payload.lines) == 2:
+        d = next((l for l in payload.lines if l.debit), None)
+        c = next((l for l in payload.lines if l.credit), None)
+        if d and c:
+            entry.debit_account = d.account_code
+            entry.credit_account = c.account_code
+            entry.amount = total_debit
+
     db.add(entry)
+    db.flush()  # للحصول على entry.id قبل إضافة الأسطر
+
+    for idx, line in enumerate(payload.lines, start=1):
+        db.add(JournalEntryLine(
+            entry_id=entry.id,
+            line_no=idx,
+            account_code=line.account_code,
+            debit=line.debit,
+            credit=line.credit,
+            line_description=line.line_description,
+        ))
+
     db.commit()
     db.refresh(entry)
     return entry

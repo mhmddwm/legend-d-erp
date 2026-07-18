@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field
 from typing import Optional
-from datetime import date
+from datetime import date, datetime
 
 class AccountIn(BaseModel):
     code: str
@@ -35,23 +35,46 @@ class AccountOut(BaseModel):
         from_attributes = True
 
 
+class JournalEntryLineIn(BaseModel):
+    account_code: str
+    debit: float = Field(default=0, ge=0)
+    credit: float = Field(default=0, ge=0)
+    line_description: Optional[str] = None
+
+
+class JournalEntryLineOut(BaseModel):
+    id: int
+    account_code: str
+    debit: float
+    credit: float
+    line_description: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
 class JournalEntryIn(BaseModel):
     entry_date: date
-    debit_account: str
-    credit_account: str
-    amount: float = Field(gt=0)
     description: Optional[str] = None
+    created_by_name: Optional[str] = None
+    lines: list[JournalEntryLineIn] = Field(min_length=2)
 
 
 class JournalEntryOut(BaseModel):
     id: int
     entry_date: date
-    debit_account: str
-    credit_account: str
-    amount: float
     description: Optional[str] = None
     source_type: str
     source_ref: Optional[str] = None
+    created_by_name: Optional[str] = None
+    created_at: Optional[datetime] = None
+    total_amount: Optional[float] = None
+    # تبقى للتوافق مع القيود القديمة/البسيطة (سطرين فقط)
+    debit_account: Optional[str] = None
+    credit_account: Optional[str] = None
+    amount: Optional[float] = None
+    lines: list[JournalEntryLineOut] = []
 
     class Config:
         from_attributes = True
+

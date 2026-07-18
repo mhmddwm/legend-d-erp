@@ -1221,7 +1221,7 @@ html[dir="ltr"] .brand-center{direction:ltr;}
       <button class="nav-dd-item" data-tab="apps_management">إدارة التطبيقات</button>
       <button class="nav-dd-item" data-tab="themes_backgrounds">السمات والخلفيات</button>
       <button class="nav-dd-item" data-tab="core_architecture">نواة النظام والذكاء</button>
-      <button class="nav-dd-item" data-tab="journal_entries">القيود اليومية</button>
+      <button class="nav-dd-item" data-tab="journal">القيود اليومية</button>
     </div>
   </div>
 </nav>
@@ -1451,30 +1451,78 @@ html[dir="ltr"] .brand-center{direction:ltr;}
       <h3>قيد محاسبي جديد</h3>
       <div class="frow two">
         <div class="field"><label>التاريخ</label><input id="jDate" type="date"></div>
-        <div class="field"><label>المبلغ</label><input id="jAmount" type="number" step="0.01" placeholder="0.00"></div>
-      </div>
-      <div class="frow two">
-        <div class="field"><label>حساب المدين</label><select id="jDebit"></select></div>
-        <div class="field"><label>حساب الدائن</label><select id="jCredit"></select></div>
+        <div class="field"><label>منشئ القيد</label><input id="jCreatedBy" placeholder="اسمك (اختياري)"></div>
       </div>
       <div class="frow" style="grid-template-columns:1fr">
-        <div class="field"><label>البيان</label><input id="jDesc" placeholder="وصف القيد"></div>
+        <div class="field"><label>البيان العام للقيد</label><input id="jDesc" placeholder="وصف عام للقيد (اختياري)"></div>
       </div>
-      <button class="btn" onclick="submitEntry()">ترحيل القيد</button>
+
+      <div class="gridcard" style="margin:14px 0"><div class="scrollx">
+        <table class="grid">
+          <thead><tr><th style="width:26%">الحساب</th><th>البيان</th><th style="width:16%">مدين</th><th style="width:16%">دائن</th><th style="width:40px"></th></tr></thead>
+          <tbody id="journalLinesBody"></tbody>
+        </table>
+      </div></div>
+      <button class="btn secondary" onclick="addJLine()" type="button">+ إضافة سطر</button>
+
+      <div class="frow" style="grid-template-columns:1fr 1fr 1fr;margin-top:14px">
+        <div class="field"><label>إجمالي المدين</label><div class="num" id="jTotalDebit" style="font-weight:700">0.00</div></div>
+        <div class="field"><label>إجمالي الدائن</label><div class="num" id="jTotalCredit" style="font-weight:700">0.00</div></div>
+        <div class="field"><label>الفرق</label><div class="num" id="jDiff" style="font-weight:700">0.00</div></div>
+      </div>
+
+      <button class="btn" id="jSubmitBtn" onclick="submitEntry()">ترحيل القيد</button>
       <div class="err" id="jErr"></div>
     </div>
   </div>
 
-  <!-- ========== JOURNAL LIST ========== -->
+  <!-- ========== JOURNAL LIST + SEARCH ========== -->
   <div class="panel" id="panel-journal">
+    <div class="formcard" id="journalSearchCard">
+      <div class="jsearch-head" onclick="toggleJournalSearch()">
+        <h3 style="margin:0">🔍 بحث في القيود</h3>
+        <span id="journalSearchToggleIcon">▾</span>
+      </div>
+      <div id="journalSearchBody">
+        <div class="jsearch-grid">
+          <div class="field"><label>رقم القيد</label><input id="jsEntryNo" type="number" oninput="applyJournalSearch()" placeholder="مثال: 12"></div>
+          <div class="field"><label>اسم / كود الحساب</label><input id="jsAccount" oninput="applyJournalSearch()" placeholder="مدين أو دائن"></div>
+          <div class="field"><label>منشئ القيد</label><input id="jsCreatedBy" oninput="applyJournalSearch()" placeholder="اسم المنشئ"></div>
+          <div class="field"><label>وصف القيد</label><input id="jsDescription" oninput="applyJournalSearch()" placeholder="بحث بالبيان"></div>
+        </div>
+        <div class="jsearch-grid">
+          <div class="field"><label>تاريخ القيد من</label><input id="jsDateFrom" type="date" oninput="applyJournalSearch()"></div>
+          <div class="field"><label>تاريخ القيد إلى</label><input id="jsDateTo" type="date" oninput="applyJournalSearch()"></div>
+          <div class="field"><label>تاريخ الإنشاء من</label><input id="jsCreatedFrom" type="date" oninput="applyJournalSearch()"></div>
+          <div class="field"><label>تاريخ الإنشاء إلى</label><input id="jsCreatedTo" type="date" oninput="applyJournalSearch()"></div>
+        </div>
+        <div class="jsearch-grid">
+          <div class="field"><label>المبلغ من</label><input id="jsAmountFrom" type="number" step="0.01" oninput="applyJournalSearch()"></div>
+          <div class="field"><label>المبلغ إلى</label><input id="jsAmountTo" type="number" step="0.01" oninput="applyJournalSearch()"></div>
+          <div class="field" style="align-self:flex-end">
+            <button class="btn secondary" onclick="clearJournalSearch()">مسح الفلاتر</button>
+          </div>
+          <div class="field" style="align-self:flex-end">
+            <span id="journalResultsCount" class="hint" style="margin:0"></span>
+          </div>
+        </div>
+      </div>
+    </div>
     <div class="gridcard"><div class="scrollx">
       <table class="grid">
-        <thead><tr><th>#</th><th>التاريخ</th><th>المدين</th><th>الدائن</th><th>المبلغ</th><th>البيان</th><th>المصدر</th><th></th></tr></thead>
+        <thead><tr><th>#</th><th>التاريخ</th><th>الحسابات</th><th>الإجمالي</th><th>البيان</th><th>منشئ القيد</th><th>المصدر</th><th></th></tr></thead>
         <tbody id="journalBody"></tbody>
       </table>
-      <div class="empty-msg" id="journalEmpty" style="display:none">لا توجد قيود</div>
+      <div class="empty-msg" id="journalEmpty" style="display:none">لا توجد قيود مطابقة</div>
     </div></div>
   </div>
+
+  <style>
+    .jsearch-head{display:flex;align-items:center;justify-content:space-between;cursor:pointer;user-select:none}
+    .jsearch-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:12px}
+    @media (max-width:900px){.jsearch-grid{grid-template-columns:repeat(2,1fr)}}
+  </style>
+  <!-- ========== (تم نقل قائمة القيود أعلاه) ========== -->
 
   <!-- ========== ITEMS ========== -->
   <div class="panel" id="panel-items">
@@ -2135,62 +2183,6 @@ html[dir="ltr"] .brand-center{direction:ltr;}
   <div class="panel" id="panel-email_templates"><div class="formcard"><h3>قوالب الايميل</h3><div class="empty-msg">جاهزة للتطوير</div></div></div>
   <div class="panel" id="panel-auto_send_rules"><div class="formcard"><h3>قواعد الإرسال الآلي</h3><div class="empty-msg">جاهزة للتطوير</div></div></div>
   <div class="panel" id="panel-account_info"><div class="formcard"><h3>معلومات الحساب</h3><div class="empty-msg">جاهزة للتطوير</div></div></div>
-  <div class="panel" id="panel-journal_entries" style="display: none;">
-    <div class="formcard">
-        <h3>القيود اليومية</h3>
-        
-        <!-- شريط البحث -->
-        <div class="filter-section" style="margin-bottom: 20px; display: flex; gap: 10px; flex-wrap: wrap;">
-            <input type="number" id="filterEntryNo" placeholder="رقم القيد">
-            <input type="text" id="filterAccount" placeholder="رقم الحساب">
-            <input type="date" id="dateFrom" title="من تاريخ">
-            <input type="date" id="dateTo" title="إلى تاريخ">
-            <button onclick="applyFilters()" class="btn-search">بحث</button>
-<!-- بداية شاشة القيود اليومية -->
-<div class="panel" id="panel-journal_entries" style="display: none;">
-    <!-- 1. قسم الإدخال الجديد -->
-    <div class="formcard" style="margin-bottom: 30px; border: 1px solid #ddd; padding: 15px;">
-        <h3>تسجيل قيد يومي جديد</h3>
-        <div style="margin-bottom: 15px;">
-            <input type="date" id="journalDate">
-            <input type="text" id="journalRef" placeholder="رقم المرجع">
-        </div>
-        <table id="journalLinesTable" style="width: 100%;">
-            <thead>
-                <tr><th>الحساب</th><th>مدين</th><th>دائن</th><th>البيان</th><th>إجراء</th></tr>
-            </thead>
-            <tbody id="journalLinesBody">
-                <tr>
-                    <td><input type="text" class="acc-input" placeholder="رقم الحساب"></td>
-                    <td><input type="number" class="debit-input" value="0"></td>
-                    <td><input type="number" class="credit-input" value="0"></td>
-                    <td><input type="text" class="desc-input" placeholder="البيان"></td>
-                    <td><button onclick="removeRow(this)">حذف</button></td>
-                </tr>
-            </tbody>
-        </table>
-        <button onclick="addRow()">إضافة سطر جديد</button>
-        <button onclick="saveJournal()" class="btn-save">حفظ وترحيل</button>
-    </div>
-
-    <!-- 2. قسم عرض البيانات -->
-    <div class="data-section">
-        <h3>القيود المسجلة</h3>
-        <div class="filter-section" style="margin-bottom: 10px;">
-            <input type="number" id="filterEntryNo" placeholder="رقم القيد">
-            <button onclick="applyFilters()" class="btn-search">تحديث / بحث</button>
-        </div>
-        <table id="journalTable" style="width: 100%; border-collapse: collapse;">
-            <thead>
-                <tr><th>رقم القيد</th><th>التاريخ</th><th>مدين</th><th>دائن</th><th>المبلغ</th><th>البيان</th></tr>
-            </thead>
-            <tbody id="journalTableBody">
-                <!-- البيانات ستظهر هنا -->
-            </tbody>
-        </table>
-    </div>
-</div>
-<!-- نهاية شاشة القيود اليومية -->
 
 <!-- الأقسام التالية -->
 <div class="panel" id="panel-account_settings_general"><div class="formcard"><h3>إعدادات الحساب</h3><div class="empty-msg">جاهزة للتطوير</div></div></div>
@@ -6027,6 +6019,6 @@ input,select,textarea,button,table{font-family:inherit!important;}
   };
 })();
 </script>
-<script src="journal.js"></script> <!-- أضف هذا السطر هنا -->
+
 </body>
 </html>

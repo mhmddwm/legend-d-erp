@@ -23,6 +23,7 @@ let accounts=[], entries=[], items=[], stockMoves=[];
 let suppliers=[], purchaseOrders=[], grns=[], invoices=[], returns_=[];
 let warehouses=[], stockIssueRequests=[], stockTransfersList=[], warehouseStockBalances=[];
 let poLines=[], grnLines=[], prtCurrentLines=[];
+let jLines=[]; // أسطر القيد المحاسبي الجديد (مدين/دائن متعدد الأسطر)
 let lineCounter=0;
 
 // ============================================================
@@ -297,6 +298,7 @@ function renderAll(){
   renderTree();
 
   renderJournal();
+  if(!jLines.length) resetJournalForm(); else renderJLines();
 
   renderItems();
   openCategories();
@@ -580,7 +582,7 @@ tr.innerHTML = `
           <td>${typeof TYPE_LABELS !== 'undefined' ? (TYPE_LABELS[acc.account_type] || '') : (acc.account_type || '')}</td>
           <td>${acc.parent_code || '-'}</td>
           <td class="num">${typeof fmt !== 'undefined' ? fmt(acc.opening_balance) : (acc.opening_balance || 0)}</td>
-          <td class="num">${typeof fmt !== 'undefined' ? fmt(acc.current_balance) : (acc.current_balance || 0)}</td>
+          <td class="num">${typeof fmt !== 'undefined' ? fmt(acc.balance) : (acc.balance || 0)}</td>
           <td style="text-align:center;">
             <button type="button" class="acc-actions-btn" onclick="toggleAccActionsMenu(event,'${acc.code}')" title="الإجراءات">⋮</button>
           </td>
@@ -679,7 +681,7 @@ function openAccountPage(code){
   .box{background:#fff;padding:25px;border-radius:12px;border:1px solid #ddd}</style></head>
   <body><div class="box"><h2>${acc.name_ar}</h2>
   <p>رقم الحساب: ${acc.code}</p>
-  <p>الرصيد الحالي: ${fmt(acc.current_balance)}</p></div></body></html>`);
+  <p>الرصيد الحالي: ${fmt(acc.balance)}</p></div></body></html>`);
   win.document.close();
 }
 
@@ -693,22 +695,120 @@ function accountAction(action,code){
 // ============================================================
 // القيود المحاسبية
 // ============================================================
+// حالة فلاتر بحث القيود (تُطبَّق فورياً على البيانات المحمّلة بالفعل — بدون أي طلب شبكة، لسرعة قصوى)
+window.journalSearchOpen = window.journalSearchOpen !== undefined ? window.journalSearchOpen : true;
+
+function accountLabel(code){
+  const a = (accounts||[]).find(x=>x.code===code);
+  return a ? `${a.code} — ${a.name_ar}` : (code||'');
+}
+
+function journalMatchesFilters(e, f){
+  if(f.entryNo && String(e.id) !== String(f.entryNo)) return false;
+
+  if(f.account){
+    const needle = f.account.trim().toLowerCase();
+    const lines = (e.lines&&e.lines.length) ? e.lines : [
+      ...(e.debit_account?[{account_code:e.debit_account}]:[]),
+      ...(e.credit_account?[{account_code:e.credit_account}]:[]),
+    ];
+    const matchesAny = lines.some(l=>accountLabel(l.account_code).toLowerCase().includes(needle));
+    if(!matchesAny) return false;
+  }
+
+  if(f.createdBy){
+    const needle = f.createdBy.trim().toLowerCase();
+    if(!(e.created_by_name||'').toLowerCase().includes(needle)) return false;
+  }
+
+  if(f.description){
+    const needle = f.description.trim().toLowerCase();
+    if(!(e.description||'').toLowerCase().includes(needle)) return false;
+  }
+
+  if(f.dateFrom && e.entry_date < f.dateFrom) return false;
+  if(f.dateTo && e.entry_date > f.dateTo) return false;
+
+  if(f.createdFrom || f.createdTo){
+    const createdDate = (e.created_at||'').slice(0,10);
+    if(f.createdFrom && createdDate < f.createdFrom) return false;
+    if(f.createdTo && createdDate > f.createdTo) return false;
+  }
+
+  const amt = parseFloat(e.total_amount ?? e.amount)||0;
+  if(f.amountFrom !== '' && f.amountFrom !== null && amt < parseFloat(f.amountFrom)) return false;
+  if(f.amountTo !== '' && f.amountTo !== null && amt > parseFloat(f.amountTo)) return false;
+
+  return true;
+}
+
+function readJournalFilters(){
+  return {
+    entryNo: document.getElementById('jsEntryNo')?.value || '',
+    account: document.getElementById('jsAccount')?.value || '',
+    createdBy: document.getElementById('jsCreatedBy')?.value || '',
+    description: document.getElementById('jsDescription')?.value || '',
+    dateFrom: document.getElementById('jsDateFrom')?.value || '',
+    dateTo: document.getElementById('jsDateTo')?.value || '',
+    createdFrom: document.getElementById('jsCreatedFrom')?.value || '',
+    createdTo: document.getElementById('jsCreatedTo')?.value || '',
+    amountFrom: document.getElementById('jsAmountFrom')?.value ?? '',
+    amountTo: document.getElementById('jsAmountTo')?.value ?? '',
+  };
+}
+
+function applyJournalSearch(){
+  renderJournal();
+}
+
+function clearJournalSearch(){
+  ['jsEntryNo','jsAccount','jsCreatedBy','jsDescription','jsDateFrom','jsDateTo','jsCreatedFrom','jsCreatedTo','jsAmountFrom','jsAmountTo']
+    .forEach(id=>{ const el=document.getElementById(id); if(el) el.value=''; });
+  renderJournal();
+}
+
+function toggleJournalSearch(){
+  window.journalSearchOpen = !window.journalSearchOpen;
+  const body = document.getElementById('journalSearchBody');
+  const icon = document.getElementById('journalSearchToggleIcon');
+  if(body) body.style.display = window.journalSearchOpen ? '' : 'none';
+  if(icon) icon.textContent = window.journalSearchOpen ? '▾' : '▸';
+}
+
 function renderJournal(){
   const body=document.getElementById('journalBody');
   const empty=document.getElementById('journalEmpty');
+  const countEl=document.getElementById('journalResultsCount');
   if(!body) return;
-  if(!entries.length){body.innerHTML=''; if(empty) empty.style.display='block'; return;}
+
+  const filters = readJournalFilters();
+  const hasAnyFilter = Object.values(filters).some(v=>v!=='' && v!==null);
+  const filtered = hasAnyFilter ? (entries||[]).filter(e=>journalMatchesFilters(e, filters)) : (entries||[]);
+
+  if(countEl) countEl.textContent = hasAnyFilter ? `${filtered.length} نتيجة من أصل ${(entries||[]).length}` : '';
+
+  if(!filtered.length){body.innerHTML=''; if(empty){empty.style.display='block'; empty.textContent = hasAnyFilter ? 'لا توجد قيود مطابقة لمعايير البحث' : 'لا توجد قيود';} return;}
   if(empty) empty.style.display='none';
-  body.innerHTML=entries.map(e=>`<tr>
+  body.innerHTML=filtered.map(e=>{
+    const lines = (e.lines&&e.lines.length) ? e.lines : [
+      ...(e.debit_account?[{account_code:e.debit_account, debit:e.amount, credit:0}]:[]),
+      ...(e.credit_account?[{account_code:e.credit_account, debit:0, credit:e.amount}]:[]),
+    ];
+    const summary = lines.map(l=>`${accountLabel(l.account_code)} <span class="muted">(${l.debit?'مدين':'دائن'})</span>`).join('، ');
+    return `<tr>
     <td>${e.id||''}</td>
     <td>${e.entry_date||''}</td>
-    <td>${e.debit_account||''}</td>
-    <td>${e.credit_account||''}</td>
-    <td class="num">${fmt(e.amount)}</td>
+    <td>${summary || '-'}</td>
+    <td class="num">${fmt(e.total_amount ?? e.amount)}</td>
     <td>${e.description||''}</td>
-    <td>${e.source||'-'}</td>
-    <td><button class="icon-btn del" onclick="deleteEntry(${e.id})">🗑️</button></td>
-  </tr>`).join('');
+    <td>${e.created_by_name||'-'}</td>
+    <td>${e.source_type==='manual'?'يدوي':(e.source_type||'-')}</td>
+    <td>
+      <button class="icon-btn" onclick="viewJournalEntry(${e.id})" title="عرض التفاصيل">👁️</button>
+      <button class="icon-btn del" onclick="deleteEntry(${e.id})" title="حذف">🗑️</button>
+    </td>
+  </tr>`;
+  }).join('');
 }
 
 // ============================================================
@@ -985,12 +1085,76 @@ function refreshAccountParents(){
 }
 
 function refreshJournalAccounts(){
-  const options='<option value="">— اختر حساب —</option>'+
-    accounts.map(acc=>`<option value="${acc.code}">${acc.code} — ${acc.name_ar}</option>`).join('');
-  const debit=document.getElementById('jDebit');
-  const credit=document.getElementById('jCredit');
-  if(debit) debit.innerHTML=options;
-  if(credit) credit.innerHTML=options;
+  renderJLines();
+}
+
+// ============================================================
+// أسطر القيد المحاسبي (دعم عدد غير محدود من الأسطر - مدين/دائن)
+// ============================================================
+function accountOptionsHtml(selected){
+  return '<option value="">— اختر حساب —</option>'+
+    (accounts||[]).map(acc=>`<option value="${acc.code}" ${acc.code===selected?'selected':''}>${acc.code} — ${acc.name_ar}</option>`).join('');
+}
+
+function addJLine(){
+  lineCounter++;
+  jLines.push({id:lineCounter, account_code:'', debit:0, credit:0, line_description:''});
+  renderJLines();
+}
+
+function removeJLine(id){
+  if(jLines.length<=2){alert('يجب أن يحتوي القيد على سطرين على الأقل'); return;}
+  jLines=jLines.filter(l=>l.id!==id);
+  renderJLines();
+}
+
+function onJLineChange(id, field, value){
+  const line=jLines.find(l=>l.id===id);
+  if(!line) return;
+  if(field==='debit' || field==='credit'){
+    line[field]=parseFloat(value)||0;
+    // سطر واحد لا يمكن أن يكون مديناً ودائناً معاً
+    if(field==='debit' && line.debit) line.credit=0;
+    if(field==='credit' && line.credit) line.debit=0;
+  } else {
+    line[field]=value;
+  }
+  renderJLines();
+}
+
+function renderJLines(){
+  const body=document.getElementById('journalLinesBody');
+  if(!body) return;
+  body.innerHTML=jLines.map(l=>`<tr>
+    <td><select onchange="onJLineChange(${l.id},'account_code',this.value)">${accountOptionsHtml(l.account_code)}</select></td>
+    <td><input type="text" placeholder="بيان السطر (اختياري)" value="${l.line_description||''}" onchange="onJLineChange(${l.id},'line_description',this.value)"></td>
+    <td><input type="number" step="0.01" min="0" value="${l.debit||0}" onchange="onJLineChange(${l.id},'debit',this.value)"></td>
+    <td><input type="number" step="0.01" min="0" value="${l.credit||0}" onchange="onJLineChange(${l.id},'credit',this.value)"></td>
+    <td><button class="rm-line" onclick="removeJLine(${l.id})">✕</button></td>
+  </tr>`).join('');
+
+  const totalDebit=jLines.reduce((s,l)=>s+(parseFloat(l.debit)||0),0);
+  const totalCredit=jLines.reduce((s,l)=>s+(parseFloat(l.credit)||0),0);
+  const diff=Math.round((totalDebit-totalCredit)*100)/100;
+
+  const tdEl=document.getElementById('jTotalDebit');
+  const tcEl=document.getElementById('jTotalCredit');
+  const diffEl=document.getElementById('jDiff');
+  const submitBtn=document.getElementById('jSubmitBtn');
+  if(tdEl) tdEl.textContent=fmt(totalDebit);
+  if(tcEl) tcEl.textContent=fmt(totalCredit);
+  if(diffEl){
+    diffEl.textContent=fmt(Math.abs(diff));
+    diffEl.style.color = diff===0 ? 'var(--success)' : 'var(--coral)';
+  }
+  if(submitBtn) submitBtn.disabled = !(diff===0 && totalDebit>0);
+}
+
+function resetJournalForm(){
+  jLines=[];
+  lineCounter++; jLines.push({id:lineCounter, account_code:'', debit:0, credit:0, line_description:''});
+  lineCounter++; jLines.push({id:lineCounter, account_code:'', debit:0, credit:0, line_description:''});
+  renderJLines();
 }
 
 // كانت مفقودة: تعبئة قوائم اختيار المورد بفورمي "أمر الشراء" و"استلام البضاعة"
@@ -1097,7 +1261,7 @@ function createChildAccount(parentCode){
 async function deleteAccount(code){
   const account=accounts.find(a=>a.code===code);
   if(!account) return;
-  if((account.current_balance||0)!==0){alert('لا يمكن حذف الحساب لأنه يحتوي على حركات أو أرصدة'); return;}
+  if((account.balance||0)!==0){alert('لا يمكن حذف الحساب لأنه يحتوي على حركات أو أرصدة'); return;}
   if(!confirm('تأكيد حذف الحساب؟')) return;
   try{await api('DELETE',`/api/accounts/${code}`); await loadAll();}
   catch(e){alert(e.message);}
@@ -1108,18 +1272,28 @@ async function deleteAccount(code){
 // ============================================================
 async function submitEntry(){
   const entry_date=document.getElementById('jDate').value;
-  const amount=parseFloat(document.getElementById('jAmount').value)||0;
-  const debit_account=document.getElementById('jDebit').value;
-  const credit_account=document.getElementById('jCredit').value;
   const description=document.getElementById('jDesc').value.trim();
+  const created_by_name=document.getElementById('jCreatedBy')?.value.trim() || null;
   const err=document.getElementById('jErr');
-  if(!entry_date||!amount||!debit_account||!credit_account){err.textContent='يرجى ملء جميع الحقول المطلوبة'; return;}
+
+  const validLines=jLines.filter(l=>l.account_code && ((l.debit||0)>0 || (l.credit||0)>0));
+  if(!entry_date){err.textContent='يرجى إدخال تاريخ القيد'; return;}
+  if(validLines.length<2){err.textContent='يرجى إدخال سطرين على الأقل، كل سطر بحساب ومبلغ'; return;}
+
+  const totalDebit=validLines.reduce((s,l)=>s+(parseFloat(l.debit)||0),0);
+  const totalCredit=validLines.reduce((s,l)=>s+(parseFloat(l.credit)||0),0);
+  if(Math.round((totalDebit-totalCredit)*100)!==0){err.textContent=`القيد غير متوازن: مدين ${fmt(totalDebit)} ≠ دائن ${fmt(totalCredit)}`; return;}
+  if(totalDebit<=0){err.textContent='لا يمكن ترحيل قيد بإجمالي صفر'; return;}
+
   err.textContent='';
   try{
-    await api('POST','/api/journal',{entry_date,amount,debit_account,credit_account,description});
+    await api('POST','/api/journal',{
+      entry_date, description, created_by_name,
+      lines: validLines.map(l=>({account_code:l.account_code, debit:l.debit||0, credit:l.credit||0, line_description:l.line_description||null}))
+    });
     await loadAll();
-    document.getElementById('jAmount').value='';
     document.getElementById('jDesc').value='';
+    resetJournalForm();
   }catch(e){err.textContent=e.message;}
 }
 
@@ -1127,6 +1301,29 @@ async function deleteEntry(id){
   if(!confirm('حذف هذا القيد؟')) return;
   try{await api('DELETE',`/api/journal/${id}`); await loadAll();}
   catch(e){alert(e.message);}
+}
+
+function viewJournalEntry(id){
+  const e=(entries||[]).find(x=>x.id===id);
+  if(!e) return;
+  const lines=e.lines&&e.lines.length ? e.lines : [];
+  const rows=lines.map(l=>`<tr>
+      <td>${accountLabel(l.account_code)}</td>
+      <td>${l.line_description||''}</td>
+      <td class="num">${l.debit?fmt(l.debit):''}</td>
+      <td class="num">${l.credit?fmt(l.credit):''}</td>
+    </tr>`).join('');
+  const w=window.open('','_blank','width=560,height=520');
+  w.document.write(`<html dir="rtl"><head><title>تفاصيل القيد #${e.id}</title>
+    <style>body{font-family:Arial;padding:20px}table{width:100%;border-collapse:collapse;margin-top:12px}
+    th,td{border:1px solid #ccc;padding:8px;text-align:right;font-size:13px}th{background:#f2f2f2}</style></head>
+    <body><h3>قيد رقم #${e.id} — ${e.entry_date}</h3>
+    <p>البيان: ${e.description||'-'}</p>
+    <p>منشئ القيد: ${e.created_by_name||'-'}</p>
+    <table><thead><tr><th>الحساب</th><th>البيان</th><th>مدين</th><th>دائن</th></tr></thead>
+    <tbody>${rows}</tbody></table>
+    <p style="margin-top:12px;font-weight:bold">الإجمالي: ${fmt(e.total_amount||e.amount||0)}</p>
+    </body></html>`);
 }
 
 

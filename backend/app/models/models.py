@@ -38,21 +38,28 @@ class JournalEntry(Base):
     id = Column(Integer, primary_key=True)
     entry_date = Column(Date, nullable=False)
 
+    # حقول تراثية (كانت تُستخدم قبل دعم الأسطر المتعددة) — تبقى موجودة
+    # لتوافق البيانات القديمة، لكنها لم تعد تُستخدم للقيود الجديدة.
     debit_account = Column(
         String(20),
         ForeignKey("accounts.code"),
-        nullable=False
+        nullable=True
     )
 
     credit_account = Column(
         String(20),
         ForeignKey("accounts.code"),
-        nullable=False
+        nullable=True
     )
 
-    amount = Column(Numeric(18, 2), nullable=False)
+    amount = Column(Numeric(18, 2), nullable=True)
+
+    # إجمالي القيد (= مجموع مدين الأسطر = مجموع دائن الأسطر)
+    total_amount = Column(Numeric(18, 2), nullable=True)
+
     description = Column(String)
     source_type = Column(String(30), default="manual")
+    created_by_name = Column(String(100))
     source_ref = Column(String(30))
 
     created_at = Column(
@@ -60,12 +67,31 @@ class JournalEntry(Base):
         server_default=func.now()
     )
 
+    lines = relationship(
+        "JournalEntryLine",
+        backref="entry",
+        cascade="all, delete-orphan",
+        order_by="JournalEntryLine.line_no"
+    )
+
     __table_args__ = (
         CheckConstraint(
-            "amount > 0",
+            "amount IS NULL OR amount > 0",
             name="ck_amount_positive"
         ),
     )
+
+
+class JournalEntryLine(Base):
+    __tablename__ = "journal_entry_lines"
+
+    id = Column(Integer, primary_key=True)
+    entry_id = Column(Integer, ForeignKey("journal_entries.id", ondelete="CASCADE"), nullable=False)
+    line_no = Column(Integer, nullable=False, default=1)
+    account_code = Column(String(20), ForeignKey("accounts.code"), nullable=False)
+    debit = Column(Numeric(18, 2), nullable=False, default=0)
+    credit = Column(Numeric(18, 2), nullable=False, default=0)
+    line_description = Column(String)
 
 
 class Item(Base):

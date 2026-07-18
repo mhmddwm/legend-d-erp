@@ -1,6 +1,6 @@
 from sqlalchemy import func
 from sqlalchemy.orm import Session
-from app.models.models import Account, JournalEntry
+from app.models.models import Account, JournalEntry, JournalEntryLine
 
 
 def next_sequence(db: Session, model, number_column, prefix: str) -> str:
@@ -10,7 +10,7 @@ def next_sequence(db: Session, model, number_column, prefix: str) -> str:
 
 
 def account_direct_balance(db: Session, code: str) -> float:
-    """الرصيد المباشر للحساب (افتتاحي + القيود التي تخصه فقط، بدون حسابات الأبناء)."""
+    """الرصيد المباشر للحساب (افتتاحي + كل أسطر القيود الخاصة به، بدون حسابات الأبناء)."""
     acc = db.query(Account).filter(Account.code == code).first()
     if not acc:
         return 0.0
@@ -19,11 +19,11 @@ def account_direct_balance(db: Session, code: str) -> float:
 
     opening = float(acc.opening_balance or 0)
 
-    debit_sum = db.query(func.coalesce(func.sum(JournalEntry.amount), 0)).filter(
-        JournalEntry.debit_account == code
+    debit_sum = db.query(func.coalesce(func.sum(JournalEntryLine.debit), 0)).filter(
+        JournalEntryLine.account_code == code
     ).scalar()
-    credit_sum = db.query(func.coalesce(func.sum(JournalEntry.amount), 0)).filter(
-        JournalEntry.credit_account == code
+    credit_sum = db.query(func.coalesce(func.sum(JournalEntryLine.credit), 0)).filter(
+        JournalEntryLine.account_code == code
     ).scalar()
 
     debit_sum = float(debit_sum or 0)
