@@ -3,29 +3,31 @@ import psycopg2
 from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
 
 def run_sql_files():
-    # جلب رابط قاعدة البيانات من متغيرات البيئة في ريندر
+    # طباعة المسار الحالي للتأكد من مكان تشغيل السكربت
+    print(f"DEBUG: Current Working Directory: {os.getcwd()}")
+    
     database_url = os.getenv("DATABASE_URL")
     if not database_url:
         print("DATABASE_URL is not set. Skipping migrations.")
         return
 
     try:
-        # الاتصال بقاعدة البيانات
         conn = psycopg2.connect(database_url)
         conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
         cursor = conn.cursor()
 
-        # استخدام المسار المطلق لضمان العثور على المجلد داخل بيئة Render
-        migrations_dir = os.path.join(os.path.abspath(os.path.dirname(__file__)), "database", "migrations")
+        # تحديد مسار مجلد المهاجرات بشكل مطلق بناءً على موقع هذا السكربت
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        migrations_dir = os.path.join(script_dir, "database", "migrations")
         
-        # إضافة سطر للتحقق من المسار في الـ Logs
         print(f"DEBUG: Looking for migrations at: {migrations_dir}")
         
         if not os.path.exists(migrations_dir):
+            # طباعة محتويات المجلد الحالي لمعرفة مكان المجلدات بالنسبة للسكربت
+            print(f"DEBUG: Directory contents: {os.listdir(script_dir)}")
             print(f"Migrations directory not found at: {migrations_dir}")
             return
 
-        # ترتيب ملفات الـ SQL أبجدياً لضمان تنفيذها بالترتيب الصحيح (001 ثم 002...)
         sql_files = sorted([f for f in os.listdir(migrations_dir) if f.endswith('.sql')])
 
         for file_name in sql_files:
