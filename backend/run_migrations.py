@@ -15,8 +15,11 @@ def run_sql_files():
         conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
         cursor = conn.cursor()
 
-        # مسار مجلد المهاجرات داخل مجلد backend
-        migrations_dir = os.path.join(os.path.dirname(__file__), "database", "migrations")
+        # استخدام المسار المطلق لضمان العثور على المجلد داخل بيئة Render
+        migrations_dir = os.path.join(os.path.abspath(os.path.dirname(__file__)), "database", "migrations")
+        
+        # إضافة سطر للتحقق من المسار في الـ Logs
+        print(f"DEBUG: Looking for migrations at: {migrations_dir}")
         
         if not os.path.exists(migrations_dir):
             print(f"Migrations directory not found at: {migrations_dir}")
