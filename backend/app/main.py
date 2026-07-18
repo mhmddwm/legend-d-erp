@@ -1,4 +1,6 @@
 import os
+import psycopg2
+from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -14,6 +16,33 @@ from app.routers import (
     warehouse,
     warehouse_locations
 )
+
+# ================= MIGRATION =================
+def run_startup_migrations():
+    database_url = os.environ.get("DATABASE_URL")
+    if not database_url:
+        return
+    try:
+        conn = psycopg2.connect(database_url)
+        conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
+        cursor = conn.cursor()
+        
+        # المسار الصحيح للمجلد بناءً على هيكلية مشروعك
+        base_dir = Path(__file__).resolve().parents[1] 
+        migrations_dir = base_dir / "database" / "migrations"
+        
+        if migrations_dir.exists():
+            sql_files = sorted([f for f in migrations_dir.glob("*.sql")])
+            for file_path in sql_files:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    cursor.execute(f.read())
+        cursor.close()
+        conn.close()
+    except Exception as e:
+        print(f"Migration error: {e}")
+
+run_startup_migrations()
+# =============================================
 
 app = FastAPI(
     title="ERP System"
