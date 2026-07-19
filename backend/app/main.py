@@ -1,6 +1,4 @@
 import os
-import psycopg2
-from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -16,46 +14,6 @@ from app.routers import (
     warehouse,
     warehouse_locations
 )
-
-# ================= MIGRATION =================
-def run_startup_migrations():
-    database_url = os.environ.get("DATABASE_URL")
-    if not database_url:
-        print("DEBUG: DATABASE_URL is missing!")
-        return
-    try:
-        conn = psycopg2.connect(database_url)
-        conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
-        cursor = conn.cursor()
-        
-        # المسار الصحيح للمجلد بناءً على هيكلية مشروعك
-        # Path(__file__) هو main.py الموجود داخل مجلد app
-        # .parents[1] يخرجنا من app ثم من backend للوصول للمجلد الجذر
-        base_dir = Path(__file__).resolve().parents[1] 
-        migrations_dir = base_dir / "database" / "migrations"
-        
-        print(f"DEBUG: Checking path: {migrations_dir}")
-        
-        if migrations_dir.exists():
-            sql_files = sorted([f for f in migrations_dir.glob("*.sql")])
-            print(f"DEBUG: Found {len(sql_files)} SQL files: {[f.name for f in sql_files]}")
-            
-            for file_path in sql_files:
-                print(f"DEBUG: Executing {file_path.name}")
-                with open(file_path, 'r', encoding='utf-8') as f:
-                    cursor.execute(f.read())
-            print("DEBUG: All migrations executed successfully.")
-        else:
-            print(f"DEBUG: Migration directory NOT found at: {migrations_dir}")
-            
-        cursor.close()
-        conn.close()
-    except Exception as e:
-        print(f"DEBUG: Migration error: {e}")
-
-# تنفيذ المهاجرة فور تشغيل الملف
-run_startup_migrations()
-# =============================================
 
 app = FastAPI(
     title="ERP System"

@@ -10,7 +10,10 @@ def next_sequence(db: Session, model, number_column, prefix: str) -> str:
 
 
 def account_direct_balance(db: Session, code: str) -> float:
-    """الرصيد المباشر للحساب (افتتاحي + كل أسطر القيود الخاصة به، بدون حسابات الأبناء)."""
+    """الرصيد المباشر للحساب (افتتاحي + كل القيود الخاصة به، بدون حسابات الأبناء).
+    يُحسب من جدول journal_entries مباشرة (مدين/دائن/مبلغ) — وهو مصدر
+    الحقيقة الوحيد لأن شاشة القيود تعتمد على قيد بسيط (حساب مدين واحد
+    وحساب دائن واحد لكل قيد)، وليس على جدول الأسطر المتعددة."""
     acc = db.query(Account).filter(Account.code == code).first()
     if not acc:
         return 0.0
@@ -19,11 +22,11 @@ def account_direct_balance(db: Session, code: str) -> float:
 
     opening = float(acc.opening_balance or 0)
 
-    debit_sum = db.query(func.coalesce(func.sum(JournalEntryLine.debit), 0)).filter(
-        JournalEntryLine.account_code == code
+    debit_sum = db.query(func.coalesce(func.sum(JournalEntry.amount), 0)).filter(
+        JournalEntry.debit_account == code
     ).scalar()
-    credit_sum = db.query(func.coalesce(func.sum(JournalEntryLine.credit), 0)).filter(
-        JournalEntryLine.account_code == code
+    credit_sum = db.query(func.coalesce(func.sum(JournalEntry.amount), 0)).filter(
+        JournalEntry.credit_account == code
     ).scalar()
 
     debit_sum = float(debit_sum or 0)

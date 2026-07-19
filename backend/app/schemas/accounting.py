@@ -55,25 +55,24 @@ class JournalEntryLineOut(BaseModel):
 
 class JournalEntryIn(BaseModel):
     entry_date: date
+    debit_account: str
+    credit_account: str
+    amount: float = Field(gt=0)
     description: Optional[str] = None
     created_by_name: Optional[str] = None
-    lines: list[JournalEntryLineIn] = Field(min_length=2)
 
 
 class JournalEntryOut(BaseModel):
     id: int
     entry_date: date
+    debit_account: str
+    credit_account: str
+    amount: float
     description: Optional[str] = None
     source_type: str
     source_ref: Optional[str] = None
     created_by_name: Optional[str] = None
     created_at: Optional[datetime] = None
-    total_amount: Optional[float] = None
-    # تبقى للتوافق مع القيود القديمة/البسيطة (سطرين فقط)
-    debit_account: Optional[str] = None
-    credit_account: Optional[str] = None
-    amount: Optional[float] = None
-    lines: list[JournalEntryLineOut] = []
 
     class Config:
         from_attributes = True

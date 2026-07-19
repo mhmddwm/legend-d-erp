@@ -1447,7 +1447,7 @@ html[dir="ltr"] .brand-center{direction:ltr;}
 
   <!-- ========== JOURNAL ENTRY ========== -->
   <div class="panel" id="panel-entry">
-    <div class="formcard">
+    <div class="formcard journal-modern-form">
       <h3>قيد محاسبي جديد</h3>
       <div class="frow two">
         <div class="field"><label>التاريخ</label><input id="jDate" type="date"></div>
@@ -1478,7 +1478,7 @@ html[dir="ltr"] .brand-center{direction:ltr;}
 
   <!-- ========== JOURNAL LIST + SEARCH ========== -->
   <div class="panel" id="panel-journal">
-    <div class="formcard" id="journalSearchCard">
+    <div class="formcard journal-modern-form" id="journalSearchCard">
       <div class="jsearch-head" onclick="toggleJournalSearch()">
         <h3 style="margin:0">🔍 بحث في القيود</h3>
         <span id="journalSearchToggleIcon">▾</span>
@@ -1499,7 +1499,8 @@ html[dir="ltr"] .brand-center{direction:ltr;}
         <div class="jsearch-grid">
           <div class="field"><label>المبلغ من</label><input id="jsAmountFrom" type="number" step="0.01" oninput="applyJournalSearch()"></div>
           <div class="field"><label>المبلغ إلى</label><input id="jsAmountTo" type="number" step="0.01" oninput="applyJournalSearch()"></div>
-          <div class="field" style="align-self:flex-end">
+          <div class="field" style="align-self:flex-end;display:flex;gap:8px;flex-direction:row">
+            <button class="btn" onclick="applyJournalSearch()">🔍 بحث</button>
             <button class="btn secondary" onclick="clearJournalSearch()">مسح الفلاتر</button>
           </div>
           <div class="field" style="align-self:flex-end">
@@ -1521,6 +1522,37 @@ html[dir="ltr"] .brand-center{direction:ltr;}
     .jsearch-head{display:flex;align-items:center;justify-content:space-between;cursor:pointer;user-select:none}
     .jsearch-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:12px}
     @media (max-width:900px){.jsearch-grid{grid-template-columns:repeat(2,1fr)}}
+
+    /* ===== تصميم حديث لشاشة القيود (إنشاء + بحث) ===== */
+    .journal-modern-form{border-radius:20px;border:1px solid #e2ebf6;background:linear-gradient(135deg,#fff,#f8fbff);box-shadow:0 10px 28px rgba(15,39,70,.05);}
+    .journal-modern-form h3{color:#08244a;margin-top:0}
+    .journal-modern-form .field label{font-weight:800;color:#0f2746;margin-bottom:6px;font-size:12.5px}
+    .journal-modern-form .field input,
+    .journal-modern-form .field select{
+      height:44px;
+      border:1.5px solid #cbd8ea;
+      border-radius:14px;
+      padding:0 14px;
+      background:#fff;
+      font-family:'Cairo',sans-serif;
+      font-weight:700;
+      font-size:14px;
+      color:#0f2746;
+      transition:border-color .18s ease, box-shadow .18s ease, background .18s ease;
+      box-shadow:0 1px 2px rgba(15,39,70,.04);
+    }
+    .journal-modern-form .field input:hover,
+    .journal-modern-form .field select:hover{
+      border-color:#9db8dd;
+    }
+    .journal-modern-form .field input:focus,
+    .journal-modern-form .field select:focus{
+      border-color:#1f78d1;
+      background:#fff;
+      box-shadow:0 0 0 4px rgba(31,120,209,.14);
+      outline:none;
+    }
+    .journal-modern-form .btn{border-radius:12px;font-weight:800}
   </style>
   <!-- ========== (تم نقل قائمة القيود أعلاه) ========== -->
 
