@@ -39,6 +39,7 @@ app.include_router(localization.router)
 # Accounting
 app.include_router(accounting.router)
 app.include_router(accounting.journal_router)
+app.include_router(accounting.cost_center_router)
 
 
 # Inventory

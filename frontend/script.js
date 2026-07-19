@@ -25,6 +25,11 @@ let warehouses=[], stockIssueRequests=[], stockTransfersList=[], warehouseStockB
 let poLines=[], grnLines=[], prtCurrentLines=[];
 let jLines=[]; // أسطر القيد المحاسبي الجديد (مدين/دائن متعدد الأسطر)
 let lineCounter=0;
+let appUsers=[]; // قائمة المستخدمين لاستخدامها في حقل "منشئ القيد"
+let costCenters=[]; // مراكز التكلفة
+let journalEditingId=null; // معرّف القيد الجاري تعديله (null = إنشاء قيد جديد)
+let journalPage=1; // الصفحة الحالية في قائمة القيود
+const JOURNAL_PAGE_SIZE=20;
 
 // ============================================================
 // دوال مساعدة
@@ -149,6 +154,18 @@ accounts = await safeLoad(
 entries = await safeLoad(
 "القيود",
 "/api/journal"
+);
+
+
+appUsers = await safeLoad(
+"المستخدمون",
+"/users"
+);
+
+
+costCenters = await safeLoad(
+"مراكز التكلفة",
+"/api/cost-centers"
 );
 
 
@@ -298,7 +315,8 @@ function renderAll(){
   renderTree();
 
   renderJournal();
-  if(!jLines.length) resetJournalForm(); else renderJLines();
+  if(!jLines.length) resetJournalForm();
+  refreshJournalAccounts();
 
   renderItems();
   openCategories();
@@ -739,6 +757,9 @@ function journalMatchesFilters(e, f){
   if(f.amountFrom !== '' && f.amountFrom !== null && amt < parseFloat(f.amountFrom)) return false;
   if(f.amountTo !== '' && f.amountTo !== null && amt > parseFloat(f.amountTo)) return false;
 
+  if(f.status && (e.status||'posted') !== f.status) return false;
+  if(f.costCenter && (e.cost_center_code||'') !== f.costCenter) return false;
+
   return true;
 }
 
@@ -754,16 +775,20 @@ function readJournalFilters(){
     createdTo: document.getElementById('jsCreatedTo')?.value || '',
     amountFrom: document.getElementById('jsAmountFrom')?.value ?? '',
     amountTo: document.getElementById('jsAmountTo')?.value ?? '',
+    status: document.getElementById('jsStatus')?.value || '',
+    costCenter: document.getElementById('jsCostCenter')?.value || '',
   };
 }
 
 function applyJournalSearch(){
+  journalPage=1;
   renderJournal();
 }
 
 function clearJournalSearch(){
-  ['jsEntryNo','jsAccount','jsCreatedBy','jsDescription','jsDateFrom','jsDateTo','jsCreatedFrom','jsCreatedTo','jsAmountFrom','jsAmountTo']
+  ['jsEntryNo','jsAccount','jsCreatedBy','jsDescription','jsDateFrom','jsDateTo','jsCreatedFrom','jsCreatedTo','jsAmountFrom','jsAmountTo','jsStatus','jsCostCenter']
     .forEach(id=>{ const el=document.getElementById(id); if(el) el.value=''; });
+  journalPage=1;
   renderJournal();
 }
 
@@ -787,14 +812,28 @@ function renderJournal(){
 
   if(countEl) countEl.textContent = hasAnyFilter ? `${filtered.length} نتيجة من أصل ${(entries||[]).length}` : '';
 
+  const totalPages=Math.max(1, Math.ceil(filtered.length / JOURNAL_PAGE_SIZE));
+  if(journalPage>totalPages) journalPage=totalPages;
+  if(journalPage<1) journalPage=1;
+  const startIdx=(journalPage-1)*JOURNAL_PAGE_SIZE;
+  const pageItems=filtered.slice(startIdx, startIdx+JOURNAL_PAGE_SIZE);
+
+  renderJournalPagination(filtered.length, totalPages);
+
   if(!filtered.length){body.innerHTML=''; if(empty){empty.style.display='block'; empty.textContent = hasAnyFilter ? 'لا توجد قيود مطابقة لمعايير البحث' : 'لا توجد قيود';} return;}
   if(empty) empty.style.display='none';
-  body.innerHTML=filtered.map(e=>{
+  body.innerHTML=pageItems.map(e=>{
     const lines = (e.lines&&e.lines.length) ? e.lines : [
       ...(e.debit_account?[{account_code:e.debit_account, debit:e.amount, credit:0}]:[]),
       ...(e.credit_account?[{account_code:e.credit_account, debit:0, credit:e.amount}]:[]),
     ];
     const summary = lines.map(l=>`${accountLabel(l.account_code)} <span class="muted">(${l.debit?'مدين':'دائن'})</span>`).join('، ');
+    const status = e.status || 'posted';
+    const statusBadge = status==='cancelled'
+      ? `<span class="badge returned">ملغي</span>`
+      : `<span class="badge posted">مرحّل</span>`;
+    const isManual = e.source_type==='manual';
+    const isCancelled = status==='cancelled';
     return `<tr>
     <td>${e.id||''}</td>
     <td>${e.entry_date||''}</td>
@@ -802,13 +841,54 @@ function renderJournal(){
     <td class="num">${fmt(e.total_amount ?? e.amount)}</td>
     <td>${e.description||''}</td>
     <td>${e.created_by_name||'-'}</td>
-    <td>${e.source_type==='manual'?'يدوي':(e.source_type||'-')}</td>
+    <td>${statusBadge}</td>
     <td>
-      <button class="icon-btn" onclick="viewJournalEntry(${e.id})" title="عرض التفاصيل">👁️</button>
-      <button class="icon-btn del" onclick="deleteEntry(${e.id})" title="حذف">🗑️</button>
+      <div class="row-menu">
+        <button class="row-menu-trigger" title="خيارات القيد" onclick="toggleJournalRowMenu(${e.id}, event)"><span></span><span></span><span></span></button>
+        <div id="jmenu-${e.id}" class="menu-popup" style="display:none">
+          <button onclick="viewJournalEntry(${e.id})"><b>👁</b><span>عرض</span></button>
+          ${isManual && !isCancelled ? `<button onclick="editJournalEntry(${e.id})"><b>✎</b><span>تعديل</span></button>` : ''}
+          <button onclick="duplicateJournalEntry(${e.id})"><b>⧉</b><span>نسخ قيد دوري</span></button>
+          ${isManual ? `<button class="danger" onclick="deleteEntry(${e.id})"><b>🗑</b><span>حذف</span></button>` : ''}
+        </div>
+      </div>
     </td>
   </tr>`;
   }).join('');
+}
+
+function renderJournalPagination(totalCount, totalPages){
+  const box=document.getElementById('journalPagination');
+  if(!box) return;
+  if(totalCount<=0){ box.innerHTML=''; return; }
+  const from=(journalPage-1)*JOURNAL_PAGE_SIZE+1;
+  const to=Math.min(journalPage*JOURNAL_PAGE_SIZE, totalCount);
+  box.innerHTML=`
+    <div class="index-info">عرض ${from}–${to} من ${totalCount}</div>
+    <div class="index-buttons">
+      <button class="index-btn" onclick="goJournalPage(1)" ${journalPage<=1?'disabled':''}>&raquo;</button>
+      <button class="index-btn" onclick="goJournalPage(${journalPage-1})" ${journalPage<=1?'disabled':''}>›</button>
+      <span class="index-info" style="min-width:70px;text-align:center">صفحة ${journalPage} / ${totalPages}</span>
+      <button class="index-btn" onclick="goJournalPage(${journalPage+1})" ${journalPage>=totalPages?'disabled':''}>‹</button>
+      <button class="index-btn" onclick="goJournalPage(${totalPages})" ${journalPage>=totalPages?'disabled':''}>&laquo;</button>
+    </div>`;
+}
+
+function goJournalPage(p){
+  journalPage=p;
+  renderJournal();
+}
+
+function toggleJournalRowMenu(id, ev){
+  if(ev) ev.stopPropagation();
+  const m=document.getElementById('jmenu-'+id);
+  const willOpen = !m || m.style.display==='none';
+  document.querySelectorAll('.menu-popup').forEach(e=>e.style.display='none');
+  document.querySelectorAll('.row-menu-trigger').forEach(b=>b.classList.remove('active'));
+  if(m && willOpen){
+    m.style.display='block';
+    if(ev && ev.currentTarget) ev.currentTarget.classList.add('active');
+  }
 }
 
 // ============================================================
@@ -1085,15 +1165,46 @@ function refreshAccountParents(){
 }
 
 function refreshJournalAccounts(){
+  const dl=document.getElementById('accountsDatalist');
+  if(dl){
+    dl.innerHTML=(accounts||[]).map(acc=>`<option value="${acc.code} — ${acc.name_ar}">`).join('');
+  }
+  const udl=document.getElementById('usersDatalist');
+  if(udl){
+    udl.innerHTML=(appUsers||[]).map(u=>`<option value="${(u.full_name||'').replace(/"/g,'&quot;')}">`).join('');
+  }
+  const ccSelects=document.querySelectorAll('.cost-center-select');
+  ccSelects.forEach(sel=>{
+    const cur=sel.value;
+    const emptyLabel=sel.dataset.emptyLabel || '— بدون مركز تكلفة —';
+    sel.innerHTML=`<option value="">${emptyLabel}</option>`+
+      (costCenters||[]).map(c=>`<option value="${c.code}">${c.code} — ${c.name_ar}</option>`).join('');
+    if(cur) sel.value=cur;
+  });
+  const statusSelects=document.querySelectorAll('.journal-status-filter-select');
+  statusSelects.forEach(sel=>{
+    if(!sel.dataset.filled){
+      sel.innerHTML='<option value="">كل الحالات</option><option value="posted">مرحّل</option><option value="cancelled">ملغي</option>';
+      sel.dataset.filled='1';
+    }
+  });
   renderJLines();
 }
 
 // ============================================================
 // أسطر القيد المحاسبي (دعم عدد غير محدود من الأسطر - مدين/دائن)
+// حقل الحساب مرتبط بدليل الحسابات عبر بحث ذكي (datalist)
 // ============================================================
-function accountOptionsHtml(selected){
-  return '<option value="">— اختر حساب —</option>'+
-    (accounts||[]).map(acc=>`<option value="${acc.code}" ${acc.code===selected?'selected':''}>${acc.code} — ${acc.name_ar}</option>`).join('');
+function resolveAccountCode(rawValue){
+  const v=(rawValue||'').trim();
+  if(!v) return '';
+  const dashIdx=v.indexOf(' — ');
+  const candidate=dashIdx>-1 ? v.slice(0,dashIdx).trim() : v;
+  if((accounts||[]).some(a=>a.code===candidate)) return candidate;
+  // السماح أيضاً بكتابة اسم الحساب مباشرة إن كان مطابقاً بدقة أو بشكل فريد
+  const byName=(accounts||[]).filter(a=>a.name_ar===v || a.name_en===v);
+  if(byName.length===1) return byName[0].code;
+  return '';
 }
 
 function addJLine(){
@@ -1106,6 +1217,18 @@ function removeJLine(id){
   if(jLines.length<=2){alert('يجب أن يحتوي القيد على سطرين على الأقل'); return;}
   jLines=jLines.filter(l=>l.id!==id);
   renderJLines();
+}
+
+function onJLineAccountChange(id, inputEl){
+  const line=jLines.find(l=>l.id===id);
+  if(!line) return;
+  const code=resolveAccountCode(inputEl.value);
+  if(!code && inputEl.value.trim()){
+    inputEl.style.borderColor='var(--coral)';
+  } else {
+    inputEl.style.borderColor='';
+  }
+  line.account_code=code;
 }
 
 function onJLineChange(id, field, value){
@@ -1126,7 +1249,7 @@ function renderJLines(){
   const body=document.getElementById('journalLinesBody');
   if(!body) return;
   body.innerHTML=jLines.map(l=>`<tr>
-    <td><select onchange="onJLineChange(${l.id},'account_code',this.value)">${accountOptionsHtml(l.account_code)}</select></td>
+    <td><input type="text" list="accountsDatalist" placeholder="ابحث بالكود أو اسم الحساب" value="${l.account_code?accountLabel(l.account_code):''}" onchange="onJLineAccountChange(${l.id}, this)"></td>
     <td><input type="text" placeholder="بيان السطر (اختياري)" value="${l.line_description||''}" onchange="onJLineChange(${l.id},'line_description',this.value)"></td>
     <td><input type="number" step="0.01" min="0" value="${l.debit||0}" onchange="onJLineChange(${l.id},'debit',this.value)"></td>
     <td><input type="number" step="0.01" min="0" value="${l.credit||0}" onchange="onJLineChange(${l.id},'credit',this.value)"></td>
@@ -1151,9 +1274,17 @@ function renderJLines(){
 }
 
 function resetJournalForm(){
+  journalEditingId=null;
   jLines=[];
   lineCounter++; jLines.push({id:lineCounter, account_code:'', debit:0, credit:0, line_description:''});
   lineCounter++; jLines.push({id:lineCounter, account_code:'', debit:0, credit:0, line_description:''});
+  const titleEl=document.getElementById('journalFormTitle');
+  if(titleEl) titleEl.textContent='قيد محاسبي جديد';
+  const submitBtn=document.getElementById('jSubmitBtn');
+  if(submitBtn) submitBtn.textContent='ترحيل القيد';
+  const ccSel=document.getElementById('jCostCenter'); if(ccSel) ccSel.value='';
+  const cb=document.getElementById('jCreatedBy'); if(cb) cb.value='';
+  const dateEl=document.getElementById('jDate'); if(dateEl) dateEl.value='';
   renderJLines();
 }
 
@@ -1274,11 +1405,12 @@ async function submitEntry(){
   const entry_date=document.getElementById('jDate').value;
   const description=document.getElementById('jDesc').value.trim();
   const created_by_name=document.getElementById('jCreatedBy')?.value.trim() || null;
+  const cost_center_code=document.getElementById('jCostCenter')?.value || null;
   const err=document.getElementById('jErr');
 
   const validLines=jLines.filter(l=>l.account_code && ((l.debit||0)>0 || (l.credit||0)>0));
   if(!entry_date){err.textContent='يرجى إدخال تاريخ القيد'; return;}
-  if(validLines.length<2){err.textContent='يرجى إدخال سطرين على الأقل، كل سطر بحساب ومبلغ'; return;}
+  if(validLines.length<2){err.textContent='يرجى إدخال سطرين على الأقل، كل سطر بحساب صحيح ومبلغ'; return;}
 
   const totalDebit=validLines.reduce((s,l)=>s+(parseFloat(l.debit)||0),0);
   const totalCredit=validLines.reduce((s,l)=>s+(parseFloat(l.credit)||0),0);
@@ -1286,15 +1418,58 @@ async function submitEntry(){
   if(totalDebit<=0){err.textContent='لا يمكن ترحيل قيد بإجمالي صفر'; return;}
 
   err.textContent='';
+  const payload={
+    entry_date, description, created_by_name, cost_center_code,
+    lines: validLines.map(l=>({account_code:l.account_code, debit:l.debit||0, credit:l.credit||0, line_description:l.line_description||null}))
+  };
   try{
-    await api('POST','/api/journal',{
-      entry_date, description, created_by_name,
-      lines: validLines.map(l=>({account_code:l.account_code, debit:l.debit||0, credit:l.credit||0, line_description:l.line_description||null}))
-    });
+    if(journalEditingId){
+      await api('PUT',`/api/journal/${journalEditingId}`,payload);
+    } else {
+      await api('POST','/api/journal',payload);
+    }
     await loadAll();
     document.getElementById('jDesc').value='';
     resetJournalForm();
+    if(typeof openSubModule==='function') openSubModule('القيود اليومية');
   }catch(e){err.textContent=e.message;}
+}
+
+function loadEntryIntoForm(id){
+  const e=(entries||[]).find(x=>x.id===id);
+  if(!e) return null;
+  const lines=(e.lines&&e.lines.length) ? e.lines : [
+    ...(e.debit_account?[{account_code:e.debit_account, debit:e.amount, credit:0, line_description:e.description}]:[]),
+    ...(e.credit_account?[{account_code:e.credit_account, debit:0, credit:e.amount, line_description:e.description}]:[]),
+  ];
+  jLines=lines.map(l=>{ lineCounter++; return {id:lineCounter, account_code:l.account_code, debit:l.debit||0, credit:l.credit||0, line_description:l.line_description||''}; });
+  document.getElementById('jDate').value=e.entry_date||'';
+  document.getElementById('jDesc').value=e.description||'';
+  const cb=document.getElementById('jCreatedBy'); if(cb) cb.value=e.created_by_name||'';
+  const ccSel=document.getElementById('jCostCenter'); if(ccSel) ccSel.value=e.cost_center_code||'';
+  renderJLines();
+  return e;
+}
+
+function editJournalEntry(id){
+  const e=loadEntryIntoForm(id);
+  if(!e) return;
+  if(e.source_type!=='manual'){ alert('لا يمكن تعديل قيد مُولَّد تلقائياً من عملية أخرى'); return; }
+  if(e.status==='cancelled'){ alert('لا يمكن تعديل قيد ملغى'); return; }
+  journalEditingId=id;
+  const titleEl=document.getElementById('journalFormTitle'); if(titleEl) titleEl.textContent=`تعديل القيد #${id}`;
+  const submitBtn=document.getElementById('jSubmitBtn'); if(submitBtn) submitBtn.textContent='حفظ التعديلات';
+  if(typeof openSubModule==='function') openSubModule('إضافة قيد');
+}
+
+function duplicateJournalEntry(id){
+  const e=loadEntryIntoForm(id);
+  if(!e) return;
+  journalEditingId=null;
+  document.getElementById('jDate').value=new Date().toISOString().slice(0,10);
+  const titleEl=document.getElementById('journalFormTitle'); if(titleEl) titleEl.textContent='نسخ قيد دوري (قيد جديد)';
+  const submitBtn=document.getElementById('jSubmitBtn'); if(submitBtn) submitBtn.textContent='ترحيل القيد';
+  if(typeof openSubModule==='function') openSubModule('إضافة قيد');
 }
 
 async function deleteEntry(id){

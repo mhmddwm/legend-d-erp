@@ -35,6 +35,22 @@ class AccountOut(BaseModel):
         from_attributes = True
 
 
+class CostCenterIn(BaseModel):
+    code: str
+    name_ar: str
+    name_en: Optional[str] = None
+
+
+class CostCenterOut(BaseModel):
+    code: str
+    name_ar: str
+    name_en: Optional[str] = None
+    is_active: bool
+
+    class Config:
+        from_attributes = True
+
+
 class JournalEntryLineIn(BaseModel):
     account_code: str
     debit: float = Field(default=0, ge=0)
@@ -55,24 +71,28 @@ class JournalEntryLineOut(BaseModel):
 
 class JournalEntryIn(BaseModel):
     entry_date: date
-    debit_account: str
-    credit_account: str
-    amount: float = Field(gt=0)
     description: Optional[str] = None
     created_by_name: Optional[str] = None
+    cost_center_code: Optional[str] = None
+    lines: list[JournalEntryLineIn] = Field(min_length=2)
 
 
 class JournalEntryOut(BaseModel):
     id: int
     entry_date: date
-    debit_account: str
-    credit_account: str
-    amount: float
     description: Optional[str] = None
     source_type: str
     source_ref: Optional[str] = None
     created_by_name: Optional[str] = None
     created_at: Optional[datetime] = None
+    total_amount: Optional[float] = None
+    status: str = "posted"
+    cost_center_code: Optional[str] = None
+    # تبقى للتوافق مع القيود القديمة/البسيطة (سطرين فقط)
+    debit_account: Optional[str] = None
+    credit_account: Optional[str] = None
+    amount: Optional[float] = None
+    lines: list[JournalEntryLineOut] = []
 
     class Config:
         from_attributes = True

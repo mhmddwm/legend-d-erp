@@ -1448,10 +1448,11 @@ html[dir="ltr"] .brand-center{direction:ltr;}
   <!-- ========== JOURNAL ENTRY ========== -->
   <div class="panel" id="panel-entry">
     <div class="formcard journal-modern-form">
-      <h3>قيد محاسبي جديد</h3>
-      <div class="frow two">
+      <h3 id="journalFormTitle">قيد محاسبي جديد</h3>
+      <div class="frow">
         <div class="field"><label>التاريخ</label><input id="jDate" type="date"></div>
-        <div class="field"><label>منشئ القيد</label><input id="jCreatedBy" placeholder="اسمك (اختياري)"></div>
+        <div class="field"><label>منشئ القيد</label><input id="jCreatedBy" list="usersDatalist" placeholder="اختر أو اكتب اسم المستخدم"></div>
+        <div class="field"><label>مركز التكلفة</label><select id="jCostCenter" class="cost-center-select"><option value="">— بدون مركز تكلفة —</option></select></div>
       </div>
       <div class="frow" style="grid-template-columns:1fr">
         <div class="field"><label>البيان العام للقيد</label><input id="jDesc" placeholder="وصف عام للقيد (اختياري)"></div>
@@ -1472,12 +1473,15 @@ html[dir="ltr"] .brand-center{direction:ltr;}
       </div>
 
       <button class="btn" id="jSubmitBtn" onclick="submitEntry()">ترحيل القيد</button>
+      <button class="btn secondary" type="button" onclick="resetJournalForm()">إلغاء / قيد جديد</button>
       <div class="err" id="jErr"></div>
     </div>
   </div>
 
   <!-- ========== JOURNAL LIST + SEARCH ========== -->
   <div class="panel" id="panel-journal">
+    <datalist id="accountsDatalist"></datalist>
+    <datalist id="usersDatalist"></datalist>
     <div class="formcard journal-modern-form" id="journalSearchCard">
       <div class="jsearch-head" onclick="toggleJournalSearch()">
         <h3 style="margin:0">🔍 بحث في القيود</h3>
@@ -1486,19 +1490,39 @@ html[dir="ltr"] .brand-center{direction:ltr;}
       <div id="journalSearchBody">
         <div class="jsearch-grid">
           <div class="field"><label>رقم القيد</label><input id="jsEntryNo" type="number" oninput="applyJournalSearch()" placeholder="مثال: 12"></div>
-          <div class="field"><label>اسم / كود الحساب</label><input id="jsAccount" oninput="applyJournalSearch()" placeholder="مدين أو دائن"></div>
-          <div class="field"><label>منشئ القيد</label><input id="jsCreatedBy" oninput="applyJournalSearch()" placeholder="اسم المنشئ"></div>
+          <div class="field"><label>اسم / كود الحساب</label><input id="jsAccount" list="accountsDatalist" oninput="applyJournalSearch()" placeholder="ابحث بالكود أو الاسم"></div>
+          <div class="field"><label>منشئ القيد</label><input id="jsCreatedBy" list="usersDatalist" oninput="applyJournalSearch()" placeholder="اسم المنشئ"></div>
           <div class="field"><label>وصف القيد</label><input id="jsDescription" oninput="applyJournalSearch()" placeholder="بحث بالبيان"></div>
         </div>
         <div class="jsearch-grid">
-          <div class="field"><label>تاريخ القيد من</label><input id="jsDateFrom" type="date" oninput="applyJournalSearch()"></div>
-          <div class="field"><label>تاريخ القيد إلى</label><input id="jsDateTo" type="date" oninput="applyJournalSearch()"></div>
-          <div class="field"><label>تاريخ الإنشاء من</label><input id="jsCreatedFrom" type="date" oninput="applyJournalSearch()"></div>
-          <div class="field"><label>تاريخ الإنشاء إلى</label><input id="jsCreatedTo" type="date" oninput="applyJournalSearch()"></div>
+          <div class="field jrange-field">
+            <label>تاريخ القيد</label>
+            <div class="jrange-row">
+              <input id="jsDateFrom" type="date" oninput="applyJournalSearch()">
+              <span class="jrange-sep">إلى</span>
+              <input id="jsDateTo" type="date" oninput="applyJournalSearch()">
+            </div>
+          </div>
+          <div class="field jrange-field">
+            <label>تاريخ الإنشاء</label>
+            <div class="jrange-row">
+              <input id="jsCreatedFrom" type="date" oninput="applyJournalSearch()">
+              <span class="jrange-sep">إلى</span>
+              <input id="jsCreatedTo" type="date" oninput="applyJournalSearch()">
+            </div>
+          </div>
+          <div class="field"><label>حالة القيد</label><select id="jsStatus" class="journal-status-filter-select" onchange="applyJournalSearch()"><option value="">كل الحالات</option><option value="posted">مرحّل</option><option value="cancelled">ملغي</option></select></div>
+          <div class="field"><label>مركز التكلفة</label><select id="jsCostCenter" class="cost-center-select" data-empty-label="كل مراكز التكلفة" onchange="applyJournalSearch()"><option value="">كل مراكز التكلفة</option></select></div>
         </div>
         <div class="jsearch-grid">
-          <div class="field"><label>المبلغ من</label><input id="jsAmountFrom" type="number" step="0.01" oninput="applyJournalSearch()"></div>
-          <div class="field"><label>المبلغ إلى</label><input id="jsAmountTo" type="number" step="0.01" oninput="applyJournalSearch()"></div>
+          <div class="field jrange-field">
+            <label>المبلغ</label>
+            <div class="jrange-row">
+              <input id="jsAmountFrom" type="number" step="0.01" placeholder="من" oninput="applyJournalSearch()">
+              <span class="jrange-sep">إلى</span>
+              <input id="jsAmountTo" type="number" step="0.01" placeholder="إلى" oninput="applyJournalSearch()">
+            </div>
+          </div>
           <div class="field" style="align-self:flex-end;display:flex;gap:8px;flex-direction:row">
             <button class="btn" onclick="applyJournalSearch()">🔍 بحث</button>
             <button class="btn secondary" onclick="clearJournalSearch()">مسح الفلاتر</button>
@@ -1511,10 +1535,11 @@ html[dir="ltr"] .brand-center{direction:ltr;}
     </div>
     <div class="gridcard"><div class="scrollx">
       <table class="grid">
-        <thead><tr><th>#</th><th>التاريخ</th><th>الحسابات</th><th>الإجمالي</th><th>البيان</th><th>منشئ القيد</th><th>المصدر</th><th></th></tr></thead>
+        <thead><tr><th>#</th><th>التاريخ</th><th>الحسابات</th><th>الإجمالي</th><th>البيان</th><th>منشئ القيد</th><th>الحالة</th><th></th></tr></thead>
         <tbody id="journalBody"></tbody>
       </table>
       <div class="empty-msg" id="journalEmpty" style="display:none">لا توجد قيود مطابقة</div>
+      <div class="index-toolbar" id="journalPagination"></div>
     </div></div>
   </div>
 
@@ -1522,6 +1547,11 @@ html[dir="ltr"] .brand-center{direction:ltr;}
     .jsearch-head{display:flex;align-items:center;justify-content:space-between;cursor:pointer;user-select:none}
     .jsearch-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:12px}
     @media (max-width:900px){.jsearch-grid{grid-template-columns:repeat(2,1fr)}}
+    .jrange-row{display:flex;align-items:center;gap:8px;background:var(--bg-card-2);border:1.5px solid var(--line);border-radius:10px;padding:4px 8px;}
+    .jrange-row input{border:none!important;background:transparent!important;padding:6px 4px!important;flex:1;min-width:0;}
+    .jrange-row input:focus{box-shadow:none!important;}
+    .jrange-row .jrange-sep{font-size:11.5px;color:var(--muted);font-weight:700;white-space:nowrap;}
+    .jrange-field:focus-within .jrange-row{border-color:var(--accent);box-shadow:0 0 0 3px rgba(21,101,192,.1);}
 
     /* ===== تصميم حديث لشاشة القيود (إنشاء + بحث) ===== */
     .journal-modern-form{border-radius:20px;border:1px solid #e2ebf6;background:linear-gradient(135deg,#fff,#f8fbff);box-shadow:0 10px 28px rgba(15,39,70,.05);}
