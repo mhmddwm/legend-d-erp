@@ -12,7 +12,8 @@ from app.routers import (
     localization,
     users,
     warehouse,
-    warehouse_locations
+    warehouse_locations,
+    branches  # تم إضافة branches هنا
 )
 
 app = FastAPI(
@@ -40,6 +41,10 @@ app.include_router(localization.router)
 app.include_router(accounting.router)
 app.include_router(accounting.journal_router)
 app.include_router(accounting.cost_center_router)
+
+
+# Branches (تم إضافة مسار الفروع)
+app.include_router(branches.router)
 
 
 # Inventory
