@@ -151,7 +151,10 @@ accounts = await safeLoad(
 "الحسابات",
 "/api/accounts"
 );
-
+branches = await safeLoad(
+  "الفروع",
+ "/api/branches"
+);
 
 entries = await safeLoad(
 "القيود",
@@ -319,6 +322,8 @@ function renderAll(){
   renderJournal();
   if(!jLines.length) resetJournalForm();
   refreshJournalAccounts();
+  // أضف هذا السطر هنا لتحديث قائمة الفروع في القوائم المنسدلة
+  if(typeof refreshBranchDropdowns === 'function') refreshBranchDropdowns();
 
   renderItems();
   openCategories();
@@ -824,38 +829,43 @@ function renderJournal(){
 
   if(!filtered.length){body.innerHTML=''; if(empty){empty.style.display='block'; empty.textContent = hasAnyFilter ? 'لا توجد قيود مطابقة لمعايير البحث' : 'لا توجد قيود';} return;}
   if(empty) empty.style.display='none';
+  
   body.innerHTML=pageItems.map(e=>{
+    // إضافة منطق جلب اسم الفرع
+    const branchObj = (branches || []).find(b => b.id == e.branch_id);
+    const branchName = branchObj ? `${branchObj.code} - ${branchObj.name_ar}` : 'عام';
+
     const lines = (e.lines&&e.lines.length) ? e.lines : [
       ...(e.debit_account?[{account_code:e.debit_account, debit:e.amount, credit:0}]:[]),
       ...(e.credit_account?[{account_code:e.credit_account, debit:0, credit:e.amount}]:[]),
     ];
     const summary = lines.map(l=>`${accountLabel(l.account_code)} <span class="muted">(${l.debit?'مدين':'دائن'})</span>`).join('، ');
     const status = e.status || 'posted';
-    const statusBadge = status==='cancelled'
-      ? `<span class="badge returned">ملغي</span>`
-      : `<span class="badge posted">مرحّل</span>`;
+    const statusBadge = status==='cancelled' ? `<span class="badge returned">ملغي</span>` : `<span class="badge posted">مرحّل</span>`;
     const isManual = e.source_type==='manual';
     const isCancelled = status==='cancelled';
+    
     return `<tr>
-    <td>${e.id||''}</td>
-    <td>${e.entry_date||''}</td>
-    <td>${summary || '-'}</td>
-    <td class="num">${fmt(e.total_amount ?? e.amount)}</td>
-    <td>${e.description||''}</td>
-    <td>${e.created_by_name||'-'}</td>
-    <td>${statusBadge}</td>
-    <td>
-      <div class="row-menu">
-        <button class="row-menu-trigger" title="خيارات القيد" onclick="toggleJournalRowMenu(${e.id}, event)"><span></span><span></span><span></span></button>
-        <div id="jmenu-${e.id}" class="menu-popup" style="display:none">
-          <button onclick="viewJournalEntry(${e.id})"><b>👁</b><span>عرض</span></button>
-          ${isManual && !isCancelled ? `<button onclick="editJournalEntry(${e.id})"><b>✎</b><span>تعديل</span></button>` : ''}
-          <button onclick="duplicateJournalEntry(${e.id})"><b>⧉</b><span>نسخ قيد دوري</span></button>
-          ${isManual ? `<button class="danger" onclick="deleteEntry(${e.id})"><b>🗑</b><span>حذف</span></button>` : ''}
+      <td>${e.id||''}</td>
+      <td>${e.entry_date||''}</td>
+      <td>${branchName}</td> <!-- تم إضافة العمود الجديد هنا -->
+      <td>${summary || '-'}</td>
+      <td class="num">${fmt(e.total_amount ?? e.amount)}</td>
+      <td>${e.description||''}</td>
+      <td>${e.created_by_name||'-'}</td>
+      <td>${statusBadge}</td>
+      <td>
+        <div class="row-menu">
+          <button class="row-menu-trigger" title="خيارات القيد" onclick="toggleJournalRowMenu(${e.id}, event)"><span></span><span></span><span></span></button>
+          <div id="jmenu-${e.id}" class="menu-popup" style="display:none">
+            <button onclick="viewJournalEntry(${e.id})"><b>👁</b><span>عرض</span></button>
+            ${isManual && !isCancelled ? `<button onclick="editJournalEntry(${e.id})"><b>✎</b><span>تعديل</span></button>` : ''}
+            <button onclick="duplicateJournalEntry(${e.id})"><b>⧉</b><span>نسخ قيد دوري</span></button>
+            ${isManual ? `<button class="danger" onclick="deleteEntry(${e.id})"><b>🗑</b><span>حذف</span></button>` : ''}
+          </div>
         </div>
-      </div>
-    </td>
-  </tr>`;
+      </td>
+    </tr>`;
   }).join('');
 }
 
