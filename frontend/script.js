@@ -17,11 +17,13 @@ const TYPE_LABELS = {
 };
 
 // ============================================================
+// ============================================================
 // المتغيرات العامة
 // ============================================================
 let accounts=[], entries=[], items=[], stockMoves=[];
 let suppliers=[], purchaseOrders=[], grns=[], invoices=[], returns_=[];
 let warehouses=[], stockIssueRequests=[], stockTransfersList=[], warehouseStockBalances=[];
+let branches=[]; // إضافة قائمة الفروع
 let poLines=[], grnLines=[], prtCurrentLines=[];
 let jLines=[]; // أسطر القيد المحاسبي الجديد (مدين/دائن متعدد الأسطر)
 let lineCounter=0;

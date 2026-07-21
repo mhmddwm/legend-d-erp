@@ -4,7 +4,16 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import relationship
 from app.database import Base
-
+# ================= BRANCHES =================
+class Branch(Base):
+    __tablename__ = "branches"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    code = Column(String(20), unique=True, nullable=False)
+    name_ar = Column(String(200), nullable=False)
+    name_en = Column(String(200))
+    is_active = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 class Account(Base):
     __tablename__ = "accounts"
@@ -32,21 +41,16 @@ class Account(Base):
     )
 
 
-class CostCenter(Base):
-    __tablename__ = "cost_centers"
-
-    code = Column(String(20), primary_key=True)
-    name_ar = Column(String(200), nullable=False)
-    name_en = Column(String(200))
-    is_active = Column(Boolean, nullable=False, default=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-
-
 class JournalEntry(Base):
     __tablename__ = "journal_entries"
 
     id = Column(Integer, primary_key=True)
     entry_date = Column(Date, nullable=False)
+
+    # --- التعديل يبدأ هنا ---
+    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=True)
+    branch = relationship("Branch")
+    # --- التعديل ينتهي هنا ---
 
     # حقول تراثية (كانت تُستخدم قبل دعم الأسطر المتعددة) — تبقى موجودة
     # لتوافق البيانات القديمة، لكنها لم تعد تُستخدم للقيود الجديدة.
@@ -55,7 +59,8 @@ class JournalEntry(Base):
         ForeignKey("accounts.code"),
         nullable=True
     )
-
+    
+    # ... (بقية الحقول كما هي)
     credit_account = Column(
         String(20),
         ForeignKey("accounts.code"),
@@ -72,10 +77,6 @@ class JournalEntry(Base):
     created_by_name = Column(String(100))
     source_ref = Column(String(30))
 
-    # حالة القيد: posted (مرحّل) / cancelled (ملغي)
-    status = Column(String(20), nullable=False, default="posted")
-    cost_center_code = Column(String(20), ForeignKey("cost_centers.code"), nullable=True)
-
     created_at = Column(
         DateTime(timezone=True),
         server_default=func.now()
@@ -87,8 +88,6 @@ class JournalEntry(Base):
         cascade="all, delete-orphan",
         order_by="JournalEntryLine.line_no"
     )
-
-    cost_center = relationship("CostCenter")
 
     __table_args__ = (
         CheckConstraint(
