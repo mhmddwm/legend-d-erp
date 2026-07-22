@@ -74,6 +74,7 @@ class JournalEntryIn(BaseModel):
     description: Optional[str] = None
     created_by_name: Optional[str] = None
     cost_center_code: Optional[str] = None
+    branch_id: Optional[int] = None
     lines: list[JournalEntryLineIn] = Field(min_length=2)
 
 
@@ -85,13 +86,10 @@ class JournalEntryOut(BaseModel):
     source_ref: Optional[str] = None
     created_by_name: Optional[str] = None
     created_at: Optional[datetime] = None
-    total_amount: Optional[float] = None
     status: str = "posted"
     cost_center_code: Optional[str] = None
-    # تبقى للتوافق مع القيود القديمة/البسيطة (سطرين فقط)
-    debit_account: Optional[str] = None
-    credit_account: Optional[str] = None
-    amount: Optional[float] = None
+    branch_id: Optional[int] = None
+    total_amount: float = 0
     lines: list[JournalEntryLineOut] = []
 
     class Config:

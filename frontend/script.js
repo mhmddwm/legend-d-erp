@@ -564,12 +564,162 @@ async function deleteWarehouse(id){
 // ============================================================
 // دليل الحسابات المحدث والمصحح
 // ============================================================
+// ============================================================
+// الشاشة الجانبية لدليل الحسابات: دروب ليست الفروع + شجرة قابلة للطي + بحث ذكي
+// ============================================================
+let coaExpandedCodes = new Set();
+
+function whEscCoa(s){
+  return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function renderCoaBranchOptions(){
+  const sel = document.getElementById('coaBranchFilter');
+  if(!sel) return;
+  const current = sel.value;
+  const list = branches || [];
+  sel.innerHTML = '<option value="">كل الفروع</option>' +
+    list.map(b=>`<option value="${b.id}">${whEscCoa(b.code)} — ${whEscCoa(b.name_ar)}</option>`).join('');
+  sel.value = current;
+}
+
+function renderJournalEntryBranchOptions(){
+  const sel = document.getElementById('jBranch');
+  if(!sel) return;
+  const current = sel.value;
+  const list = branches || [];
+  sel.innerHTML = '<option value="">— بدون فرع محدد —</option>' +
+    list.map(b=>`<option value="${b.id}">${whEscCoa(b.code)} — ${whEscCoa(b.name_ar)}</option>`).join('');
+  sel.value = current;
+}
+
+async function onCoaBranchChange(){
+  const branchId = document.getElementById('coaBranchFilter')?.value || '';
+  try{
+    const qs = branchId ? `?branch_id=${encodeURIComponent(branchId)}` : '';
+    const fresh = await api('GET', `/api/accounts${qs}`);
+    const balanceByCode = {};
+    fresh.forEach(a=>{ balanceByCode[a.code] = a.balance; });
+    accounts = (accounts||[]).map(a=>
+      balanceByCode[a.code] !== undefined ? Object.assign({}, a, {balance: balanceByCode[a.code]}) : a
+    );
+    renderTree();
+  }catch(e){
+    alert('تعذر تحميل أرصدة الفرع المحدد: ' + e.message);
+  }
+}
+
+function buildCoaTree(filterText){
+  const list = accounts || [];
+  const term = (filterText||'').trim().toLowerCase();
+
+  let directMatches = null;
+  if(term){
+    directMatches = new Set(
+      list.filter(a =>
+        String(a.code||'').toLowerCase().includes(term) ||
+        String(a.name_ar||'').toLowerCase().includes(term) ||
+        String(a.name_en||'').toLowerCase().includes(term)
+      ).map(a=>a.code)
+    );
+  }
+
+  let visibleCodes = null;
+  if(directMatches){
+    visibleCodes = new Set(directMatches);
+    const byCode = {};
+    list.forEach(a=>{ byCode[a.code] = a; });
+    directMatches.forEach(code=>{
+      let cur = byCode[code];
+      while(cur && cur.parent_code){
+        visibleCodes.add(cur.parent_code);
+        cur = byCode[cur.parent_code];
+      }
+    });
+  }
+
+  function buildLevel(parentCode, level){
+    return list
+      .filter(a => String(a.parent_code||'') === String(parentCode||''))
+      .filter(a => !visibleCodes || visibleCodes.has(a.code))
+      .sort((a,b)=> String(a.code).localeCompare(String(b.code), undefined, {numeric:true}))
+      .map(a=>{
+        const children = buildLevel(a.code, level+1);
+        return {
+          acc: a, level, children,
+          hasChildren: children.length > 0,
+          isMatch: !!(directMatches && directMatches.has(a.code)),
+        };
+      });
+  }
+
+  return { tree: buildLevel(null, 0), searching: !!term };
+}
+
+function renderCoaSidebar(){
+  const box = document.getElementById('coaSidebarTree');
+  if(!box) return;
+
+  const term = document.getElementById('coaTreeSearch')?.value || '';
+  const { tree, searching } = buildCoaTree(term);
+
+  function renderNode(node){
+    const { acc, level, children, hasChildren, isMatch } = node;
+    const expanded = searching ? true : coaExpandedCodes.has(acc.code);
+    const levelClass = level === 0 ? 'coa-node-main' : 'coa-node-sub';
+    let html = `<div class="coa-node ${levelClass}">`;
+    html += `<span class="coa-toggle" onclick="toggleCoaNode('${acc.code}')">${hasChildren ? (expanded ? '▾' : '▸') : ''}</span>`;
+    html += `<span class="coa-node-label ${isMatch ? 'coa-node-hit' : ''}" onclick="focusAccountRow('${acc.code}')" title="${whEscCoa(acc.name_ar)}">${whEscCoa(acc.code)} — ${whEscCoa(acc.name_ar)}</span>`;
+    html += `</div>`;
+    if(hasChildren && expanded){
+      html += `<div class="coa-children">` + children.map(renderNode).join('') + `</div>`;
+    }
+    return html;
+  }
+
+  box.innerHTML = tree.length
+    ? tree.map(renderNode).join('')
+    : `<div class="hint" style="padding:14px;text-align:center">لا توجد نتائج مطابقة</div>`;
+}
+
+function toggleCoaNode(code){
+  if(coaExpandedCodes.has(code)) coaExpandedCodes.delete(code);
+  else coaExpandedCodes.add(code);
+  renderCoaSidebar();
+}
+
+function focusAccountRow(code){
+  const escaped = (window.CSS && CSS.escape) ? CSS.escape(String(code)) : String(code);
+  const row = document.querySelector(`#accBody tr[data-code="${escaped}"]`);
+  if(!row) return;
+
+  // افتح كل الآباء بالجدول الرئيسي حتى يظهر الصف المطلوب (يعتمد على toggleAccountChildren الموجودة أصلاً)
+  let parentCode = row.dataset.parent;
+  while(parentCode){
+    const parentRow = document.querySelector(`#accBody tr[data-code="${(window.CSS && CSS.escape) ? CSS.escape(String(parentCode)) : parentCode}"]`);
+    if(!parentRow) break;
+    const arrow = parentRow.querySelector('.account-arrow');
+    if(arrow && !arrow.classList.contains('open')){
+      toggleAccountChildren(parentCode, arrow);
+    }
+    parentCode = parentRow.dataset.parent;
+  }
+
+  row.scrollIntoView({behavior:'smooth', block:'center'});
+  row.classList.remove('coa-row-flash');
+  void row.offsetWidth; // إعادة تشغيل الأنيميشن لو كان الصف نفسه مُختاراً سابقاً
+  row.classList.add('coa-row-flash');
+}
+
 function renderTree() {
   const body = document.getElementById('accBody');
   const empty = document.getElementById('accEmpty');
   
   if (!body) return;
   body.innerHTML = ''; // تنظيف الجدول
+
+  renderCoaBranchOptions();
+  renderCoaSidebar();
 
   if (!accounts || accounts.length === 0) {
     if (empty) empty.style.display = 'block';
@@ -812,6 +962,8 @@ function renderJournal(){
   const empty=document.getElementById('journalEmpty');
   const countEl=document.getElementById('journalResultsCount');
   if(!body) return;
+
+  renderJournalEntryBranchOptions();
 
   const filters = readJournalFilters();
   const hasAnyFilter = Object.values(filters).some(v=>v!=='' && v!==null);
@@ -1257,10 +1409,56 @@ function onJLineChange(id, field, value){
   renderJLines();
 }
 
+let draggedLineId = null;
+
+function onLineDragStart(id, ev){
+  draggedLineId = id;
+  ev.dataTransfer.effectAllowed = 'move';
+  try{ ev.dataTransfer.setData('text/plain', String(id)); }catch(e){}
+  ev.currentTarget.classList.add('jline-dragging');
+}
+
+function onLineDragEnd(ev){
+  ev.currentTarget.classList.remove('jline-dragging');
+  document.querySelectorAll('.jline-row').forEach(r=>r.classList.remove('jline-drop-target'));
+  draggedLineId = null;
+}
+
+function onLineDragOver(ev){
+  ev.preventDefault();
+  ev.dataTransfer.dropEffect = 'move';
+  ev.currentTarget.classList.add('jline-drop-target');
+}
+
+function onLineDragLeave(ev){
+  ev.currentTarget.classList.remove('jline-drop-target');
+}
+
+function onLineDrop(targetId, ev){
+  ev.preventDefault();
+  ev.currentTarget.classList.remove('jline-drop-target');
+  if(draggedLineId === null || draggedLineId === targetId) return;
+
+  const fromIdx = jLines.findIndex(l=>l.id === draggedLineId);
+  const toIdx = jLines.findIndex(l=>l.id === targetId);
+  if(fromIdx === -1 || toIdx === -1) return;
+
+  const [moved] = jLines.splice(fromIdx, 1);
+  jLines.splice(toIdx, 0, moved);
+  draggedLineId = null;
+  renderJLines();
+}
+
 function renderJLines(){
   const body=document.getElementById('journalLinesBody');
   if(!body) return;
-  body.innerHTML=jLines.map(l=>`<tr>
+  body.innerHTML=jLines.map(l=>`<tr class="jline-row" draggable="true"
+      ondragstart="onLineDragStart(${l.id}, event)"
+      ondragend="onLineDragEnd(event)"
+      ondragover="onLineDragOver(event)"
+      ondragleave="onLineDragLeave(event)"
+      ondrop="onLineDrop(${l.id}, event)">
+    <td class="jline-handle" title="اسحب لتغيير الترتيب">⠿⠿</td>
     <td><input type="text" list="accountsDatalist" placeholder="ابحث بالكود أو اسم الحساب" value="${l.account_code?accountLabel(l.account_code):''}" onchange="onJLineAccountChange(${l.id}, this)"></td>
     <td><input type="text" placeholder="بيان السطر (اختياري)" value="${l.line_description||''}" onchange="onJLineChange(${l.id},'line_description',this.value)"></td>
     <td><input type="number" step="0.01" min="0" value="${l.debit||0}" onchange="onJLineChange(${l.id},'debit',this.value)"></td>
@@ -1295,6 +1493,7 @@ function resetJournalForm(){
   const submitBtn=document.getElementById('jSubmitBtn');
   if(submitBtn) submitBtn.textContent='ترحيل القيد';
   const ccSel=document.getElementById('jCostCenter'); if(ccSel) ccSel.value='';
+  const brSel=document.getElementById('jBranch'); if(brSel) brSel.value='';
   const cb=document.getElementById('jCreatedBy'); if(cb) cb.value='';
   const dateEl=document.getElementById('jDate'); if(dateEl) dateEl.value='';
   renderJLines();
@@ -1418,6 +1617,8 @@ async function submitEntry(){
   const description=document.getElementById('jDesc').value.trim();
   const created_by_name=document.getElementById('jCreatedBy')?.value.trim() || null;
   const cost_center_code=document.getElementById('jCostCenter')?.value || null;
+  const branchVal=document.getElementById('jBranch')?.value || '';
+  const branch_id=branchVal ? parseInt(branchVal,10) : null;
   const err=document.getElementById('jErr');
 
   const validLines=jLines.filter(l=>l.account_code && ((l.debit||0)>0 || (l.credit||0)>0));
@@ -1431,7 +1632,7 @@ async function submitEntry(){
 
   err.textContent='';
   const payload={
-    entry_date, description, created_by_name, cost_center_code,
+    entry_date, description, created_by_name, cost_center_code, branch_id,
     lines: validLines.map(l=>({account_code:l.account_code, debit:l.debit||0, credit:l.credit||0, line_description:l.line_description||null}))
   };
   try{
@@ -1459,6 +1660,7 @@ function loadEntryIntoForm(id){
   document.getElementById('jDesc').value=e.description||'';
   const cb=document.getElementById('jCreatedBy'); if(cb) cb.value=e.created_by_name||'';
   const ccSel=document.getElementById('jCostCenter'); if(ccSel) ccSel.value=e.cost_center_code||'';
+  const brSel=document.getElementById('jBranch'); if(brSel) brSel.value=e.branch_id||'';
   renderJLines();
   return e;
 }

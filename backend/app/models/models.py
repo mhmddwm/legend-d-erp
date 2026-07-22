@@ -41,41 +41,43 @@ class Account(Base):
     )
 
 
+class CostCenter(Base):
+    __tablename__ = "cost_centers"
+
+    code = Column(String(20), primary_key=True)
+    name_ar = Column(String(200), nullable=False)
+    name_en = Column(String(200))
+    is_active = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
 class JournalEntry(Base):
+    """رأس القيد المحاسبي — قيد مركب: يحتوي على سطرين أو أكثر عبر JournalEntryLine.
+    كل سطر إما مدين أو دائن (وليس كلاهما)، ويجب أن يتوازن إجمالي المدين مع
+    إجمالي الدائن عبر كل الأسطر."""
     __tablename__ = "journal_entries"
 
     id = Column(Integer, primary_key=True)
     entry_date = Column(Date, nullable=False)
 
-    # --- التعديل يبدأ هنا ---
     branch_id = Column(Integer, ForeignKey("branches.id"), nullable=True)
     branch = relationship("Branch")
-    # --- التعديل ينتهي هنا ---
-
-    # حقول تراثية (كانت تُستخدم قبل دعم الأسطر المتعددة) — تبقى موجودة
-    # لتوافق البيانات القديمة، لكنها لم تعد تُستخدم للقيود الجديدة.
-    debit_account = Column(
-        String(20),
-        ForeignKey("accounts.code"),
-        nullable=True
-    )
-    
-    # ... (بقية الحقول كما هي)
-    credit_account = Column(
-        String(20),
-        ForeignKey("accounts.code"),
-        nullable=True
-    )
-
-    amount = Column(Numeric(18, 2), nullable=True)
-
-    # إجمالي القيد (= مجموع مدين الأسطر = مجموع دائن الأسطر)
-    total_amount = Column(Numeric(18, 2), nullable=True)
 
     description = Column(String)
     source_type = Column(String(30), default="manual")
     created_by_name = Column(String(100))
     source_ref = Column(String(30))
+
+    status = Column(String(20), nullable=False, default="posted")
+    cost_center_code = Column(String(20), ForeignKey("cost_centers.code"), nullable=True)
+
+    # إجمالي القيد = مجموع مدين الأسطر = مجموع دائن الأسطر (محسوب عند الترحيل)
+    total_amount = Column(Numeric(18, 2), nullable=False, default=0)
+
+    # حقول تراثية (قبل دعم الأسطر المتعددة) — تبقى NULL للقيود الجديدة، ولا تُستخدم بعد الآن
+    debit_account = Column(String(20), ForeignKey("accounts.code"), nullable=True)
+    credit_account = Column(String(20), ForeignKey("accounts.code"), nullable=True)
+    amount = Column(Numeric(18, 2), nullable=True)
 
     created_at = Column(
         DateTime(timezone=True),
@@ -91,13 +93,18 @@ class JournalEntry(Base):
 
     __table_args__ = (
         CheckConstraint(
-            "amount IS NULL OR amount > 0",
-            name="ck_amount_positive"
+            "total_amount >= 0",
+            name="ck_total_amount_nonneg"
+        ),
+        CheckConstraint(
+            "status IN ('posted','cancelled')",
+            name="ck_journal_status_model"
         ),
     )
 
 
 class JournalEntryLine(Base):
+    """سطر واحد بقيد مركب: حساب واحد + مبلغ مدين أو دائن (وليس كلاهما)."""
     __tablename__ = "journal_entry_lines"
 
     id = Column(Integer, primary_key=True)
@@ -107,6 +114,11 @@ class JournalEntryLine(Base):
     debit = Column(Numeric(18, 2), nullable=False, default=0)
     credit = Column(Numeric(18, 2), nullable=False, default=0)
     line_description = Column(String)
+
+    __table_args__ = (
+        CheckConstraint("debit >= 0 AND credit >= 0", name="ck_line_amounts_nonneg"),
+        CheckConstraint("debit = 0 OR credit = 0", name="ck_line_single_side"),
+    )
 
 
 class Item(Base):

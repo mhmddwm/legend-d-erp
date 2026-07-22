@@ -3,14 +3,14 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.models import Branch
 from pydantic import BaseModel
-from typing import List
+from typing import List, Optional
 
 router = APIRouter(prefix="/api/branches", tags=["Branches"])
 
 class BranchIn(BaseModel):
     code: str
     name_ar: str
-    name_en: str = None
+    name_en: Optional[str] = None
     is_active: bool = True
 
 class BranchOut(BranchIn):

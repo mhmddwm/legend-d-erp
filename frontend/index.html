@@ -1396,6 +1396,23 @@ html[dir="ltr"] .brand-center{direction:ltr;}
   <div class="panel" id="panel-tree">
     <div class="summary" id="treeSummary"></div>
 
+    <div class="coa-layout">
+
+      <!-- ===== الشاشة الجانبية: بحث ذكي + شجرة الحسابات القابلة للطي ===== -->
+      <aside class="coa-sidebar">
+        <div class="coa-sidebar-search">
+          <input id="coaTreeSearch" placeholder="🔍 بحث برقم أو اسم الحساب" oninput="renderCoaSidebar()">
+        </div>
+        <div class="coa-sidebar-branch">
+          <label>الفرع</label>
+          <select id="coaBranchFilter" onchange="onCoaBranchChange()"><option value="">كل الفروع</option></select>
+        </div>
+        <div class="coa-sidebar-tree" id="coaSidebarTree"></div>
+      </aside>
+
+      <!-- ===== المحتوى الرئيسي (الفورم + الجدول الحالي) ===== -->
+      <div class="coa-main">
+
     <!-- شريط الإضافة -->
     <div class="acc-add-bar">
       <h2>دليل الحسابات</h2>
@@ -1443,6 +1460,9 @@ html[dir="ltr"] .brand-center{direction:ltr;}
       </table>
       <div class="empty-msg" id="accEmpty" style="display:none">لا توجد حسابات</div>
     </div></div>
+
+      </div><!-- /coa-main -->
+    </div><!-- /coa-layout -->
   </div>
 
   <!-- ========== JOURNAL ENTRY ========== -->
@@ -1453,6 +1473,7 @@ html[dir="ltr"] .brand-center{direction:ltr;}
         <div class="field"><label>التاريخ</label><input id="jDate" type="date"></div>
         <div class="field"><label>منشئ القيد</label><input id="jCreatedBy" list="usersDatalist" placeholder="اختر أو اكتب اسم المستخدم"></div>
         <div class="field"><label>مركز التكلفة</label><select id="jCostCenter" class="cost-center-select"><option value="">— بدون مركز تكلفة —</option></select></div>
+        <div class="field"><label>الفرع</label><select id="jBranch"><option value="">— بدون فرع محدد —</option></select></div>
       </div>
       <div class="frow" style="grid-template-columns:1fr">
         <div class="field"><label>البيان العام للقيد</label><input id="jDesc" placeholder="وصف عام للقيد (اختياري)"></div>
@@ -1460,7 +1481,7 @@ html[dir="ltr"] .brand-center{direction:ltr;}
 
       <div class="gridcard" style="margin:14px 0"><div class="scrollx">
         <table class="grid">
-          <thead><tr><th style="width:26%">الحساب</th><th>البيان</th><th style="width:16%">مدين</th><th style="width:16%">دائن</th><th style="width:40px"></th></tr></thead>
+          <thead><tr><th style="width:36px"></th><th style="width:24%">الحساب</th><th>البيان</th><th style="width:15%">مدين</th><th style="width:15%">دائن</th><th style="width:40px"></th></tr></thead>
           <tbody id="journalLinesBody"></tbody>
         </table>
       </div></div>
@@ -1583,6 +1604,123 @@ html[dir="ltr"] .brand-center{direction:ltr;}
       outline:none;
     }
     .journal-modern-form .btn{border-radius:12px;font-weight:800}
+
+    /* ===== أسطر القيد المركب — مربعات عصرية + سحب وإفلات لإعادة الترتيب ===== */
+    .journal-modern-form table.grid input{
+      height:38px;
+      border:1.5px solid #cbd8ea;
+      border-radius:10px;
+      padding:0 10px;
+      font-family:'Cairo',sans-serif;
+      font-weight:600;
+      font-size:13.5px;
+      color:#0f2746;
+      background:#fff;
+      width:100%;
+      box-sizing:border-box;
+      transition:border-color .18s ease, box-shadow .18s ease;
+    }
+    .journal-modern-form table.grid input:hover{border-color:#9db8dd}
+    .journal-modern-form table.grid input:focus{
+      border-color:#1f78d1;
+      box-shadow:0 0 0 3px rgba(31,120,209,.14);
+      outline:none;
+    }
+    tr.jline-row{transition:background .12s ease, opacity .12s ease}
+    tr.jline-row.jline-dragging{opacity:.35}
+    tr.jline-row.jline-drop-target{background:#eaf3ff}
+    td.jline-handle{
+      cursor:grab;
+      text-align:center;
+      color:#9db2cf;
+      font-size:14px;
+      letter-spacing:-2px;
+      user-select:none;
+      width:28px;
+    }
+    td.jline-handle:active{cursor:grabbing}
+    .rm-line{
+      border:none;background:#fdeaea;color:#c0392b;border-radius:8px;
+      width:28px;height:28px;cursor:pointer;font-weight:800;transition:.15s ease;
+    }
+    .rm-line:hover{background:#f8d0d0}
+
+    /* ============================================================
+       شاشة دليل الحسابات — تخطيط جانبي + شجرة قابلة للطي + خطوط احترافية
+       ============================================================ */
+    .coa-layout{display:flex;gap:18px;align-items:flex-start}
+    .coa-sidebar{
+      width:300px;flex:0 0 300px;
+      background:linear-gradient(180deg,#fbfdff,#f4f8fd);
+      border:1px solid #e2ebf6;border-radius:18px;
+      box-shadow:0 10px 26px rgba(15,39,70,.05);
+      padding:14px;position:sticky;top:14px;
+      max-height:calc(100vh - 120px);
+      display:flex;flex-direction:column;gap:10px;
+    }
+    .coa-sidebar-search input{
+      width:100%;height:42px;border-radius:12px;border:1.5px solid #cbd8ea;
+      padding:0 14px;font-family:'Cairo',sans-serif;font-weight:700;font-size:13.5px;
+      background:#fff;transition:.18s ease;
+    }
+    .coa-sidebar-search input:focus{border-color:#1f78d1;box-shadow:0 0 0 4px rgba(31,120,209,.14);outline:none}
+    .coa-sidebar-branch{display:flex;align-items:center;gap:8px}
+    .coa-sidebar-branch label{font-weight:800;font-size:12.5px;color:#0f2746;white-space:nowrap}
+    .coa-sidebar-branch select{
+      flex:1;height:38px;border-radius:10px;border:1.5px solid #cbd8ea;
+      padding:0 10px;font-family:'Cairo',sans-serif;font-weight:700;font-size:13px;background:#fff;
+    }
+    .coa-sidebar-tree{overflow-y:auto;flex:1;padding-inline-end:4px}
+    .coa-sidebar-tree::-webkit-scrollbar{width:6px}
+    .coa-sidebar-tree::-webkit-scrollbar-thumb{background:#cbd8ea;border-radius:6px}
+
+    .coa-node{display:flex;align-items:center;gap:6px;padding:7px 8px;border-radius:10px;cursor:default;transition:background .12s ease}
+    .coa-node:hover{background:#eef4fc}
+    .coa-toggle{
+      width:18px;height:18px;flex:0 0 18px;display:flex;align-items:center;justify-content:center;
+      cursor:pointer;color:#5b7ba8;font-size:12px;user-select:none;
+    }
+    .coa-node-label{cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+    /* الحسابات الرئيسية (المجلدات) — خط أكبر وأعرض وأوضح */
+    .coa-node-main > .coa-node-label{
+      font-family:'Cairo',sans-serif;
+      font-weight:800;
+      font-size:16px;
+      letter-spacing:.2px;
+      color:#08244a;
+    }
+    .coa-node-main{margin-top:4px}
+
+    /* الحسابات الفرعية — خط أهدأ وأدق تدريجياً حسب العمق */
+    .coa-node-sub > .coa-node-label{
+      font-family:'Cairo',sans-serif;
+      font-weight:600;
+      font-size:13.5px;
+      color:#33507a;
+    }
+
+    .coa-node-hit > .coa-node-label{
+      background:linear-gradient(90deg,#fff6d8,#fff6d8);
+      border-radius:6px;padding:1px 6px;
+      color:#7a5a00;font-weight:800;
+    }
+
+    .coa-children{border-inline-start:1.5px dashed #d7e3f3;margin-inline-start:12px}
+
+    .coa-main{flex:1;min-width:0}
+
+    /* تمييز صف الحساب بالجدول عند اختياره من الشجرة الجانبية */
+    tr.coa-row-flash{animation:coaFlash 1.5s ease}
+    @keyframes coaFlash{
+      0%{background:#fff6d8}
+      100%{background:transparent}
+    }
+
+    @media (max-width:1000px){
+      .coa-layout{flex-direction:column}
+      .coa-sidebar{width:100%;flex:1 1 auto;position:static;max-height:340px}
+    }
   </style>
   <!-- ========== (تم نقل قائمة القيود أعلاه) ========== -->
 

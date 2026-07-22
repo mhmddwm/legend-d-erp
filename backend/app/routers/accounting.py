@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session
 from sqlalchemy import or_
 from typing import Optional
 from datetime import date
@@ -37,7 +37,7 @@ def create_cost_center(payload: CostCenterIn, db: Session = Depends(get_db)):
 # ============================================================
 
 @router.get("", response_model=list[AccountOut])
-def list_accounts(db: Session = Depends(get_db)):
+def list_accounts(branch_id: Optional[int] = Query(None, description="فلترة الأرصدة حسب فرع معيّن"), db: Session = Depends(get_db)):
     accounts = db.query(Account).filter(Account.is_active == True).all()
     result = []
     for acc in accounts:
@@ -49,7 +49,7 @@ def list_accounts(db: Session = Depends(get_db)):
             nature=acc.nature, 
             parent_code=acc.parent_code,
             opening_balance=float(acc.opening_balance),
-            balance=account_rollup_balance(db, acc.code)
+            balance=account_rollup_balance(db, acc.code, branch_id)
         ))
     return result
 
@@ -112,8 +112,6 @@ def delete_account(code: str, db: Session = Depends(get_db)):
     if db.query(Account).filter(Account.parent_code == code).first():
         raise HTTPException(400, "لا يمكن حذف حساب له حسابات فرعية")
 
-    if db.query(JournalEntry).filter(or_(JournalEntry.debit_account == code, JournalEntry.credit_account == code)).first():
-        raise HTTPException(400, "لا يمكن حذف حساب مرتبط بقيود محاسبية")
     if db.query(JournalEntryLine).filter(JournalEntryLine.account_code == code).first():
         raise HTTPException(400, "لا يمكن حذف حساب مرتبط بقيود محاسبية")
 
@@ -140,9 +138,10 @@ def list_journal_entries(
     amount_to: Optional[float] = Query(None, description="المبلغ إلى"),
     status: Optional[str] = Query(None, description="حالة القيد: posted / cancelled"),
     cost_center_code: Optional[str] = Query(None, description="مركز التكلفة"),
+    branch_id: Optional[int] = Query(None, description="الفرع"),
     db: Session = Depends(get_db)
 ):
-    query = db.query(JournalEntry).options(joinedload(JournalEntry.lines))
+    query = db.query(JournalEntry)
 
     if entry_no:
         query = query.filter(JournalEntry.id == entry_no)
@@ -162,13 +161,7 @@ def list_journal_entries(
                 JournalEntryLine.account_code.in_(matching_codes)
             ).distinct().all()
         ]
-        query = query.filter(
-            or_(
-                JournalEntry.id.in_(matching_entry_ids),
-                JournalEntry.debit_account.in_(matching_codes),
-                JournalEntry.credit_account.in_(matching_codes),
-            )
-        )
+        query = query.filter(JournalEntry.id.in_(matching_entry_ids))
 
     if created_by:
         query = query.filter(JournalEntry.created_by_name.ilike(f"%{created_by}%"))
@@ -197,10 +190,13 @@ def list_journal_entries(
     if cost_center_code:
         query = query.filter(JournalEntry.cost_center_code == cost_center_code)
 
+    if branch_id:
+        query = query.filter(JournalEntry.branch_id == branch_id)
+
     return query.order_by(JournalEntry.entry_date.desc(), JournalEntry.id.desc()).all()
 
 
-def _validate_lines(payload, db: Session):
+def _validate_and_total_lines(payload: JournalEntryIn, db: Session) -> float:
     if len(payload.lines) < 2:
         raise HTTPException(400, "يجب أن يحتوي القيد على سطرين على الأقل")
 
@@ -219,34 +215,28 @@ def _validate_lines(payload, db: Session):
     if total_debit <= 0:
         raise HTTPException(400, "لا يمكن ترحيل قيد بإجمالي صفر")
 
+    if payload.cost_center_code and not db.query(CostCenter).filter(CostCenter.code == payload.cost_center_code).first():
+        raise HTTPException(404, "مركز التكلفة غير موجود")
+
     return total_debit
 
 
 @journal_router.post("", response_model=JournalEntryOut, status_code=201)
 def create_journal_entry(payload: JournalEntryIn, db: Session = Depends(get_db)):
-    total_debit = _validate_lines(payload, db)
-    if payload.cost_center_code and not db.query(CostCenter).filter(CostCenter.code == payload.cost_center_code).first():
-        raise HTTPException(404, "مركز التكلفة غير موجود")
+    total = _validate_and_total_lines(payload, db)
 
     entry = JournalEntry(
         entry_date=payload.entry_date,
         description=payload.description,
         created_by_name=payload.created_by_name,
+        cost_center_code=payload.cost_center_code,
+        branch_id=payload.branch_id,
         source_type="manual",
         status="posted",
-        cost_center_code=payload.cost_center_code,
-        total_amount=total_debit,
+        total_amount=total,
     )
-    if len(payload.lines) == 2:
-        d = next((l for l in payload.lines if l.debit), None)
-        c = next((l for l in payload.lines if l.credit), None)
-        if d and c:
-            entry.debit_account = d.account_code
-            entry.credit_account = c.account_code
-            entry.amount = total_debit
-
     db.add(entry)
-    db.flush()
+    db.flush()  # للحصول على entry.id قبل إضافة الأسطر
 
     for idx, line in enumerate(payload.lines, start=1):
         db.add(JournalEntryLine(
@@ -271,29 +261,21 @@ def update_journal_entry(entry_id: int, payload: JournalEntryIn, db: Session = D
     if entry.source_type != "manual":
         raise HTTPException(400, "لا يمكن تعديل قيد مُولَّد تلقائياً")
     if entry.status == "cancelled":
-        raise HTTPException(400, "لا يمكن تعديل قيد ملغى")
+        raise HTTPException(400, "لا يمكن تعديل قيد ملغى — أنشئ قيداً جديداً بدلاً من ذلك")
 
-    total_debit = _validate_lines(payload, db)
-    if payload.cost_center_code and not db.query(CostCenter).filter(CostCenter.code == payload.cost_center_code).first():
-        raise HTTPException(404, "مركز التكلفة غير موجود")
+    total = _validate_and_total_lines(payload, db)
 
     entry.entry_date = payload.entry_date
     entry.description = payload.description
     entry.created_by_name = payload.created_by_name
     entry.cost_center_code = payload.cost_center_code
-    entry.total_amount = total_debit
-    entry.debit_account = None
-    entry.credit_account = None
-    entry.amount = None
-    if len(payload.lines) == 2:
-        d = next((l for l in payload.lines if l.debit), None)
-        c = next((l for l in payload.lines if l.credit), None)
-        if d and c:
-            entry.debit_account = d.account_code
-            entry.credit_account = c.account_code
-            entry.amount = total_debit
+    if payload.branch_id is not None:
+        entry.branch_id = payload.branch_id
+    entry.total_amount = total
 
-    db.query(JournalEntryLine).filter(JournalEntryLine.entry_id == entry_id).delete()
+    # استبدال الأسطر بالكامل بالقيمة الجديدة
+    db.query(JournalEntryLine).filter(JournalEntryLine.entry_id == entry.id).delete()
+    db.flush()
     for idx, line in enumerate(payload.lines, start=1):
         db.add(JournalEntryLine(
             entry_id=entry.id,
@@ -311,6 +293,7 @@ def update_journal_entry(entry_id: int, payload: JournalEntryIn, db: Session = D
 
 @journal_router.patch("/{entry_id}/cancel", response_model=JournalEntryOut)
 def cancel_journal_entry(entry_id: int, db: Session = Depends(get_db)):
+    """إلغاء قيد بعد ترحيله (بدلاً من حذفه) — يحافظ على أثره بالسجل دون احتسابه بالأرصدة."""
     entry = db.query(JournalEntry).get(entry_id)
     if not entry:
         raise HTTPException(404, "القيد غير موجود")
@@ -328,7 +311,7 @@ def delete_journal_entry(entry_id: int, db: Session = Depends(get_db)):
     if not entry:
         raise HTTPException(404, "القيد غير موجود")
     if entry.source_type != "manual":
-        raise HTTPException(400, "لا يمكن حذف قيد مُولَّد تلقائياً")
+        raise HTTPException(400, "لا يمكن حذف قيد مُولَّد تلقائياً من عملية أخرى (مشتريات/مستودعات...)")
     db.delete(entry)
     db.commit()
     return None
