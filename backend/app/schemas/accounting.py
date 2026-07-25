@@ -51,11 +51,26 @@ class CostCenterOut(BaseModel):
         from_attributes = True
 
 
+class LineCostAllocationIn(BaseModel):
+    cost_center_code: str
+    percentage: float = Field(gt=0, le=100)
+
+
+class LineCostAllocationOut(BaseModel):
+    id: int
+    cost_center_code: str
+    percentage: float
+
+    class Config:
+        from_attributes = True
+
+
 class JournalEntryLineIn(BaseModel):
     account_code: str
     debit: float = Field(default=0, ge=0)
     credit: float = Field(default=0, ge=0)
     line_description: Optional[str] = None
+    cost_allocations: list[LineCostAllocationIn] = []
 
 
 class JournalEntryLineOut(BaseModel):
@@ -64,6 +79,7 @@ class JournalEntryLineOut(BaseModel):
     debit: float
     credit: float
     line_description: Optional[str] = None
+    cost_allocations: list[LineCostAllocationOut] = []
 
     class Config:
         from_attributes = True
@@ -73,7 +89,6 @@ class JournalEntryIn(BaseModel):
     entry_date: date
     description: Optional[str] = None
     created_by_name: Optional[str] = None
-    cost_center_code: Optional[str] = None
     branch_id: Optional[int] = None
     lines: list[JournalEntryLineIn] = Field(min_length=2)
 
@@ -87,7 +102,6 @@ class JournalEntryOut(BaseModel):
     created_by_name: Optional[str] = None
     created_at: Optional[datetime] = None
     status: str = "posted"
-    cost_center_code: Optional[str] = None
     branch_id: Optional[int] = None
     total_amount: float = 0
     lines: list[JournalEntryLineOut] = []

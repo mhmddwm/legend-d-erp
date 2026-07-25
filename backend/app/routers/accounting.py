@@ -4,7 +4,7 @@ from sqlalchemy import or_
 from typing import Optional
 from datetime import date
 from app.database import get_db
-from app.models.models import Account, JournalEntry, JournalEntryLine, CostCenter
+from app.models.models import Account, JournalEntry, JournalEntryLine, CostCenter, LineCostAllocation
 from app.schemas.accounting import (
     AccountIn, AccountUpdate, AccountOut,
     JournalEntryIn, JournalEntryOut,
@@ -188,7 +188,13 @@ def list_journal_entries(
         query = query.filter(JournalEntry.status == status)
 
     if cost_center_code:
-        query = query.filter(JournalEntry.cost_center_code == cost_center_code)
+        matching_entry_ids = [
+            row[0] for row in db.query(JournalEntryLine.entry_id)
+            .join(LineCostAllocation, LineCostAllocation.line_id == JournalEntryLine.id)
+            .filter(LineCostAllocation.cost_center_code == cost_center_code)
+            .distinct().all()
+        ]
+        query = query.filter(JournalEntry.id.in_(matching_entry_ids))
 
     if branch_id:
         query = query.filter(JournalEntry.branch_id == branch_id)
@@ -207,6 +213,15 @@ def _validate_and_total_lines(payload: JournalEntryIn, db: Session) -> float:
             raise HTTPException(400, "كل سطر يجب أن يكون له مبلغ مدين أو دائن فقط، وليس كلاهما ولا لا شيء")
         if not db.query(Account).filter(Account.code == line.account_code).first():
             raise HTTPException(404, f"الحساب {line.account_code} غير موجود")
+
+        if line.cost_allocations:
+            total_pct = sum(a.percentage for a in line.cost_allocations)
+            if round(total_pct, 2) != 100:
+                raise HTTPException(400, f"مجموع نسب مراكز التكلفة لسطر الحساب {line.account_code} يجب أن يساوي 100% (الحالي: {total_pct:.2f}%)")
+            for alloc in line.cost_allocations:
+                if not db.query(CostCenter).filter(CostCenter.code == alloc.cost_center_code).first():
+                    raise HTTPException(404, f"مركز التكلفة {alloc.cost_center_code} غير موجود")
+
         total_debit += line.debit
         total_credit += line.credit
 
@@ -214,9 +229,6 @@ def _validate_and_total_lines(payload: JournalEntryIn, db: Session) -> float:
         raise HTTPException(400, f"القيد غير متوازن: إجمالي المدين {total_debit:.2f} لا يساوي إجمالي الدائن {total_credit:.2f}")
     if total_debit <= 0:
         raise HTTPException(400, "لا يمكن ترحيل قيد بإجمالي صفر")
-
-    if payload.cost_center_code and not db.query(CostCenter).filter(CostCenter.code == payload.cost_center_code).first():
-        raise HTTPException(404, "مركز التكلفة غير موجود")
 
     return total_debit
 
@@ -229,7 +241,6 @@ def create_journal_entry(payload: JournalEntryIn, db: Session = Depends(get_db))
         entry_date=payload.entry_date,
         description=payload.description,
         created_by_name=payload.created_by_name,
-        cost_center_code=payload.cost_center_code,
         branch_id=payload.branch_id,
         source_type="manual",
         status="posted",
@@ -239,14 +250,22 @@ def create_journal_entry(payload: JournalEntryIn, db: Session = Depends(get_db))
     db.flush()  # للحصول على entry.id قبل إضافة الأسطر
 
     for idx, line in enumerate(payload.lines, start=1):
-        db.add(JournalEntryLine(
+        line_row = JournalEntryLine(
             entry_id=entry.id,
             line_no=idx,
             account_code=line.account_code,
             debit=line.debit,
             credit=line.credit,
             line_description=line.line_description,
-        ))
+        )
+        db.add(line_row)
+        db.flush()  # للحصول على line_row.id قبل إضافة توزيعات مركز التكلفة
+        for alloc in line.cost_allocations:
+            db.add(LineCostAllocation(
+                line_id=line_row.id,
+                cost_center_code=alloc.cost_center_code,
+                percentage=alloc.percentage,
+            ))
 
     db.commit()
     db.refresh(entry)
@@ -268,23 +287,30 @@ def update_journal_entry(entry_id: int, payload: JournalEntryIn, db: Session = D
     entry.entry_date = payload.entry_date
     entry.description = payload.description
     entry.created_by_name = payload.created_by_name
-    entry.cost_center_code = payload.cost_center_code
     if payload.branch_id is not None:
         entry.branch_id = payload.branch_id
     entry.total_amount = total
 
-    # استبدال الأسطر بالكامل بالقيمة الجديدة
+    # استبدال الأسطر بالكامل بالقيمة الجديدة (يحذف تلقائياً توزيعات مركز التكلفة القديمة عبر cascade)
     db.query(JournalEntryLine).filter(JournalEntryLine.entry_id == entry.id).delete()
     db.flush()
     for idx, line in enumerate(payload.lines, start=1):
-        db.add(JournalEntryLine(
+        line_row = JournalEntryLine(
             entry_id=entry.id,
             line_no=idx,
             account_code=line.account_code,
             debit=line.debit,
             credit=line.credit,
             line_description=line.line_description,
-        ))
+        )
+        db.add(line_row)
+        db.flush()
+        for alloc in line.cost_allocations:
+            db.add(LineCostAllocation(
+                line_id=line_row.id,
+                cost_center_code=alloc.cost_center_code,
+                percentage=alloc.percentage,
+            ))
 
     db.commit()
     db.refresh(entry)

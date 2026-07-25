@@ -104,7 +104,8 @@ class JournalEntry(Base):
 
 
 class JournalEntryLine(Base):
-    """سطر واحد بقيد مركب: حساب واحد + مبلغ مدين أو دائن (وليس كلاهما)."""
+    """سطر واحد بقيد مركب: حساب واحد + مبلغ مدين أو دائن (وليس كلاهما).
+    يمكن توزيع السطر على أكثر من مركز تكلفة بنسب مئوية عبر cost_allocations."""
     __tablename__ = "journal_entry_lines"
 
     id = Column(Integer, primary_key=True)
@@ -115,9 +116,30 @@ class JournalEntryLine(Base):
     credit = Column(Numeric(18, 2), nullable=False, default=0)
     line_description = Column(String)
 
+    cost_allocations = relationship(
+        "LineCostAllocation",
+        backref="line",
+        cascade="all, delete-orphan"
+    )
+
     __table_args__ = (
         CheckConstraint("debit >= 0 AND credit >= 0", name="ck_line_amounts_nonneg"),
         CheckConstraint("debit = 0 OR credit = 0", name="ck_line_single_side"),
+    )
+
+
+class LineCostAllocation(Base):
+    """توزيع نسبة مئوية من سطر قيد معيّن على مركز تكلفة واحد. مجموع
+    النسب لكل أسطر السطر الواحد يجب أن يساوي 100% إذا وُجد أي توزيع."""
+    __tablename__ = "line_cost_allocations"
+
+    id = Column(Integer, primary_key=True)
+    line_id = Column(Integer, ForeignKey("journal_entry_lines.id", ondelete="CASCADE"), nullable=False)
+    cost_center_code = Column(String(20), ForeignKey("cost_centers.code"), nullable=False)
+    percentage = Column(Numeric(5, 2), nullable=False)
+
+    __table_args__ = (
+        CheckConstraint("percentage > 0 AND percentage <= 100", name="ck_lca_percentage"),
     )
 
 

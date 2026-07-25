@@ -1373,7 +1373,7 @@ function resolveAccountCode(rawValue){
 
 function addJLine(){
   lineCounter++;
-  jLines.push({id:lineCounter, account_code:'', debit:0, credit:0, line_description:''});
+  jLines.push({id:lineCounter, account_code:'', debit:0, credit:0, line_description:'', cost_allocations:[]});
   renderJLines();
 }
 
@@ -1410,6 +1410,7 @@ function onJLineChange(id, field, value){
 }
 
 let draggedLineId = null;
+let expandedCostLines = new Set();
 
 function onLineDragStart(id, ev){
   draggedLineId = id;
@@ -1449,22 +1450,100 @@ function onLineDrop(targetId, ev){
   renderJLines();
 }
 
+function toggleLineCostPanel(lineId){
+  if(expandedCostLines.has(lineId)) expandedCostLines.delete(lineId);
+  else expandedCostLines.add(lineId);
+  renderJLines();
+}
+
+function lineCostSummary(line){
+  const allocs = line.cost_allocations || [];
+  if(!allocs.length) return 'توزيع';
+  const total = allocs.reduce((s,a)=>s+(parseFloat(a.percentage)||0),0);
+  return `${allocs.length} مراكز — ${total.toFixed(0)}%`;
+}
+
+function addLineCostAllocation(lineId){
+  const line = jLines.find(l=>l.id===lineId);
+  if(!line) return;
+  if(!line.cost_allocations) line.cost_allocations = [];
+  line.cost_allocations.push({cost_center_code:'', percentage: line.cost_allocations.length ? 0 : 100});
+  expandedCostLines.add(lineId);
+  renderJLines();
+}
+
+function removeLineCostAllocation(lineId, idx){
+  const line = jLines.find(l=>l.id===lineId);
+  if(!line || !line.cost_allocations) return;
+  line.cost_allocations.splice(idx, 1);
+  renderJLines();
+}
+
+function onLineCostAllocationChange(lineId, idx, field, value){
+  const line = jLines.find(l=>l.id===lineId);
+  if(!line || !line.cost_allocations || !line.cost_allocations[idx]) return;
+  line.cost_allocations[idx][field] = field==='percentage' ? value : value;
+  renderJLines();
+}
+
+function renderCostCenterOptionsHtml(selected){
+  const list = costCenters || [];
+  return '<option value="">— اختر —</option>' +
+    list.map(c=>`<option value="${c.code}" ${c.code===selected?'selected':''}>${whEscCoa(c.code)} — ${whEscCoa(c.name_ar)}</option>`).join('');
+}
+
 function renderJLines(){
   const body=document.getElementById('journalLinesBody');
   if(!body) return;
-  body.innerHTML=jLines.map(l=>`<tr class="jline-row" draggable="true"
-      ondragstart="onLineDragStart(${l.id}, event)"
-      ondragend="onLineDragEnd(event)"
-      ondragover="onLineDragOver(event)"
-      ondragleave="onLineDragLeave(event)"
-      ondrop="onLineDrop(${l.id}, event)">
-    <td class="jline-handle" title="اسحب لتغيير الترتيب">⠿⠿</td>
-    <td><input type="text" list="accountsDatalist" placeholder="ابحث بالكود أو اسم الحساب" value="${l.account_code?accountLabel(l.account_code):''}" onchange="onJLineAccountChange(${l.id}, this)"></td>
-    <td><input type="text" placeholder="بيان السطر (اختياري)" value="${l.line_description||''}" onchange="onJLineChange(${l.id},'line_description',this.value)"></td>
-    <td><input type="number" step="0.01" min="0" value="${l.debit||0}" onchange="onJLineChange(${l.id},'debit',this.value)"></td>
-    <td><input type="number" step="0.01" min="0" value="${l.credit||0}" onchange="onJLineChange(${l.id},'credit',this.value)"></td>
-    <td><button class="rm-line" onclick="removeJLine(${l.id})">✕</button></td>
-  </tr>`).join('');
+
+  body.innerHTML=jLines.map(l=>{
+    const allocs = l.cost_allocations || [];
+    const totalPct = allocs.reduce((s,a)=>s+(parseFloat(a.percentage)||0),0);
+    const isExpanded = expandedCostLines.has(l.id);
+    const pctOk = !allocs.length || Math.round(totalPct*100)===10000;
+
+    const mainRow = `<tr class="jline-row" draggable="true"
+        ondragstart="onLineDragStart(${l.id}, event)"
+        ondragend="onLineDragEnd(event)"
+        ondragover="onLineDragOver(event)"
+        ondragleave="onLineDragLeave(event)"
+        ondrop="onLineDrop(${l.id}, event)">
+      <td class="jline-handle" title="اسحب لتغيير الترتيب">⠿⠿</td>
+      <td><input type="text" list="accountsDatalist" placeholder="ابحث بالكود أو اسم الحساب" value="${l.account_code?accountLabel(l.account_code):''}" onchange="onJLineAccountChange(${l.id}, this)"></td>
+      <td><input type="text" placeholder="بيان السطر (اختياري)" value="${l.line_description||''}" onchange="onJLineChange(${l.id},'line_description',this.value)"></td>
+      <td><input type="number" step="0.01" min="0" value="${l.debit||0}" onchange="onJLineChange(${l.id},'debit',this.value)"></td>
+      <td><input type="number" step="0.01" min="0" value="${l.credit||0}" onchange="onJLineChange(${l.id},'credit',this.value)"></td>
+      <td><button type="button" class="cc-btn ${allocs.length && !pctOk ? 'cc-btn-warn':''}" onclick="toggleLineCostPanel(${l.id})">🏷️ ${lineCostSummary(l)}</button></td>
+      <td><button class="rm-line" onclick="removeJLine(${l.id})">✕</button></td>
+    </tr>`;
+
+    if(!isExpanded) return mainRow;
+
+    const allocRows = allocs.map((a,idx)=>`
+      <div class="cc-alloc-row">
+        <select onchange="onLineCostAllocationChange(${l.id},${idx},'cost_center_code',this.value)">${renderCostCenterOptionsHtml(a.cost_center_code)}</select>
+        <input type="number" step="0.01" min="0" max="100" value="${a.percentage||0}" onchange="onLineCostAllocationChange(${l.id},${idx},'percentage',parseFloat(this.value)||0)">
+        <span class="cc-pct-sign">%</span>
+        <button type="button" class="rm-line" onclick="removeLineCostAllocation(${l.id},${idx})">✕</button>
+      </div>`).join('');
+
+    const panelRow = `<tr class="jline-cost-panel-row">
+      <td></td>
+      <td colspan="5">
+        <div class="cc-panel">
+          <div class="cc-panel-head">
+            <span>توزيع مركز التكلفة لهذا السطر</span>
+            <span class="cc-total ${pctOk?'cc-total-ok':'cc-total-bad'}">الإجمالي: ${totalPct.toFixed(2)}%</span>
+          </div>
+          ${allocRows || '<div class="hint">بدون توزيع — سيُرحّل السطر بدون مركز تكلفة</div>'}
+          <button type="button" class="btn secondary cc-add-btn" onclick="addLineCostAllocation(${l.id})">+ إضافة مركز تكلفة</button>
+        </div>
+      </td>
+      <td></td>
+    </tr>`;
+
+    return mainRow + panelRow;
+  }).join('');
 
   const totalDebit=jLines.reduce((s,l)=>s+(parseFloat(l.debit)||0),0);
   const totalCredit=jLines.reduce((s,l)=>s+(parseFloat(l.credit)||0),0);
@@ -1486,16 +1565,16 @@ function renderJLines(){
 function resetJournalForm(){
   journalEditingId=null;
   jLines=[];
-  lineCounter++; jLines.push({id:lineCounter, account_code:'', debit:0, credit:0, line_description:''});
-  lineCounter++; jLines.push({id:lineCounter, account_code:'', debit:0, credit:0, line_description:''});
+  lineCounter++; jLines.push({id:lineCounter, account_code:'', debit:0, credit:0, line_description:'', cost_allocations:[]});
+  lineCounter++; jLines.push({id:lineCounter, account_code:'', debit:0, credit:0, line_description:'', cost_allocations:[]});
   const titleEl=document.getElementById('journalFormTitle');
   if(titleEl) titleEl.textContent='قيد محاسبي جديد';
   const submitBtn=document.getElementById('jSubmitBtn');
   if(submitBtn) submitBtn.textContent='ترحيل القيد';
-  const ccSel=document.getElementById('jCostCenter'); if(ccSel) ccSel.value='';
-  const brSel=document.getElementById('jBranch'); if(brSel) brSel.value='';
+  const brSelReset=document.getElementById('jBranch'); if(brSelReset) brSelReset.value='';
   const cb=document.getElementById('jCreatedBy'); if(cb) cb.value='';
   const dateEl=document.getElementById('jDate'); if(dateEl) dateEl.value='';
+  clearJournalError();
   renderJLines();
 }
 
@@ -1616,24 +1695,37 @@ async function submitEntry(){
   const entry_date=document.getElementById('jDate').value;
   const description=document.getElementById('jDesc').value.trim();
   const created_by_name=document.getElementById('jCreatedBy')?.value.trim() || null;
-  const cost_center_code=document.getElementById('jCostCenter')?.value || null;
   const branchVal=document.getElementById('jBranch')?.value || '';
   const branch_id=branchVal ? parseInt(branchVal,10) : null;
   const err=document.getElementById('jErr');
 
   const validLines=jLines.filter(l=>l.account_code && ((l.debit||0)>0 || (l.credit||0)>0));
-  if(!entry_date){err.textContent='يرجى إدخال تاريخ القيد'; return;}
-  if(validLines.length<2){err.textContent='يرجى إدخال سطرين على الأقل، كل سطر بحساب صحيح ومبلغ'; return;}
+  if(!entry_date){showJournalError('يرجى إدخال تاريخ القيد'); return;}
+  if(validLines.length<2){showJournalError('يرجى إدخال سطرين على الأقل، كل سطر بحساب صحيح ومبلغ'); return;}
 
   const totalDebit=validLines.reduce((s,l)=>s+(parseFloat(l.debit)||0),0);
   const totalCredit=validLines.reduce((s,l)=>s+(parseFloat(l.credit)||0),0);
-  if(Math.round((totalDebit-totalCredit)*100)!==0){err.textContent=`القيد غير متوازن: مدين ${fmt(totalDebit)} ≠ دائن ${fmt(totalCredit)}`; return;}
-  if(totalDebit<=0){err.textContent='لا يمكن ترحيل قيد بإجمالي صفر'; return;}
+  if(Math.round((totalDebit-totalCredit)*100)!==0){showJournalError(`القيد غير متوازن: مدين ${fmt(totalDebit)} ≠ دائن ${fmt(totalCredit)}`); return;}
+  if(totalDebit<=0){showJournalError('لا يمكن ترحيل قيد بإجمالي صفر'); return;}
 
-  err.textContent='';
+  // تحقق مسبق من نسب مراكز التكلفة بكل سطر قبل الإرسال (نفس تحقق الباك إند، لإظهار الخطأ فوراً)
+  for(const l of validLines){
+    if(l.cost_allocations && l.cost_allocations.length){
+      const totalPct = l.cost_allocations.reduce((s,a)=>s+(parseFloat(a.percentage)||0),0);
+      if(Math.round(totalPct*100)!==10000){
+        showJournalError(`مجموع نسب مراكز التكلفة لسطر "${accountLabel(l.account_code)}" يجب أن يساوي 100% (الحالي: ${totalPct.toFixed(2)}%)`);
+        return;
+      }
+    }
+  }
+
+  clearJournalError();
   const payload={
-    entry_date, description, created_by_name, cost_center_code, branch_id,
-    lines: validLines.map(l=>({account_code:l.account_code, debit:l.debit||0, credit:l.credit||0, line_description:l.line_description||null}))
+    entry_date, description, created_by_name, branch_id,
+    lines: validLines.map(l=>({
+      account_code:l.account_code, debit:l.debit||0, credit:l.credit||0, line_description:l.line_description||null,
+      cost_allocations:(l.cost_allocations||[]).filter(a=>a.cost_center_code).map(a=>({cost_center_code:a.cost_center_code, percentage:parseFloat(a.percentage)||0}))
+    }))
   };
   try{
     if(journalEditingId){
@@ -1645,7 +1737,22 @@ async function submitEntry(){
     document.getElementById('jDesc').value='';
     resetJournalForm();
     if(typeof openSubModule==='function') openSubModule('القيود اليومية');
-  }catch(e){err.textContent=e.message;}
+  }catch(e){showJournalError(e.message);}
+}
+
+function showJournalError(msg){
+  const err=document.getElementById('jErr');
+  if(!err) return;
+  err.textContent=msg;
+  err.classList.add('jerr-visible');
+  err.scrollIntoView({behavior:'smooth', block:'center'});
+}
+
+function clearJournalError(){
+  const err=document.getElementById('jErr');
+  if(!err) return;
+  err.textContent='';
+  err.classList.remove('jerr-visible');
 }
 
 function loadEntryIntoForm(id){
@@ -1655,11 +1762,10 @@ function loadEntryIntoForm(id){
     ...(e.debit_account?[{account_code:e.debit_account, debit:e.amount, credit:0, line_description:e.description}]:[]),
     ...(e.credit_account?[{account_code:e.credit_account, debit:0, credit:e.amount, line_description:e.description}]:[]),
   ];
-  jLines=lines.map(l=>{ lineCounter++; return {id:lineCounter, account_code:l.account_code, debit:l.debit||0, credit:l.credit||0, line_description:l.line_description||''}; });
+  jLines=lines.map(l=>{ lineCounter++; return {id:lineCounter, account_code:l.account_code, debit:l.debit||0, credit:l.credit||0, line_description:l.line_description||'', cost_allocations:(l.cost_allocations||[]).map(a=>({cost_center_code:a.cost_center_code, percentage:a.percentage}))}; });
   document.getElementById('jDate').value=e.entry_date||'';
   document.getElementById('jDesc').value=e.description||'';
   const cb=document.getElementById('jCreatedBy'); if(cb) cb.value=e.created_by_name||'';
-  const ccSel=document.getElementById('jCostCenter'); if(ccSel) ccSel.value=e.cost_center_code||'';
   const brSel=document.getElementById('jBranch'); if(brSel) brSel.value=e.branch_id||'';
   renderJLines();
   return e;

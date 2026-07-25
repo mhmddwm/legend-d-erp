@@ -1472,7 +1472,6 @@ html[dir="ltr"] .brand-center{direction:ltr;}
       <div class="frow">
         <div class="field"><label>التاريخ</label><input id="jDate" type="date"></div>
         <div class="field"><label>منشئ القيد</label><input id="jCreatedBy" list="usersDatalist" placeholder="اختر أو اكتب اسم المستخدم"></div>
-        <div class="field"><label>مركز التكلفة</label><select id="jCostCenter" class="cost-center-select"><option value="">— بدون مركز تكلفة —</option></select></div>
         <div class="field"><label>الفرع</label><select id="jBranch"><option value="">— بدون فرع محدد —</option></select></div>
       </div>
       <div class="frow" style="grid-template-columns:1fr">
@@ -1481,7 +1480,7 @@ html[dir="ltr"] .brand-center{direction:ltr;}
 
       <div class="gridcard" style="margin:14px 0"><div class="scrollx">
         <table class="grid">
-          <thead><tr><th style="width:36px"></th><th style="width:24%">الحساب</th><th>البيان</th><th style="width:15%">مدين</th><th style="width:15%">دائن</th><th style="width:40px"></th></tr></thead>
+          <thead><tr><th style="width:36px"></th><th style="width:22%">الحساب</th><th>البيان</th><th style="width:13%">مدين</th><th style="width:13%">دائن</th><th style="width:110px">مركز التكلفة</th><th style="width:40px"></th></tr></thead>
           <tbody id="journalLinesBody"></tbody>
         </table>
       </div></div>
@@ -1644,6 +1643,42 @@ html[dir="ltr"] .brand-center{direction:ltr;}
       width:28px;height:28px;cursor:pointer;font-weight:800;transition:.15s ease;
     }
     .rm-line:hover{background:#f8d0d0}
+
+    /* ===== زر وشارة توزيع مركز التكلفة ===== */
+    .cc-btn{
+      height:32px;width:100%;border-radius:9px;border:1.5px solid #cbd8ea;background:#f4f8fd;
+      color:#33507a;font-family:'Cairo',sans-serif;font-weight:700;font-size:11.5px;cursor:pointer;
+      transition:.15s ease;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:0 6px;
+    }
+    .cc-btn:hover{background:#eaf3ff;border-color:#9db8dd}
+    .cc-btn-warn{background:#fff3d6;border-color:#e8c565;color:#8a6300}
+
+    tr.jline-cost-panel-row td{border-top:none;padding-top:0}
+    .cc-panel{
+      background:#f7fafd;border:1.5px dashed #cbd8ea;border-radius:12px;padding:12px 14px;margin:2px 0 10px;
+    }
+    .cc-panel-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;font-weight:800;font-size:12.5px;color:#0f2746}
+    .cc-total-ok{color:#1e7e34}
+    .cc-total-bad{color:#c0392b}
+    .cc-alloc-row{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+    .cc-alloc-row select{
+      flex:2;height:34px;border-radius:8px;border:1.5px solid #cbd8ea;padding:0 8px;
+      font-family:'Cairo',sans-serif;font-weight:600;font-size:13px;background:#fff;
+    }
+    .cc-alloc-row input{
+      flex:0 0 80px;height:34px;border-radius:8px;border:1.5px solid #cbd8ea;padding:0 8px;
+      font-family:'Cairo',sans-serif;font-weight:600;font-size:13px;background:#fff;text-align:center;
+    }
+    .cc-pct-sign{color:#5b7ba8;font-weight:800;font-size:12px}
+    .cc-add-btn{height:32px;font-size:12px;padding:0 12px;margin-top:4px}
+
+    /* ===== رسالة خطأ بارزة لشاشة القيود — تمنع أي فشل صامت ===== */
+    #jErr{transition:.15s ease}
+    #jErr.jerr-visible{
+      display:block;background:#fdeaea;border:1.5px solid #f0b7b7;color:#a91b1b;
+      border-radius:12px;padding:12px 16px;font-weight:800;font-size:13.5px;margin-top:10px;
+      box-shadow:0 4px 14px rgba(169,27,27,.12);
+    }
 
     /* ============================================================
        شاشة دليل الحسابات — تخطيط جانبي + شجرة قابلة للطي + خطوط احترافية
