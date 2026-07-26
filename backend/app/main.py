@@ -1,7 +1,10 @@
 import os
+import logging
+import traceback
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
@@ -16,6 +19,8 @@ from app.routers import (
     branches  # تم إضافة branches هنا
 )
 
+logger = logging.getLogger("uvicorn.error")
+
 app = FastAPI(
     title="ERP System"
 )
@@ -29,6 +34,20 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# ================= معالج أخطاء شامل =================
+# بدون هذا، أي خطأ غير متوقع (عمود غير موجود بقاعدة البيانات، migration
+# لم تُشغَّل، إلخ) يرجع للواجهة كـ 500 فارغ فتظهر رسالة "خطأ في الخادم"
+# العامة بدون أي تفاصيل تساعد على التشخيص. هذا المعالج يسجّل الخطأ
+# الكامل بالـ logs (لك أنت فقط، بلوحة Render) ويرجع رسالة واضحة للواجهة.
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    logger.error("خطأ غير متوقع في %s: %s\n%s", request.url.path, exc, traceback.format_exc())
+    return JSONResponse(
+        status_code=500,
+        content={"detail": f"خطأ غير متوقع في الخادم: {type(exc).__name__}: {str(exc)}"},
+    )
 
 
 # ================= ROUTERS =================
