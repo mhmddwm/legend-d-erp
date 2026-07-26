@@ -4,12 +4,13 @@ from sqlalchemy import or_, func
 from typing import Optional
 from datetime import date
 from app.database import get_db
-from app.models.models import Account, JournalEntry, JournalEntryLine, CostCenter, LineCostAllocation
+from app.models.models import Account, JournalEntry, JournalEntryLine, CostCenter, LineCostAllocation, JournalEntryAttachment
 from app.schemas.accounting import (
     AccountIn, AccountUpdate, AccountOut,
     JournalEntryIn, JournalEntryOut,
     CostCenterIn, CostCenterOut,
     LedgerResponseOut, LedgerTransactionOut,
+    JournalEntryAttachmentIn, JournalEntryAttachmentOut,
 )
 from app.services import account_rollup_balance, account_direct_balance
 
@@ -445,3 +446,53 @@ def get_account_ledger(
         page_size=page_size,
         transactions=[LedgerTransactionOut(**row) for row in page_rows],
     )
+
+
+# ============================================================
+# مرفقات القيود (فواتير/صور/PDF) — الملف نفسه يُرفع من الفرونت إند
+# مباشرة إلى Supabase Storage؛ هنا فقط نخزّن رابط الملف الناتج.
+# ============================================================
+
+@journal_router.get("/{entry_id}/attachments", response_model=list[JournalEntryAttachmentOut])
+def list_attachments(entry_id: int, db: Session = Depends(get_db)):
+    entry = db.query(JournalEntry).get(entry_id)
+    if not entry:
+        raise HTTPException(404, "القيد غير موجود")
+    return db.query(JournalEntryAttachment).filter(
+        JournalEntryAttachment.entry_id == entry_id
+    ).order_by(JournalEntryAttachment.uploaded_at).all()
+
+
+@journal_router.post("/{entry_id}/attachments", response_model=JournalEntryAttachmentOut, status_code=201)
+def add_attachment(entry_id: int, payload: JournalEntryAttachmentIn, db: Session = Depends(get_db)):
+    entry = db.query(JournalEntry).get(entry_id)
+    if not entry:
+        raise HTTPException(404, "القيد غير موجود")
+    att = JournalEntryAttachment(
+        entry_id=entry_id,
+        file_name=payload.file_name,
+        file_url=payload.file_url,
+        file_type=payload.file_type,
+        file_size=payload.file_size,
+        uploaded_by=payload.uploaded_by,
+    )
+    db.add(att)
+    db.commit()
+    db.refresh(att)
+    return att
+
+
+@journal_router.delete("/{entry_id}/attachments/{attachment_id}", status_code=204)
+def delete_attachment(entry_id: int, attachment_id: int, db: Session = Depends(get_db)):
+    att = db.query(JournalEntryAttachment).filter(
+        JournalEntryAttachment.id == attachment_id,
+        JournalEntryAttachment.entry_id == entry_id,
+    ).first()
+    if not att:
+        raise HTTPException(404, "المرفق غير موجود")
+    # ملاحظة: هذا يحذف السجل من قاعدة بياناتنا فقط. حذف الملف الفعلي من
+    # Supabase Storage يتم من الفرونت إند مباشرة عبر الـ API الخاص بهم
+    # (نفس ما يحدث عند الرفع)، قبل أو بعد استدعاء هذا المسار.
+    db.delete(att)
+    db.commit()
+    return None

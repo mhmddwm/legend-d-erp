@@ -91,6 +91,13 @@ class JournalEntry(Base):
         order_by="JournalEntryLine.line_no"
     )
 
+    attachments = relationship(
+        "JournalEntryAttachment",
+        backref="entry",
+        cascade="all, delete-orphan",
+        order_by="JournalEntryAttachment.uploaded_at"
+    )
+
     __table_args__ = (
         CheckConstraint(
             "total_amount >= 0",
@@ -126,6 +133,22 @@ class JournalEntryLine(Base):
         CheckConstraint("debit >= 0 AND credit >= 0", name="ck_line_amounts_nonneg"),
         CheckConstraint("debit = 0 OR credit = 0", name="ck_line_single_side"),
     )
+
+
+class JournalEntryAttachment(Base):
+    """مستند مرفق بقيد محاسبي (فاتورة، صورة، PDF...). الملف نفسه يُرفع
+    مباشرة من الفرونت إند إلى Supabase Storage، وهنا فقط يُخزَّن رابط
+    الملف الناتج وبياناته الوصفية."""
+    __tablename__ = "journal_entry_attachments"
+
+    id = Column(Integer, primary_key=True)
+    entry_id = Column(Integer, ForeignKey("journal_entries.id", ondelete="CASCADE"), nullable=False)
+    file_name = Column(String(255), nullable=False)
+    file_url = Column(String, nullable=False)
+    file_type = Column(String(100))
+    file_size = Column(Integer)
+    uploaded_by = Column(String(100))
+    uploaded_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
 class LineCostAllocation(Base):

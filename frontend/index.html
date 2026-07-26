@@ -108,6 +108,63 @@ input.ldp-input, input.numeric-fmt{
 }
 .entry-link:hover{ color:var(--accent-hover); }
 
+/* عمود الحسابات: مدين | فاصل عصري | دائن — كل حساب رابط لصفحة الأستاذ الخاصة به */
+.jacc-cell{ display:flex; align-items:stretch; gap:10px; min-height:28px; }
+.jacc-side{ flex:1; display:flex; flex-direction:column; gap:4px; min-width:0; }
+.jacc-divider{
+  width:2px; align-self:stretch;
+  background:linear-gradient(180deg, transparent, var(--accent), transparent);
+  border-radius:2px; opacity:.5;
+}
+.jacc-link{
+  background:none; border:none; padding:2px 0; cursor:pointer;
+  color:var(--accent); font-weight:700; font-size:12.5px; text-align:right;
+  text-decoration:none; border-bottom:1px dashed transparent; transition:.15s;
+}
+.jacc-link:hover{ border-bottom-color:var(--accent); }
+.jacc-link.jacc-credit{ color:#b5604a; }
+
+/* خلية الإجمالي: تسمية صغيرة أعلى القيمة الكبيرة */
+.jamt-cell{ display:flex; flex-direction:column; gap:1px; }
+.jamt-label{ font-size:10px; color:var(--muted); font-weight:700; }
+.jamt-value{ font-size:14px; font-weight:800; color:var(--ink-2); direction:ltr; text-align:right; }
+
+/* زر ترتيب القيود */
+.journal-sort-select{
+  background:var(--bg-card); border:1.5px solid var(--line); border-radius:999px;
+  padding:8px 14px; font-size:12px; font-weight:700; color:var(--ink-2);
+  cursor:pointer; box-shadow:var(--shadow);
+}
+.journal-sort-select:hover{ border-color:var(--accent); }
+
+/* قسم مرفقات القيد */
+.jatt-section{ margin-top:18px; }
+.jatt-title{ font-size:14.5px; font-weight:800; color:var(--ink-2); margin-bottom:8px; }
+.jatt-dropzone{
+  border:2px dashed var(--line); border-radius:14px; padding:22px;
+  text-align:center; cursor:pointer; transition:.15s; background:var(--bg-card-2);
+}
+.jatt-dropzone:hover, .jatt-dropzone.jatt-drag-over{
+  border-color:var(--accent); background:rgba(21,101,192,.05);
+}
+.jatt-dropzone-icon{ font-size:28px; margin-bottom:6px; }
+.jatt-dropzone-text{ font-weight:700; color:var(--ink-2); font-size:13px; }
+.jatt-dropzone-hint{ font-size:11px; color:var(--muted); margin-top:3px; }
+.jatt-status{ margin-top:8px; font-size:12.5px; font-weight:700; color:var(--success); }
+.jatt-status-warn{ color:#b5604a; background:#fff6ee; border:1px solid #f3ddc9; border-radius:10px; padding:10px 12px; line-height:1.8; }
+.jatt-status-ok{ color:var(--success); }
+.jatt-list{ display:flex; flex-wrap:wrap; gap:10px; margin-top:12px; }
+.jatt-item{
+  display:flex; align-items:center; gap:8px; background:var(--bg-card);
+  border:1px solid var(--line); border-radius:12px; padding:8px 10px;
+  max-width:220px;
+}
+.jatt-thumb{ width:34px; height:34px; object-fit:cover; border-radius:8px; }
+.jatt-file-icon{ width:34px; height:34px; display:flex; align-items:center; justify-content:center; font-size:18px; background:var(--bg-card-2); border-radius:8px; }
+.jatt-name{ font-size:12px; color:var(--accent); font-weight:700; text-decoration:none; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:110px; }
+.jatt-name:hover{ text-decoration:underline; }
+.jatt-remove{ background:none; border:none; color:var(--coral); cursor:pointer; font-size:13px; padding:2px; }
+
 /* شريط التنقل بين القيود (السابق/التالي) في صفحة تفاصيل القيد */
 .entry-nav-bar{
   display:flex; align-items:center; justify-content:space-between;
@@ -892,6 +949,8 @@ body.focus-mode .rfq-page{min-height:calc(100vh - 72px);}
 .row-menu-trigger:hover span,.row-menu-trigger.active span{background:#fff;}
 .menu-popup{position:absolute;left:0;top:46px;min-width:150px;background:#fff;border:1px solid #dfe8f3;border-radius:18px;padding:8px;box-shadow:0 18px 45px rgba(13,27,46,.20);z-index:999;}
 .menu-popup:before{content:"";position:absolute;top:-7px;left:18px;width:12px;height:12px;background:#fff;border-top:1px solid #dfe8f3;border-right:1px solid #dfe8f3;transform:rotate(-45deg);}
+.menu-popup.menu-popup-up{top:auto;bottom:46px;}
+.menu-popup.menu-popup-up:before{top:auto;bottom:-7px;transform:rotate(135deg);}
 .menu-popup button{width:100%;border:0;background:transparent;border-radius:12px;padding:10px 12px;font-family:Cairo;font-weight:800;text-align:right;display:flex;align-items:center;gap:9px;cursor:pointer;color:#21364d;transition:.15s;}
 .menu-popup button:hover{background:#f1f6fc;color:#0f4c81;}
 .menu-popup button b{width:22px;text-align:center;font-size:15px;}
@@ -1645,7 +1704,20 @@ html[dir="ltr"] .brand-center{direction:ltr;}
     </div>
     <div class="gridcard"><div class="scrollx">
       <table class="grid">
-        <thead><tr><th>#</th><th>التاريخ</th><th>الحسابات</th><th>الإجمالي</th><th>البيان</th><th>منشئ القيد</th><th>الحالة</th><th></th></tr></thead>
+        <thead><tr>
+          <th>رقم القيد</th><th>التاريخ</th><th>الفرع</th><th>الحسابات</th>
+          <th>الإجمالي</th><th>البيان</th><th>منشئ القيد</th><th>الحالة</th>
+          <th>
+            <select id="journalSortSelect" class="journal-sort-select" onchange="applyJournalSort()" title="ترتيب القيود">
+              <option value="entry_date_desc">ترتيب: تاريخ القيد (الأحدث)</option>
+              <option value="entry_date_asc">ترتيب: تاريخ القيد (الأقدم)</option>
+              <option value="id_desc">ترتيب: رقم القيد (تنازلي)</option>
+              <option value="id_asc">ترتيب: رقم القيد (تصاعدي)</option>
+              <option value="created_desc">ترتيب: تاريخ الإنشاء (الأحدث)</option>
+              <option value="created_asc">ترتيب: تاريخ الإنشاء (الأقدم)</option>
+            </select>
+          </th>
+        </tr></thead>
         <tbody id="journalBody"></tbody>
       </table>
       <div class="empty-msg" id="journalEmpty" style="display:none">لا توجد قيود مطابقة</div>
@@ -2783,6 +2855,7 @@ html[dir="ltr"] .brand-center{direction:ltr;}
 <div class="panel" id="panel-extra_fields"><div class="formcard"><h3>الحقول الإضافية</h3><div class="empty-msg">جاهزة للتطوير</div></div></div>
 </div><!-- end .wrap -->
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script src="i18n.js"></script>
 <script src="script.js">
 

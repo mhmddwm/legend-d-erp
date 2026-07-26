@@ -32,6 +32,13 @@ let costCenters=[]; // مراكز التكلفة
 let journalEditingId=null; // معرّف القيد الجاري تعديله (null = إنشاء قيد جديد)
 let journalPage=1; // الصفحة الحالية في قائمة القيود
 const JOURNAL_PAGE_SIZE=20;
+let journalSortBy='entry_date_desc'; // معيار ترتيب قائمة القيود الحالي
+function applyJournalSort(){
+  const sel=document.getElementById('journalSortSelect');
+  if(sel) journalSortBy=sel.value;
+  journalPage=1;
+  renderJournal();
+}
 let entryDetailId=null; // معرّف القيد المعروض حالياً في صفحة تفاصيل القيد
 
 // ============================================================
@@ -960,6 +967,16 @@ function renderJournal(){
   const hasAnyFilter = Object.values(filters).some(v=>v!=='' && v!==null);
   const filtered = hasAnyFilter ? (entries||[]).filter(e=>journalMatchesFilters(e, filters)) : (entries||[]);
 
+  const sortFns = {
+    entry_date_desc:(a,b)=> (b.entry_date||'').localeCompare(a.entry_date||'') || (b.id||0)-(a.id||0),
+    entry_date_asc:(a,b)=> (a.entry_date||'').localeCompare(b.entry_date||'') || (a.id||0)-(b.id||0),
+    id_desc:(a,b)=> (b.id||0)-(a.id||0),
+    id_asc:(a,b)=> (a.id||0)-(b.id||0),
+    created_desc:(a,b)=> (b.created_at||'').localeCompare(a.created_at||''),
+    created_asc:(a,b)=> (a.created_at||'').localeCompare(b.created_at||''),
+  };
+  filtered.sort(sortFns[journalSortBy] || sortFns.entry_date_desc);
+
   if(countEl) countEl.textContent = hasAnyFilter ? `${filtered.length} نتيجة من أصل ${(entries||[]).length}` : '';
 
   const totalPages=Math.max(1, Math.ceil(filtered.length / JOURNAL_PAGE_SIZE));
@@ -982,7 +999,13 @@ function renderJournal(){
       ...(e.debit_account?[{account_code:e.debit_account, debit:e.amount, credit:0}]:[]),
       ...(e.credit_account?[{account_code:e.credit_account, debit:0, credit:e.amount}]:[]),
     ];
-    const summary = lines.map(l=>`${accountLabel(l.account_code)} <span class="muted">(${l.debit?'مدين':'دائن'})</span>`).join('، ');
+    const debitLinks = lines.filter(l=>l.debit).map(l=>`<button class="jacc-link" onclick="openAccountPage('${l.account_code}')">${accountLabel(l.account_code)}</button>`).join('');
+    const creditLinks = lines.filter(l=>l.credit).map(l=>`<button class="jacc-link jacc-credit" onclick="openAccountPage('${l.account_code}')">${accountLabel(l.account_code)}</button>`).join('');
+    const accountsCell = `<div class="jacc-cell">
+        <div class="jacc-side">${debitLinks||'-'}</div>
+        <div class="jacc-divider"></div>
+        <div class="jacc-side">${creditLinks||'-'}</div>
+      </div>`;
     const status = e.status || 'posted';
     const statusBadge = status==='cancelled' ? `<span class="badge returned">ملغي</span>` : `<span class="badge posted">مرحّل</span>`;
     const isManual = e.source_type==='manual';
@@ -991,10 +1014,10 @@ function renderJournal(){
     return `<tr>
       <td><button class="entry-link" onclick="openEntryDetail(${e.id})">#${e.id||''}</button></td>
       <td>${e.entry_date||''}</td>
-      <td>${branchName}</td> <!-- تم إضافة العمود الجديد هنا -->
-      <td>${summary || '-'}</td>
-      <td class="num">${fmt(e.total_amount ?? e.amount)}</td>
-      <td>${e.description||''}</td>
+      <td>${branchName}</td>
+      <td>${accountsCell}</td>
+      <td><div class="jamt-cell"><span class="jamt-label">الإجمالي</span><span class="jamt-value">${fmt(e.total_amount ?? e.amount)}</span></div></td>
+      <td>${e.description||'-'}</td>
       <td>${e.created_by_name||'-'}</td>
       <td>${statusBadge}</td>
       <td>
@@ -1003,7 +1026,7 @@ function renderJournal(){
           <div id="jmenu-${e.id}" class="menu-popup" style="display:none">
             <button onclick="viewJournalEntry(${e.id})"><b>👁</b><span>عرض</span></button>
             ${isManual && !isCancelled ? `<button onclick="editJournalEntry(${e.id})"><b>✎</b><span>تعديل</span></button>` : ''}
-            <button onclick="duplicateJournalEntry(${e.id})"><b>⧉</b><span>نسخ قيد دوري</span></button>
+            <button onclick="duplicateJournalEntry(${e.id})"><b>⧉</b><span>نسخ</span></button>
             ${isManual ? `<button class="danger" onclick="deleteEntry(${e.id})"><b>🗑</b><span>حذف</span></button>` : ''}
           </div>
         </div>
@@ -1038,11 +1061,20 @@ function toggleJournalRowMenu(id, ev){
   if(ev) ev.stopPropagation();
   const m=document.getElementById('jmenu-'+id);
   const willOpen = !m || m.style.display==='none';
-  document.querySelectorAll('.menu-popup').forEach(e=>e.style.display='none');
+  document.querySelectorAll('.menu-popup').forEach(e=>{e.style.display='none'; e.classList.remove('menu-popup-up');});
   document.querySelectorAll('.row-menu-trigger').forEach(b=>b.classList.remove('active'));
   if(m && willOpen){
     m.style.display='block';
-    if(ev && ev.currentTarget) ev.currentTarget.classList.add('active');
+    const trigger = ev && ev.currentTarget;
+    if(trigger) trigger.classList.add('active');
+    // لو ما فيه مساحة كافية أسفل الزر داخل الشاشة (صفوف قرب نهاية الجدول)،
+    // افتح القائمة للأعلى بدلاً من الأسفل بدل ما تنقطع خارج الشاشة
+    if(trigger){
+      const rect = trigger.getBoundingClientRect();
+      const menuHeight = m.scrollHeight || 190;
+      const spaceBelow = window.innerHeight - rect.bottom;
+      if(spaceBelow < menuHeight + 16) m.classList.add('menu-popup-up');
+    }
   }
 }
 
@@ -1889,13 +1921,156 @@ function renderEntryDetail(){
       </table>
     </div></div>
     <p style="font-weight:800;font-size:15px">الإجمالي: ${fmt(e.total_amount ?? e.amount ?? 0)}</p>
+
+    <div class="jatt-section">
+      <h4 class="jatt-title">📎 المرفقات</h4>
+      <div class="jatt-dropzone" id="jattDropzone" onclick="document.getElementById('jattFileInput').click()">
+        <div class="jatt-dropzone-icon">📎</div>
+        <div class="jatt-dropzone-text">اسحب وأفلت الملفات هنا، أو اضغط للاختيار</div>
+        <div class="jatt-dropzone-hint">صور، PDF، مستندات — يمكن اختيار أكثر من ملف</div>
+        <input type="file" id="jattFileInput" multiple style="display:none" accept="image/*,.pdf,.doc,.docx" onchange="handleAttachmentFiles(this.files)">
+      </div>
+      <div id="jattUploadStatus"></div>
+      <div class="jatt-list" id="jattList">${renderAttachmentsList(e)}</div>
+    </div>
+
     <div style="display:flex;gap:8px;margin-top:10px">
       ${isManual && !isCancelled ? `<button class="btn secondary" onclick="editJournalEntry(${e.id})">✎ تعديل</button>` : ''}
-      <button class="btn secondary" onclick="duplicateJournalEntry(${e.id})">⧉ نسخ قيد دوري</button>
+      <button class="btn secondary" onclick="duplicateJournalEntry(${e.id})">⧉ نسخ</button>
       ${isManual ? `<button class="btn secondary" style="color:var(--coral)" onclick="deleteEntry(${e.id})">🗑 حذف</button>` : ''}
       <button class="btn secondary" onclick="openSubModule('القيود اليومية')">رجوع للقائمة</button>
     </div>
   `;
+
+  setupAttachmentDropzone();
+}
+
+function renderAttachmentsList(e){
+  const atts = e.attachments || [];
+  if(!atts.length) return '<div class="hint" style="padding:8px 0">لا توجد مرفقات على هذا القيد بعد</div>';
+  return atts.map(a=>{
+    const isImage = /\.(png|jpe?g|gif|webp)$/i.test(a.file_name||'') || /^image\//.test(a.file_type||'');
+    const icon = isImage ? `<img src="${a.file_url}" class="jatt-thumb" alt="">` : `<div class="jatt-file-icon">📄</div>`;
+    return `<div class="jatt-item">
+        ${icon}
+        <a href="${a.file_url}" target="_blank" class="jatt-name" title="${a.file_name}">${a.file_name}</a>
+        <button class="jatt-remove" title="حذف المرفق" onclick="removeAttachment(${e.id},${a.id})">✕</button>
+      </div>`;
+  }).join('');
+}
+
+// ============================================================
+// مرفقات القيد — رفع عبر Supabase Storage (سحب وإفلات أو اختيار ملفات)
+// ============================================================
+
+// ⚠️ إعداد مطلوب منك مرة واحدة فقط: عبّي هذين المتغيّرين ببيانات مشروعك
+// على Supabase (Project Settings → API → Project URL / anon public key)
+// حتى تعمل ميزة رفع المرفقات فعلياً. القيمتان آمنتان للنشر العلني
+// (anon key مصمم أصلاً ليكون في كود الواجهة الأمامية).
+window.SUPABASE_URL = window.SUPABASE_URL || '';
+window.SUPABASE_ANON_KEY = window.SUPABASE_ANON_KEY || '';
+window.SUPABASE_STORAGE_BUCKET = window.SUPABASE_STORAGE_BUCKET || 'journal-attachments';
+
+let __supabaseClient = null;
+function getSupabaseClient(){
+  if(__supabaseClient) return __supabaseClient;
+  if(!window.SUPABASE_URL || !window.SUPABASE_ANON_KEY){
+    return null;
+  }
+  if(typeof window.supabase === 'undefined'){
+    return null;
+  }
+  __supabaseClient = window.supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
+  return __supabaseClient;
+}
+
+function setupAttachmentDropzone(){
+  const zone = document.getElementById('jattDropzone');
+  if(!zone || zone.dataset.dzBound) return;
+  zone.dataset.dzBound = '1';
+  ['dragenter','dragover'].forEach(evt=>{
+    zone.addEventListener(evt, e=>{ e.preventDefault(); e.stopPropagation(); zone.classList.add('jatt-drag-over'); });
+  });
+  ['dragleave','drop'].forEach(evt=>{
+    zone.addEventListener(evt, e=>{ e.preventDefault(); e.stopPropagation(); zone.classList.remove('jatt-drag-over'); });
+  });
+  zone.addEventListener('drop', e=>{
+    const files = e.dataTransfer && e.dataTransfer.files;
+    if(files && files.length) handleAttachmentFiles(files);
+  });
+}
+
+async function handleAttachmentFiles(fileList){
+  const statusEl = document.getElementById('jattUploadStatus');
+  const files = Array.from(fileList||[]);
+  if(!files.length) return;
+
+  const client = getSupabaseClient();
+  if(!client){
+    if(statusEl) statusEl.innerHTML = `<div class="jatt-status jatt-status-warn">
+      رفع المرفقات غير مُفعَّل بعد — يحتاج إعداد بسيط لمرة واحدة: عبّي
+      <code>window.SUPABASE_URL</code> و<code>window.SUPABASE_ANON_KEY</code>
+      في أعلى ملف script.js ببيانات مشروعك على Supabase (Project Settings → API)،
+      وتأكد من تحميل مكتبة supabase-js في index.html.
+    </div>`;
+    return;
+  }
+
+  if(statusEl) statusEl.innerHTML = `<div class="jatt-status">⏳ جاري رفع ${files.length} ملف...</div>`;
+
+  let okCount = 0, failCount = 0;
+  for(const file of files){
+    try{
+      const safeName = file.name.replace(/[^\w.\-]/g,'_');
+      const path = `entry-${entryDetailId}/${Date.now()}-${safeName}`;
+      const { error: uploadErr } = await client.storage
+        .from(window.SUPABASE_STORAGE_BUCKET)
+        .upload(path, file, { upsert:false });
+      if(uploadErr) throw uploadErr;
+
+      const { data: pub } = client.storage.from(window.SUPABASE_STORAGE_BUCKET).getPublicUrl(path);
+      const fileUrl = pub && pub.publicUrl;
+      if(!fileUrl) throw new Error('تعذر الحصول على رابط الملف بعد الرفع');
+
+      await api('POST', `/api/journal/${entryDetailId}/attachments`, {
+        file_name: file.name,
+        file_url: fileUrl,
+        file_type: file.type || null,
+        file_size: file.size || null,
+        uploaded_by: document.getElementById('jCreatedBy')?.value || null,
+      });
+      okCount++;
+    }catch(err){
+      console.error('فشل رفع الملف', file.name, err);
+      failCount++;
+    }
+  }
+
+  if(statusEl){
+    statusEl.innerHTML = failCount
+      ? `<div class="jatt-status jatt-status-warn">تم رفع ${okCount} ملف، وفشل ${failCount}</div>`
+      : `<div class="jatt-status jatt-status-ok">✓ تم رفع ${okCount} ملف بنجاح</div>`;
+  }
+
+  // تحديث بيانات القيد من الخادم لعرض المرفقات الجديدة
+  try{
+    const fresh = await api('GET', `/api/journal/${entryDetailId}/attachments`);
+    const entry = (entries||[]).find(x=>x.id===entryDetailId);
+    if(entry) entry.attachments = fresh;
+    const listEl = document.getElementById('jattList');
+    if(listEl && entry) listEl.innerHTML = renderAttachmentsList(entry);
+  }catch(err){ console.warn('تعذر تحديث قائمة المرفقات', err.message); }
+}
+
+async function removeAttachment(entryId, attachmentId){
+  if(!confirm('حذف هذا المرفق؟')) return;
+  try{
+    await api('DELETE', `/api/journal/${entryId}/attachments/${attachmentId}`);
+    const entry = (entries||[]).find(x=>x.id===entryId);
+    if(entry) entry.attachments = (entry.attachments||[]).filter(a=>a.id!==attachmentId);
+    const listEl = document.getElementById('jattList');
+    if(listEl && entry) listEl.innerHTML = renderAttachmentsList(entry);
+  }catch(e){ alert(e.message); }
 }
 
 function getProductCategories(){
@@ -2947,11 +3122,17 @@ function toggleItemMenu(code, ev){
  if(ev) ev.stopPropagation();
  const m=document.getElementById('menu-'+code);
  const willOpen = !m || m.style.display==='none';
- document.querySelectorAll('.menu-popup').forEach(e=>e.style.display='none');
+ document.querySelectorAll('.menu-popup').forEach(e=>{e.style.display='none'; e.classList.remove('menu-popup-up');});
  document.querySelectorAll('.row-menu-trigger').forEach(b=>b.classList.remove('active'));
  if(m && willOpen){
    m.style.display='block';
-   if(ev && ev.currentTarget) ev.currentTarget.classList.add('active');
+   const trigger = ev && ev.currentTarget;
+   if(trigger) trigger.classList.add('active');
+   if(trigger){
+     const rect = trigger.getBoundingClientRect();
+     const menuHeight = m.scrollHeight || 190;
+     if(window.innerHeight - rect.bottom < menuHeight + 16) m.classList.add('menu-popup-up');
+   }
  }
 }
 document.addEventListener('click', function(e){

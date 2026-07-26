@@ -119,6 +119,27 @@ class JournalEntryIn(BaseModel):
     lines: list[JournalEntryLineIn] = Field(min_length=2)
 
 
+class JournalEntryAttachmentIn(BaseModel):
+    file_name: str
+    file_url: str
+    file_type: Optional[str] = None
+    file_size: Optional[int] = None
+    uploaded_by: Optional[str] = None
+
+
+class JournalEntryAttachmentOut(BaseModel):
+    id: int
+    file_name: str
+    file_url: str
+    file_type: Optional[str] = None
+    file_size: Optional[int] = None
+    uploaded_by: Optional[str] = None
+    uploaded_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
 class JournalEntryOut(BaseModel):
     id: int
     entry_date: date
@@ -131,6 +152,7 @@ class JournalEntryOut(BaseModel):
     branch_id: Optional[int] = None
     total_amount: float = 0
     lines: list[JournalEntryLineOut] = []
+    attachments: list[JournalEntryAttachmentOut] = []
 
     class Config:
         from_attributes = True
