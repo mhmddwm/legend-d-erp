@@ -847,17 +847,7 @@ function accMenuRun(action){
 
 document.addEventListener('click', closeAccActionsMenu);
 function openAccountPage(code){
-  const acc=(window.accounts||[]).find(a=>a.code===code);
-  if(!acc) return;
-  const win=window.open('','_blank');
-  win.document.write(`
-  <html dir="rtl"><head><title>${acc.name_ar}</title>
-  <style>body{font-family:Cairo,Arial;padding:30px;background:#f5f0e8;color:#1b2a44}
-  .box{background:#fff;padding:25px;border-radius:12px;border:1px solid #ddd}</style></head>
-  <body><div class="box"><h2>${acc.name_ar}</h2>
-  <p>رقم الحساب: ${acc.code}</p>
-  <p>الرصيد الحالي: ${fmt(acc.balance)}</p></div></body></html>`);
-  win.document.close();
+  window.open(`ledger.html?account=${encodeURIComponent(code)}`, '_blank');
 }
 
 function accountAction(action,code){

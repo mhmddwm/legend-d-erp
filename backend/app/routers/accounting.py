@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from sqlalchemy import or_
+from sqlalchemy import or_, func
 from typing import Optional
 from datetime import date
 from app.database import get_db
@@ -9,8 +9,9 @@ from app.schemas.accounting import (
     AccountIn, AccountUpdate, AccountOut,
     JournalEntryIn, JournalEntryOut,
     CostCenterIn, CostCenterOut,
+    LedgerResponseOut, LedgerTransactionOut,
 )
-from app.services import account_rollup_balance
+from app.services import account_rollup_balance, account_direct_balance
 
 router = APIRouter(prefix="/api/accounts", tags=["Accounts"])
 journal_router = APIRouter(prefix="/api/journal", tags=["Journal"])
@@ -341,3 +342,101 @@ def delete_journal_entry(entry_id: int, db: Session = Depends(get_db)):
     db.delete(entry)
     db.commit()
     return None
+
+
+# ============================================================
+# حساب الأستاذ الاحترافي (General Ledger)
+# ============================================================
+
+@router.get("/{code}/ledger", response_model=LedgerResponseOut)
+def get_account_ledger(
+    code: str,
+    branch_id: Optional[int] = Query(None, description="الفرع"),
+    date_from: Optional[date] = Query(None, description="الفترة من"),
+    date_to: Optional[date] = Query(None, description="الفترة إلى"),
+    created_by: Optional[str] = Query(None, description="أنشئ بواسطة (بحث جزئي)"),
+    cost_center_code: Optional[str] = Query(None, description="مركز التكلفة"),
+    fiscal_year: Optional[int] = Query(None, description="السنة المالية"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=200),
+    db: Session = Depends(get_db),
+):
+    """كشف حساب احترافي: كل حركات حساب معيّن مرتبة زمنياً مع الرصيد بعد كل
+    حركة. يدعم الفلترة بالفرع/الفترة/منشئ القيد/مركز التكلفة/السنة المالية،
+    والترقيم (آخر 20 حركة افتراضياً، مع إمكانية التنقل للأقدم)."""
+    acc = db.query(Account).filter(Account.code == code).first()
+    if not acc:
+        raise HTTPException(404, "الحساب غير موجود")
+
+    debit_nature = acc.account_type in ("assets", "expenses")
+
+    # كل حركات هذا الحساب (بدون فلاتر) لحساب الرصيد قبل بداية الفترة المطلوبة بدقة
+    all_lines_q = (
+        db.query(JournalEntryLine, JournalEntry)
+        .join(JournalEntry, JournalEntryLine.entry_id == JournalEntry.id)
+        .filter(JournalEntryLine.account_code == code, JournalEntry.status == "posted")
+        .order_by(JournalEntry.entry_date.asc(), JournalEntry.id.asc())
+    )
+    if branch_id:
+        all_lines_q = all_lines_q.filter(JournalEntry.branch_id == branch_id)
+
+    all_rows = all_lines_q.all()
+
+    # الرصيد قبل بداية الفترة المفلترة (date_from) إن وُجدت
+    balance_before_period = float(acc.opening_balance or 0)
+    filtered_rows = []
+    for line, entry in all_rows:
+        before_start = date_from and entry.entry_date < date_from
+        if before_start:
+            d, c = float(line.debit or 0), float(line.credit or 0)
+            balance_before_period += (d - c) if debit_nature else (c - d)
+            continue
+        if date_to and entry.entry_date > date_to:
+            continue
+        if created_by and (not entry.created_by_name or created_by.lower() not in entry.created_by_name.lower()):
+            continue
+        if fiscal_year and entry.entry_date.year != fiscal_year:
+            continue
+        if cost_center_code:
+            has_cc = any(a.cost_center_code == cost_center_code for a in line.cost_allocations)
+            if not has_cc:
+                continue
+        filtered_rows.append((line, entry))
+
+    # احتساب الرصيد التراكمي لكل حركة ضمن الفترة المفلترة، بدءاً من balance_before_period
+    running = balance_before_period
+    enriched = []
+    for line, entry in filtered_rows:
+        d, c = float(line.debit or 0), float(line.credit or 0)
+        running += (d - c) if debit_nature else (c - d)
+        enriched.append({
+            "entry_id": entry.id,
+            "entry_date": entry.entry_date,
+            "operation": (entry.description or line.line_description or "-"),
+            "debit": d,
+            "credit": c,
+            "balance_after": running,
+            "branch_id": entry.branch_id,
+            "created_by_name": entry.created_by_name,
+            "status": entry.status,
+        })
+
+    total = len(enriched)
+    # الأحدث أولاً (لعرض "آخر 20 حركة" افتراضياً)، مع دعم التنقل للأقدم
+    enriched.reverse()
+    start = (page - 1) * page_size
+    page_rows = enriched[start:start + page_size]
+
+    return LedgerResponseOut(
+        account_code=acc.code,
+        account_name_ar=acc.name_ar,
+        account_name_en=acc.name_en,
+        account_type=acc.account_type,
+        opening_balance=float(acc.opening_balance or 0),
+        balance_before_period=balance_before_period,
+        current_balance=account_direct_balance(db, code, branch_id),
+        total=total,
+        page=page,
+        page_size=page_size,
+        transactions=[LedgerTransactionOut(**row) for row in page_rows],
+    )

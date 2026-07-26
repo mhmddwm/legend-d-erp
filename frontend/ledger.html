@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html dir="rtl" lang="ar">
+<head>
+<meta charset="UTF-8">
+<title>حساب الأستاذ — LEGEND D ERP</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg-page:#EEF2F7; --bg-card:#FFFFFF; --bg-card-2:#F8FAFD;
+  --ink:#0D1B2E; --ink-2:#1A3257; --ink-3:#2E4D7A;
+  --header-bg:#0D1B2E; --accent:#1565C0; --accent-light:#E3EDFF; --accent-hover:#0D47A1;
+  --teal:#00897B; --teal-bg:#E0F2F1; --coral:#C62828; --coral-bg:#FFEBEE;
+  --amber:#F57F17; --amber-bg:#FFF8E1; --success:#2E7D32; --success-bg:#E8F5E9;
+  --muted:#5C6B7D; --line:#D0D8E4; --line-2:#E8EDF3;
+  --shadow:0 2px 12px rgba(13,27,46,.10); --shadow-lg:0 8px 32px rgba(13,27,46,.16);
+  --radius:10px;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg-page);color:var(--ink);font-family:'Cairo',Tahoma,Arial,sans-serif;font-size:14px}
+
+.top-header{
+  background:var(--header-bg);color:#fff;padding:16px 26px;display:flex;align-items:center;justify-content:space-between;
+  box-shadow:var(--shadow-lg);
+}
+.top-header h1{font-size:17px;margin:0;font-weight:800}
+.top-header .sub{color:#9db2cf;font-size:12px;margin-top:2px}
+.back-link{color:#cfe0ff;text-decoration:none;font-weight:700;font-size:13px;border:1px solid #2c406e00;padding:8px 14px;border-radius:10px;background:rgba(255,255,255,.08)}
+.back-link:hover{background:rgba(255,255,255,.16)}
+
+.wrap{max-width:1180px;margin:22px auto;padding:0 18px}
+
+.acc-hero{
+  background:linear-gradient(135deg,#fff,#f8fbff);border:1px solid var(--line-2);border-radius:18px;
+  box-shadow:var(--shadow);padding:20px 24px;display:flex;justify-content:space-between;align-items:center;gap:20px;
+  margin-bottom:18px;flex-wrap:wrap;
+}
+.acc-hero .name{font-size:20px;font-weight:800;color:var(--ink-2)}
+.acc-hero .code{color:var(--muted);font-weight:700;font-size:13px;margin-top:2px}
+.acc-balances{display:flex;gap:22px;flex-wrap:wrap}
+.bal-box{text-align:center}
+.bal-box .lbl{font-size:11.5px;color:var(--muted);font-weight:700}
+.bal-box .val{font-size:19px;font-weight:800;color:var(--ink-2);margin-top:2px}
+.bal-box.current .val{color:var(--accent)}
+
+.toolbar{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;gap:10px;flex-wrap:wrap}
+.adv-btn{
+  display:flex;align-items:center;gap:8px;background:linear-gradient(135deg,var(--accent),var(--accent-hover));
+  color:#fff;border:none;padding:11px 18px;border-radius:12px;font-weight:800;font-size:13.5px;cursor:pointer;
+  box-shadow:0 6px 18px rgba(21,101,192,.28);transition:.15s ease;
+}
+.adv-btn:hover{transform:translateY(-1px);box-shadow:0 8px 22px rgba(21,101,192,.36)}
+
+.filters-card{
+  background:var(--bg-card);border:1px solid var(--line-2);border-radius:16px;padding:16px 18px;
+  box-shadow:var(--shadow);margin-bottom:16px;
+}
+.filters-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+@media (max-width:900px){.filters-grid{grid-template-columns:repeat(2,1fr)}}
+.f-field label{display:block;font-size:11.5px;font-weight:800;color:var(--ink-2);margin-bottom:5px}
+.f-field select,.f-field input{
+  width:100%;height:40px;border-radius:10px;border:1.5px solid var(--line);padding:0 10px;
+  font-family:'Cairo',sans-serif;font-weight:600;font-size:13px;background:#fff;color:var(--ink);
+  transition:.15s ease;
+}
+.f-field select:focus,.f-field input:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-light);outline:none}
+.filters-actions{display:flex;gap:8px;margin-top:12px}
+.btn{
+  height:38px;border-radius:10px;border:none;padding:0 16px;font-weight:800;font-size:13px;cursor:pointer;
+  background:var(--accent);color:#fff;transition:.15s ease;
+}
+.btn:hover{background:var(--accent-hover)}
+.btn.secondary{background:var(--bg-card-2);color:var(--ink-2);border:1.5px solid var(--line)}
+.btn.secondary:hover{background:var(--line-2)}
+
+.ledger-card{background:var(--bg-card);border:1px solid var(--line-2);border-radius:16px;box-shadow:var(--shadow);overflow:hidden}
+table.ledger{width:100%;border-collapse:collapse}
+table.ledger thead th{
+  background:var(--bg-card-2);color:var(--ink-2);font-weight:800;font-size:12.5px;
+  padding:12px 14px;border-bottom:2px solid var(--line);text-align:right;white-space:nowrap;
+}
+table.ledger tbody td{padding:11px 14px;border-bottom:1px solid var(--line-2);font-size:13px;color:var(--ink)}
+table.ledger tbody tr:hover{background:var(--bg-card-2)}
+table.ledger td.num{font-variant-numeric:tabular-nums;font-weight:700}
+table.ledger td.debit{color:var(--ink-3)}
+table.ledger td.credit{color:var(--teal)}
+table.ledger td.balance{color:var(--accent);font-weight:800}
+.status-cancelled{color:var(--coral);font-weight:800;font-size:11px}
+
+.empty-msg{padding:40px;text-align:center;color:var(--muted);font-weight:700}
+
+.pagination{display:flex;align-items:center;justify-content:center;gap:6px;padding:16px}
+.pg-btn{
+  min-width:34px;height:34px;border-radius:9px;border:1.5px solid var(--line);background:#fff;
+  color:var(--ink-2);font-weight:800;cursor:pointer;font-size:13px;transition:.15s ease;
+}
+.pg-btn:hover{background:var(--accent-light);border-color:var(--accent)}
+.pg-btn.active{background:var(--accent);border-color:var(--accent);color:#fff}
+.pg-btn:disabled{opacity:.4;cursor:not-allowed}
+
+/* ===== Advanced search modal ===== */
+.modal-overlay{
+  display:none;position:fixed;inset:0;background:rgba(13,27,46,.5);z-index:1000;
+  align-items:center;justify-content:center;padding:20px;
+}
+.modal-overlay.open{display:flex}
+.modal-box{
+  background:#fff;border-radius:18px;box-shadow:var(--shadow-lg);max-width:720px;width:100%;
+  max-height:88vh;overflow-y:auto;padding:24px 26px;
+}
+.modal-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}
+.modal-head h2{font-size:16px;margin:0;color:var(--ink-2);font-weight:800}
+.modal-close{background:none;border:none;font-size:20px;cursor:pointer;color:var(--muted)}
+.modal-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:14px}
+@media (max-width:600px){.modal-grid{grid-template-columns:1fr}}
+.modal-actions{display:flex;gap:10px;margin-top:20px;justify-content:flex-end}
+</style>
+</head>
+<body>
+
+<div class="top-header">
+  <div>
+    <h1 id="pageTitle">حساب الأستاذ الاحترافي</h1>
+    <div class="sub">LEGEND D ERP SYS</div>
+  </div>
+  <a href="index.html" class="back-link">← الرجوع للنظام</a>
+</div>
+
+<div class="wrap">
+
+  <div class="acc-hero">
+    <div>
+      <div class="name" id="accName">—</div>
+      <div class="code" id="accCode">—</div>
+    </div>
+    <div class="acc-balances">
+      <div class="bal-box"><div class="lbl">الرصيد الافتتاحي</div><div class="val" id="valOpening">0.00</div></div>
+      <div class="bal-box"><div class="lbl">الرصيد قبل الفترة</div><div class="val" id="valBeforePeriod">0.00</div></div>
+      <div class="bal-box current"><div class="lbl">الرصيد الحالي</div><div class="val" id="valCurrent">0.00</div></div>
+    </div>
+  </div>
+
+  <div class="toolbar">
+    <div style="font-weight:800;color:var(--ink-2);font-size:14px">📒 كشف الحساب</div>
+    <button class="adv-btn" onclick="openAdvancedSearch()">⭐ بحث متقدم</button>
+  </div>
+
+  <div class="filters-card">
+    <div class="filters-grid">
+      <div class="f-field">
+        <label>الفرع</label>
+        <select id="fBranch"></select>
+      </div>
+      <div class="f-field">
+        <label>الفترة من</label>
+        <input type="date" id="fDateFrom">
+      </div>
+      <div class="f-field">
+        <label>الفترة إلى</label>
+        <input type="date" id="fDateTo">
+      </div>
+      <div class="f-field">
+        <label>&nbsp;</label>
+        <div style="display:flex;gap:8px">
+          <button class="btn" onclick="applyFilters()">🔍 بحث</button>
+          <button class="btn secondary" onclick="clearFilters()">مسح</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="ledger-card">
+    <table class="ledger">
+      <thead>
+        <tr><th>التاريخ</th><th>العملية</th><th>مدين</th><th>دائن</th><th>الرصيد بعد</th></tr>
+      </thead>
+      <tbody id="ledgerBody"></tbody>
+    </table>
+    <div class="empty-msg" id="ledgerEmpty" style="display:none">لا توجد حركات مطابقة</div>
+    <div class="pagination" id="pagination"></div>
+  </div>
+
+</div>
+
+<!-- ===== Advanced Search Modal ===== -->
+<div class="modal-overlay" id="advModal">
+  <div class="modal-box">
+    <div class="modal-head">
+      <h2>⭐ البحث المتقدم — كشف الحساب</h2>
+      <button class="modal-close" onclick="closeAdvancedSearch()">✕</button>
+    </div>
+    <div class="modal-grid">
+      <div class="f-field">
+        <label>الفترة من</label>
+        <input type="date" id="advDateFrom">
+      </div>
+      <div class="f-field">
+        <label>الفترة إلى</label>
+        <input type="date" id="advDateTo">
+      </div>
+      <div class="f-field">
+        <label>نوع الحساب</label>
+        <select id="advAccountType">
+          <option value="">الكل</option>
+          <option value="main">حساب رئيسي</option>
+          <option value="sub">حساب فرعي</option>
+        </select>
+      </div>
+      <div class="f-field">
+        <label>اسم / كود الحساب</label>
+        <input type="text" id="advAccountSearch" list="advAccountsDatalist" placeholder="ابحث لعرض حساب آخر">
+        <datalist id="advAccountsDatalist"></datalist>
+      </div>
+      <div class="f-field">
+        <label>أُنشئ بواسطة</label>
+        <select id="advCreatedBy"><option value="">الكل</option></select>
+      </div>
+      <div class="f-field">
+        <label>الفرع</label>
+        <select id="advBranch"><option value="">الكل</option></select>
+      </div>
+      <div class="f-field">
+        <label>مركز التكلفة</label>
+        <select id="advCostCenter"><option value="">الكل</option></select>
+      </div>
+      <div class="f-field">
+        <label>السنة المالية</label>
+        <select id="advFiscalYear"><option value="">الكل</option></select>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn secondary" onclick="closeAdvancedSearch()">إلغاء</button>
+      <button class="btn" onclick="applyAdvancedSearch()">تطبيق البحث</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const API = (["127.0.0.1","localhost"].includes(location.hostname)) ? "http://127.0.0.1:8080" : "";
+
+function fmt(n){ return (parseFloat(n)||0).toLocaleString('en',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+
+async function api(method, path, body){
+  const opts={method, headers:{'Content-Type':'application/json'}};
+  if(body) opts.body=JSON.stringify(body);
+  const res=await fetch(API+path, opts);
+  const json=await res.json().catch(()=>({}));
+  if(!res.ok) throw new Error(json.detail||json.message||'خطأ في الخادم');
+  return json;
+}
+
+const params = new URLSearchParams(location.search);
+let currentAccountCode = params.get('account') || '';
+let currentPage = 1;
+let allAccounts = [];
+let allBranches = [];
+let allCostCenters = [];
+let allUsers = [];
+
+let activeFilters = { branch_id:'', date_from:'', date_to:'', created_by:'', cost_center_code:'', fiscal_year:'' };
+
+async function loadReferenceData(){
+  try{ allAccounts = await api('GET','/api/accounts'); }catch(e){ allAccounts = []; }
+  try{ allBranches = await api('GET','/api/branches'); }catch(e){ allBranches = []; }
+  try{ allCostCenters = await api('GET','/api/cost-centers'); }catch(e){ allCostCenters = []; }
+  try{ allUsers = await api('GET','/users'); }catch(e){ allUsers = []; }
+
+  const branchOptions = '<option value="">الكل</option>' + allBranches.map(b=>`<option value="${b.id}">${b.code} — ${b.name_ar}</option>`).join('');
+  document.getElementById('fBranch').innerHTML = '<option value="">كل الفروع</option>' + allBranches.map(b=>`<option value="${b.id}">${b.code} — ${b.name_ar}</option>`).join('');
+  document.getElementById('advBranch').innerHTML = branchOptions;
+
+  document.getElementById('advCostCenter').innerHTML = '<option value="">الكل</option>' + allCostCenters.map(c=>`<option value="${c.code}">${c.code} — ${c.name_ar}</option>`).join('');
+
+  const userNames = [...new Set(allUsers.map(u=>u.full_name || u.name || u.username).filter(Boolean))];
+  document.getElementById('advCreatedBy').innerHTML = '<option value="">الكل</option>' + userNames.map(n=>`<option value="${n}">${n}</option>`).join('');
+
+  const years = [...new Set([new Date().getFullYear(), new Date().getFullYear()-1, new Date().getFullYear()-2])];
+  document.getElementById('advFiscalYear').innerHTML = '<option value="">الكل</option>' + years.map(y=>`<option value="${y}">${y}</option>`).join('');
+
+  document.getElementById('advAccountsDatalist').innerHTML = allAccounts.map(a=>`<option value="${a.code} — ${a.name_ar}">`).join('');
+}
+
+function resolveAccountCodeFromText(text){
+  if(!text) return null;
+  const t = text.trim();
+  const direct = allAccounts.find(a=>a.code===t);
+  if(direct) return direct.code;
+  const byLabel = allAccounts.find(a=>`${a.code} — ${a.name_ar}` === t);
+  if(byLabel) return byLabel.code;
+  const partial = allAccounts.find(a=> a.code.includes(t) || (a.name_ar||'').includes(t));
+  return partial ? partial.code : null;
+}
+
+async function loadLedger(){
+  if(!currentAccountCode){
+    document.getElementById('accName').textContent = 'لم يتم تحديد حساب';
+    return;
+  }
+  const qs = new URLSearchParams();
+  if(activeFilters.branch_id) qs.set('branch_id', activeFilters.branch_id);
+  if(activeFilters.date_from) qs.set('date_from', activeFilters.date_from);
+  if(activeFilters.date_to) qs.set('date_to', activeFilters.date_to);
+  if(activeFilters.created_by) qs.set('created_by', activeFilters.created_by);
+  if(activeFilters.cost_center_code) qs.set('cost_center_code', activeFilters.cost_center_code);
+  if(activeFilters.fiscal_year) qs.set('fiscal_year', activeFilters.fiscal_year);
+  qs.set('page', currentPage);
+  qs.set('page_size', 20);
+
+  try{
+    const data = await api('GET', `/api/accounts/${encodeURIComponent(currentAccountCode)}/ledger?${qs.toString()}`);
+    renderLedger(data);
+  }catch(e){
+    document.getElementById('ledgerBody').innerHTML='';
+    document.getElementById('ledgerEmpty').style.display='block';
+    document.getElementById('ledgerEmpty').textContent = 'تعذر تحميل كشف الحساب: ' + e.message;
+  }
+}
+
+function renderLedger(data){
+  document.getElementById('pageTitle').textContent = `حساب الأستاذ — ${data.account_name_ar}`;
+  document.title = `حساب الأستاذ — ${data.account_name_ar}`;
+  document.getElementById('accName').textContent = data.account_name_ar;
+  document.getElementById('accCode').textContent = `الكود: ${data.account_code}`;
+  document.getElementById('valOpening').textContent = fmt(data.opening_balance);
+  document.getElementById('valBeforePeriod').textContent = fmt(data.balance_before_period);
+  document.getElementById('valCurrent').textContent = fmt(data.current_balance);
+
+  const body = document.getElementById('ledgerBody');
+  const empty = document.getElementById('ledgerEmpty');
+
+  if(!data.transactions.length){
+    body.innerHTML = '';
+    empty.style.display = 'block';
+    empty.textContent = 'لا توجد حركات مطابقة';
+  } else {
+    empty.style.display = 'none';
+    body.innerHTML = data.transactions.map(t=>`
+      <tr>
+        <td>${t.entry_date}</td>
+        <td>${escHtml(t.operation)} ${t.status==='cancelled' ? '<span class="status-cancelled">(ملغى)</span>' : ''}</td>
+        <td class="num debit">${t.debit ? fmt(t.debit) : '-'}</td>
+        <td class="num credit">${t.credit ? fmt(t.credit) : '-'}</td>
+        <td class="num balance">${fmt(t.balance_after)}</td>
+      </tr>
+    `).join('');
+  }
+
+  renderPagination(data.total, data.page, data.page_size);
+}
+
+function escHtml(s){ return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+function renderPagination(total, page, pageSize){
+  const box = document.getElementById('pagination');
+  const pageCount = Math.max(1, Math.ceil(total / pageSize));
+  if(pageCount <= 1){ box.innerHTML=''; return; }
+
+  let html = `<button class="pg-btn" ${page<=1?'disabled':''} onclick="goToPage(${page-1})">‹</button>`;
+  const windowSize = 2;
+  for(let p=1; p<=pageCount; p++){
+    if(p===1 || p===pageCount || Math.abs(p-page)<=windowSize){
+      html += `<button class="pg-btn ${p===page?'active':''}" onclick="goToPage(${p})">${p}</button>`;
+    } else if(Math.abs(p-page)===windowSize+1){
+      html += `<span style="padding:0 4px;color:var(--muted)">…</span>`;
+    }
+  }
+  html += `<button class="pg-btn" ${page>=pageCount?'disabled':''} onclick="goToPage(${page+1})">›</button>`;
+  box.innerHTML = html;
+}
+
+function goToPage(p){
+  currentPage = p;
+  loadLedger();
+  window.scrollTo({top:0, behavior:'smooth'});
+}
+
+function applyFilters(){
+  activeFilters.branch_id = document.getElementById('fBranch').value;
+  activeFilters.date_from = document.getElementById('fDateFrom').value;
+  activeFilters.date_to = document.getElementById('fDateTo').value;
+  currentPage = 1;
+  loadLedger();
+}
+
+function clearFilters(){
+  document.getElementById('fBranch').value = '';
+  document.getElementById('fDateFrom').value = '';
+  document.getElementById('fDateTo').value = '';
+  activeFilters = { branch_id:'', date_from:'', date_to:'', created_by:'', cost_center_code:'', fiscal_year:'' };
+  currentPage = 1;
+  loadLedger();
+}
+
+function openAdvancedSearch(){
+  document.getElementById('advDateFrom').value = activeFilters.date_from || '';
+  document.getElementById('advDateTo').value = activeFilters.date_to || '';
+  document.getElementById('advBranch').value = activeFilters.branch_id || '';
+  document.getElementById('advCostCenter').value = activeFilters.cost_center_code || '';
+  document.getElementById('advCreatedBy').value = activeFilters.created_by || '';
+  document.getElementById('advFiscalYear').value = activeFilters.fiscal_year || '';
+  document.getElementById('advAccountSearch').value = '';
+  document.getElementById('advModal').classList.add('open');
+}
+
+function closeAdvancedSearch(){
+  document.getElementById('advModal').classList.remove('open');
+}
+
+function applyAdvancedSearch(){
+  const accountTypeFilter = document.getElementById('advAccountType').value;
+  const accountSearchText = document.getElementById('advAccountSearch').value.trim();
+
+  // لو المستخدم بحث عن حساب مختلف بالبحث المتقدم، ننتقل لعرض ذلك الحساب
+  if(accountSearchText){
+    let candidates = allAccounts;
+    if(accountTypeFilter==='main') candidates = candidates.filter(a=>!a.parent_code);
+    if(accountTypeFilter==='sub') candidates = candidates.filter(a=>!!a.parent_code);
+    const resolved = resolveAccountCodeFromText(accountSearchText);
+    const match = candidates.find(a=>a.code===resolved) || candidates.find(a=> a.code.includes(accountSearchText) || (a.name_ar||'').includes(accountSearchText));
+    if(match){
+      currentAccountCode = match.code;
+      const url = new URL(location.href);
+      url.searchParams.set('account', match.code);
+      history.replaceState(null,'',url);
+    }
+  }
+
+  activeFilters.date_from = document.getElementById('advDateFrom').value;
+  activeFilters.date_to = document.getElementById('advDateTo').value;
+  activeFilters.branch_id = document.getElementById('advBranch').value;
+  activeFilters.cost_center_code = document.getElementById('advCostCenter').value;
+  activeFilters.created_by = document.getElementById('advCreatedBy').value;
+  activeFilters.fiscal_year = document.getElementById('advFiscalYear').value;
+
+  // مزامنة الفلاتر البسيطة أعلى الصفحة مع نفس القيم
+  document.getElementById('fBranch').value = activeFilters.branch_id;
+  document.getElementById('fDateFrom').value = activeFilters.date_from;
+  document.getElementById('fDateTo').value = activeFilters.date_to;
+
+  currentPage = 1;
+  closeAdvancedSearch();
+  loadLedger();
+}
+
+(async function init(){
+  await loadReferenceData();
+  await loadLedger();
+})();
+</script>
+</body>
+</html>

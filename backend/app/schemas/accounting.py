@@ -65,6 +65,32 @@ class LineCostAllocationOut(BaseModel):
         from_attributes = True
 
 
+class LedgerTransactionOut(BaseModel):
+    entry_id: int
+    entry_date: date
+    operation: str
+    debit: float
+    credit: float
+    balance_after: float
+    branch_id: Optional[int] = None
+    created_by_name: Optional[str] = None
+    status: str
+
+
+class LedgerResponseOut(BaseModel):
+    account_code: str
+    account_name_ar: str
+    account_name_en: Optional[str] = None
+    account_type: str
+    opening_balance: float
+    balance_before_period: float
+    current_balance: float
+    total: int
+    page: int
+    page_size: int
+    transactions: list[LedgerTransactionOut]
+
+
 class JournalEntryLineIn(BaseModel):
     account_code: str
     debit: float = Field(default=0, ge=0)
