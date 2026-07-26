@@ -32,6 +32,7 @@ let costCenters=[]; // مراكز التكلفة
 let journalEditingId=null; // معرّف القيد الجاري تعديله (null = إنشاء قيد جديد)
 let journalPage=1; // الصفحة الحالية في قائمة القيود
 const JOURNAL_PAGE_SIZE=20;
+let entryDetailId=null; // معرّف القيد المعروض حالياً في صفحة تفاصيل القيد
 
 // ============================================================
 // دوال مساعدة
@@ -988,7 +989,7 @@ function renderJournal(){
     const isCancelled = status==='cancelled';
     
     return `<tr>
-      <td>${e.id||''}</td>
+      <td><button class="entry-link" onclick="openEntryDetail(${e.id})">#${e.id||''}</button></td>
       <td>${e.entry_date||''}</td>
       <td>${branchName}</td> <!-- تم إضافة العمود الجديد هنا -->
       <td>${summary || '-'}</td>
@@ -1812,6 +1813,90 @@ function viewJournalEntry(id){
 }
 
 
+
+function getSortedJournalEntries(){
+  return [...(entries||[])].sort((a,b)=>{
+    if(a.entry_date!==b.entry_date) return a.entry_date<b.entry_date?1:-1;
+    return (b.id||0)-(a.id||0);
+  });
+}
+
+function openEntryDetail(id){
+  entryDetailId=id;
+  if(typeof openSubModule==='function') openSubModule('تفاصيل القيد');
+  renderEntryDetail();
+}
+
+function navigateEntryDetail(dir){
+  const sorted=getSortedJournalEntries();
+  const idx=sorted.findIndex(x=>x.id===entryDetailId);
+  if(idx===-1) return;
+  const newIdx=idx-dir; // dir=+1 يعني "التالي" (الأحدث تسلسلياً)، dir=-1 يعني "السابق"
+  if(newIdx<0 || newIdx>=sorted.length) return;
+  entryDetailId=sorted[newIdx].id;
+  renderEntryDetail();
+}
+
+function renderEntryDetail(){
+  const box=document.getElementById('entryDetailBody');
+  if(!box) return;
+  const e=(entries||[]).find(x=>x.id===entryDetailId);
+  if(!e){ box.innerHTML='<div class="empty-msg">القيد غير موجود</div>'; return; }
+
+  const sorted=getSortedJournalEntries();
+  const idx=sorted.findIndex(x=>x.id===entryDetailId);
+  const hasOlder=idx<sorted.length-1;
+  const hasNewer=idx>0;
+
+  const lines=(e.lines&&e.lines.length) ? e.lines : [
+    ...(e.debit_account?[{account_code:e.debit_account, debit:e.amount, credit:0, line_description:e.description}]:[]),
+    ...(e.credit_account?[{account_code:e.credit_account, debit:0, credit:e.amount, line_description:e.description}]:[]),
+  ];
+  const rows=lines.map(l=>`<tr>
+      <td>${accountLabel(l.account_code)}</td>
+      <td>${l.line_description||''}</td>
+      <td class="num">${l.debit?fmt(l.debit):''}</td>
+      <td class="num">${l.credit?fmt(l.credit):''}</td>
+    </tr>`).join('');
+
+  const status=e.status||'posted';
+  const statusBadge = status==='cancelled' ? `<span class="badge returned">ملغي</span>` : `<span class="badge posted">مرحّل</span>`;
+  const branchObj=(branches||[]).find(b=>b.id==e.branch_id);
+  const branchName=branchObj ? `${branchObj.code} — ${branchObj.name_ar}` : 'عام';
+  const ccObj=(costCenters||[]).find(c=>c.code===e.cost_center_code);
+  const isManual=e.source_type==='manual';
+  const isCancelled=status==='cancelled';
+
+  box.innerHTML=`
+    <div class="entry-nav-bar">
+      <button class="entry-nav-btn" onclick="navigateEntryDetail(-1)" ${hasOlder?'':'disabled'}>◀ القيد السابق</button>
+      <div class="entry-nav-title">قيد رقم #${e.id} ${statusBadge}</div>
+      <button class="entry-nav-btn" onclick="navigateEntryDetail(1)" ${hasNewer?'':'disabled'}>القيد التالي ▶</button>
+    </div>
+    <div class="frow">
+      <div class="field"><label>التاريخ</label><div class="num" style="font-weight:700">${e.entry_date||''}</div></div>
+      <div class="field"><label>الفرع</label><div style="font-weight:700">${branchName}</div></div>
+      <div class="field"><label>مركز التكلفة</label><div style="font-weight:700">${ccObj?`${ccObj.code} — ${ccObj.name_ar}`:'-'}</div></div>
+    </div>
+    <div class="frow" style="grid-template-columns:1fr 1fr">
+      <div class="field"><label>البيان</label><div style="font-weight:700">${e.description||'-'}</div></div>
+      <div class="field"><label>منشئ القيد</label><div style="font-weight:700">${e.created_by_name||'-'}</div></div>
+    </div>
+    <div class="gridcard" style="margin:14px 0"><div class="scrollx">
+      <table class="grid">
+        <thead><tr><th>الحساب</th><th>البيان</th><th>مدين</th><th>دائن</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div></div>
+    <p style="font-weight:800;font-size:15px">الإجمالي: ${fmt(e.total_amount ?? e.amount ?? 0)}</p>
+    <div style="display:flex;gap:8px;margin-top:10px">
+      ${isManual && !isCancelled ? `<button class="btn secondary" onclick="editJournalEntry(${e.id})">✎ تعديل</button>` : ''}
+      <button class="btn secondary" onclick="duplicateJournalEntry(${e.id})">⧉ نسخ قيد دوري</button>
+      ${isManual ? `<button class="btn secondary" style="color:var(--coral)" onclick="deleteEntry(${e.id})">🗑 حذف</button>` : ''}
+      <button class="btn secondary" onclick="openSubModule('القيود اليومية')">رجوع للقائمة</button>
+    </div>
+  `;
+}
 
 function getProductCategories(){
   try{
@@ -3065,6 +3150,7 @@ function openSubModule(name){
     'دليل الحسابات':'tree',
     'القيود اليومية':'journal',
     'إضافة قيد':'entry',
+    'تفاصيل القيد':'entry-detail',
     'مراكز التكلفة':'cost',
     'إعدادات الحسابات':'settings',
     'إعدادات الضرائب':'tax_settings',
@@ -4002,3 +4088,107 @@ window.purchaseOrders = window.purchaseOrders || [];
 
 window.rfqSuppliers = window.rfqSuppliers || [];
 window.suppliers = window.suppliers || [];
+
+// ==============================================================
+// إصلاح شامل وتلقائي لكل حقول الأرقام والتواريخ في النظام بأكمله
+// - يجبر عرض التاريخ/الأرقام بالإنجليزية (lang=en) لتفادي مشكلة
+//   "يوم / شهر / سنة" المعكوسة في متصفحات اللغة العربية.
+// - يحوّل تلقائياً أي رقم عربي/هندي (٠-٩) يكتبه المستخدم إلى رقم
+//   إنجليزي فور الكتابة (قبول ذكي للإدخال، مهما كانت لغة لوحة المفاتيح).
+// - يعمل تلقائياً على أي حقل جديد يُضاف لاحقاً بأي شاشة عبر MutationObserver.
+// ==============================================================
+(function(){
+  const DIGIT_MAP = {
+    '٠':'0','١':'1','٢':'2','٣':'3','٤':'4','٥':'5','٦':'6','٧':'7','٨':'8','٩':'9',
+    '۰':'0','۱':'1','۲':'2','۳':'3','۴':'4','۵':'5','۶':'6','۷':'7','۸':'8','۹':'9'
+  };
+  function normalizeDigits(str){
+    return String(str).replace(/[٠-٩۰-۹]/g, ch => DIGIT_MAP[ch] !== undefined ? DIGIT_MAP[ch] : ch);
+  }
+  window.normalizeDigits = normalizeDigits;
+
+  const NUMERIC_DATE_SELECTOR = 'input[type="date"],input[type="number"],input[type="month"],input[type="week"],input[type="time"],input[type="datetime-local"]';
+
+  function forceEnglish(el){
+    if(!el || el.dataset.ltrFixed) return;
+    el.setAttribute('lang','en');
+    el.setAttribute('dir','ltr');
+    el.dataset.ltrFixed='1';
+  }
+
+  function applyToRoot(root){
+    try{
+      (root||document).querySelectorAll(NUMERIC_DATE_SELECTOR).forEach(forceEnglish);
+    }catch(e){}
+  }
+
+  function shouldNormalize(el){
+    if(!el || el.tagName !== 'INPUT') return false;
+    if(el.type === 'number') return true;
+    if(el.type === 'text' && (el.classList.contains('numeric-input') || el.inputMode === 'numeric' || el.inputMode === 'decimal')) return true;
+    return false;
+  }
+
+  // قبول ذكي: تحويل أي رقم عربي/هندي يُكتب في حقل رقمي إلى رقم إنجليزي *قبل*
+  // أن يرفضه المتصفح. حقول type=number تتجاهل الأرقام العربية تلقائياً في
+  // حدث input (لأن المتصفح يُبطلها قبل وصولها)، لذلك نعترضها في beforeinput
+  // حيث لا تزال الأحرف الأصلية متاحة عبر event.data. نستخدم execCommand
+  // بدل التعديل اليدوي على value لأن selectionStart/setSelectionRange غير
+  // مدعومة أصلاً على حقول type=number في المتصفحات.
+  document.addEventListener('beforeinput', function(ev){
+    const el = ev.target;
+    if(!shouldNormalize(el)) return;
+    if(!ev.data || !/[٠-٩۰-۹]/.test(ev.data)) return;
+    ev.preventDefault();
+    document.execCommand('insertText', false, normalizeDigits(ev.data));
+  }, true);
+
+  // تحديد كامل محتوى الحقل عند التركيز عليه لحقول الأرقام، حتى لا يضطر
+  // المستخدم لحذف الصفر الافتراضي يدوياً قبل كتابة قيمة جديدة (تجربة
+  // استخدام معتادة في أنظمة ERP الاحترافية مثل Odoo).
+  document.addEventListener('focus', function(ev){
+    const el = ev.target;
+    if(el && el.tagName==='INPUT' && el.type==='number'){
+      try{ el.select(); }catch(e){}
+    }
+  }, true);
+
+  // شبكة أمان إضافية: لو دخل رقم عربي عبر لصق أو أي مسار آخر لم يمر بـ
+  // beforeinput، ننظّفه أيضاً هنا (لن يفيد في type=number لأن المتصفح
+  // يكون قد أفرغ القيمة فعلاً، لكنه يبقي الحقول النصية الرقمية متسقة).
+  document.addEventListener('input', function(ev){
+    const el = ev.target;
+    if(!shouldNormalize(el)) return;
+    const normalized = normalizeDigits(el.value);
+    if(normalized !== el.value){
+      const pos = el.selectionStart;
+      el.value = normalized;
+      try{ el.setSelectionRange(pos, pos); }catch(e){}
+    }
+  }, true);
+
+  // تطبيق فوري على كل الحقول الموجودة حالياً
+  if(document.readyState === 'loading'){
+    document.addEventListener('DOMContentLoaded', ()=>applyToRoot(document));
+  } else {
+    applyToRoot(document);
+  }
+
+  // مراقبة أي حقول جديدة تُضاف لاحقاً بأي شاشة (نتيجة إعادة رسم الجداول/النماذج)
+  const observer = new MutationObserver(function(mutations){
+    for(const m of mutations){
+      m.addedNodes && m.addedNodes.forEach(function(node){
+        if(node.nodeType !== 1) return;
+        if(node.matches && node.matches(NUMERIC_DATE_SELECTOR)) forceEnglish(node);
+        if(node.querySelectorAll) applyToRoot(node);
+      });
+    }
+  });
+  if(document.body){
+    observer.observe(document.body, {childList:true, subtree:true});
+  } else {
+    document.addEventListener('DOMContentLoaded', function(){
+      observer.observe(document.body, {childList:true, subtree:true});
+    });
+  }
+})();

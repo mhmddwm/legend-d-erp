@@ -44,6 +44,45 @@
   --nav-h:46px;
 }
 
+/* إصلاح شامل: كل حقول الأرقام والتواريخ تُعرض دائماً بالإنجليزية LTR
+   حتى لا تظهر "يوم / شهر / سنة" معكوسة، وتبقى منسّقة (محاذاة يمين
+   لتناسق تخطيط RTL العام) بغض النظر عن الشاشة أو وقت إضافة الحقل. */
+input[type="date"], input[type="number"], input[type="month"],
+input[type="week"], input[type="time"], input[type="datetime-local"]{
+  direction: ltr;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* رابط رقم القيد في شاشة القيود اليومية */
+.entry-link{
+  background:none; border:none; padding:0; cursor:pointer;
+  color:var(--accent); font-weight:700; text-decoration:underline;
+  text-underline-offset:3px; font-size:inherit; font-family:inherit;
+}
+.entry-link:hover{ color:var(--accent-hover); }
+
+/* شريط التنقل بين القيود (السابق/التالي) في صفحة تفاصيل القيد */
+.entry-nav-bar{
+  display:flex; align-items:center; justify-content:space-between;
+  gap:12px; margin-bottom:16px; flex-wrap:wrap;
+}
+.entry-nav-btn{
+  display:inline-flex; align-items:center; gap:6px;
+  background:var(--bg-card); border:1.5px solid var(--line);
+  color:var(--ink-2); font-weight:700; font-size:13.5px;
+  padding:9px 18px; border-radius:999px; cursor:pointer;
+  box-shadow:var(--shadow); transition:all .15s ease;
+}
+.entry-nav-btn:hover:not(:disabled){
+  background:var(--accent); color:#fff; border-color:var(--accent);
+  transform:translateY(-1px); box-shadow:var(--shadow-lg);
+}
+.entry-nav-btn:disabled{ opacity:.4; cursor:not-allowed; }
+.entry-nav-title{
+  font-weight:800; font-size:16px; color:var(--ink-2);
+}
+
 /* ===== RESET & BASE ===== */
 *{box-sizing:border-box;margin:0;padding:0;}
 body{
@@ -1496,6 +1535,11 @@ html[dir="ltr"] .brand-center{direction:ltr;}
       <button class="btn secondary" type="button" onclick="resetJournalForm()">إلغاء / قيد جديد</button>
       <div class="err" id="jErr"></div>
     </div>
+  </div>
+
+  <!-- ========== JOURNAL ENTRY DETAIL (hyperlink target + prev/next) ========== -->
+  <div class="panel" id="panel-entry-detail">
+    <div class="formcard journal-modern-form" id="entryDetailBody"></div>
   </div>
 
   <!-- ========== JOURNAL LIST + SEARCH ========== -->
@@ -5657,7 +5701,7 @@ input,select,textarea,button,table{font-family:inherit!important;}
 </script>
 
 <style>
-/* ===== v42: search buttons, creator suggestions, RFQ/PO checkboxes+bulk actions+pagination, date dd/mm/yyyy hint ===== */
+/* ===== v42: search buttons, creator suggestions, RFQ/PO checkboxes+bulk actions+pagination ===== */
 .rfq-timeline span{cursor:pointer;transition:filter .15s}
 .rfq-timeline span:hover{filter:brightness(.96)}
 .po-trace.rfq-timeline{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
@@ -5672,27 +5716,35 @@ input,select,textarea,button,table{font-family:inherit!important;}
 .pr-saved-table td:first-child, .pr-saved-table th:first-child,
 .rfq-saved-table td:first-child, .rfq-saved-table th:first-child,
 .po-list-table td:first-child, .po-list-table th:first-child{width:36px;text-align:center}
-.date-dd-hint{display:block;color:#64748b;font-size:11px;margin-top:3px;font-weight:700}
 </style>
 
 <script>
-/* ===== v42: show day/month/year hint next to every native date input (non-invasive, keeps ISO storage) ===== */
+/* ===== فرض عرض الأرقام بالصيغة الإنجليزية (0-9) بكل حقول الأرقام والتواريخ ===== */
+/* السبب: صفر اللغة العربية (٠) غير واضح للعين. النظام يبقى ذكياً ويقبل
+   إدخال أرقام عربية أو إنجليزية بلا فرق (المتصفح يفهم الاثنين تلقائياً بحقول
+   type=number/date)، لكن العرض دائماً بالأرقام الإنجليزية عبر خاصية lang="en"
+   على هذي الحقول تحديداً، بغض النظر عن لغة الصفحة العامة (ar). يعمل تلقائياً
+   على أي حقل يُضاف لاحقاً بالصفحة (عبر MutationObserver) بدون حاجة لتعديل كل شاشة يدوياً. */
 (function(){
   'use strict';
-  function fmt(v){ if(!v) return ''; const m=String(v).match(/^(\d{4})-(\d{2})-(\d{2})/); return m? `${m[3]}/${m[2]}/${m[1]}`:''; }
-  function decorate(input){
-    if(input.dataset.ddDecorated==='1') return;
-    input.dataset.ddDecorated='1';
-    const hint=document.createElement('small');
-    hint.className='date-dd-hint';
-    input.insertAdjacentElement('afterend',hint);
-    const update=()=>{ hint.textContent = input.value ? ('يوم/شهر/سنة: '+fmt(input.value)) : ''; };
-    input.addEventListener('change',update);
-    input.addEventListener('input',update);
-    update();
+  function forceEnglishNumerals(root){
+    (root.querySelectorAll ? root : document).querySelectorAll('input[type="number"], input[type="date"], input[type="time"], input[type="datetime-local"]').forEach(el=>{
+      if(el.lang !== 'en') el.lang = 'en';
+    });
   }
-  function scan(){ document.querySelectorAll('input[type="date"]').forEach(decorate); }
-  document.addEventListener('DOMContentLoaded',()=>{ scan(); setInterval(scan,1500); });
+  document.addEventListener('DOMContentLoaded', ()=>forceEnglishNumerals(document));
+  const observer = new MutationObserver(muts=>{
+    for(const m of muts){
+      m.addedNodes && m.addedNodes.forEach(node=>{
+        if(node.nodeType !== 1) return;
+        if(node.matches && node.matches('input[type="number"],input[type="date"],input[type="time"],input[type="datetime-local"]')){
+          node.lang = 'en';
+        }
+        if(node.querySelectorAll) forceEnglishNumerals(node);
+      });
+    }
+  });
+  observer.observe(document.documentElement, {childList:true, subtree:true});
 })();
 </script>
 
