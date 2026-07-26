@@ -48,11 +48,57 @@
    حتى لا تظهر "يوم / شهر / سنة" معكوسة، وتبقى منسّقة (محاذاة يمين
    لتناسق تخطيط RTL العام) بغض النظر عن الشاشة أو وقت إضافة الحقل. */
 input[type="date"], input[type="number"], input[type="month"],
-input[type="week"], input[type="time"], input[type="datetime-local"]{
+input[type="week"], input[type="time"], input[type="datetime-local"],
+input.ldp-input, input.numeric-fmt{
   direction: ltr;
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
+
+/* منتقي التاريخ المخصص (لا يعتمد على input[type=date] الأصلي إطلاقاً،
+   لذا لا يتأثر بلغة واجهة المتصفح — يبقى دائماً بالإنجليزية وبشكل عصري) */
+.ldp-popup{
+  position:absolute; z-index:9999; width:260px;
+  background:var(--bg-card); border:1px solid var(--line);
+  border-radius:14px; box-shadow:var(--shadow-lg);
+  padding:12px; direction:ltr; font-family:inherit;
+}
+.ldp-header{
+  display:flex; align-items:center; justify-content:space-between;
+  margin-bottom:8px;
+}
+.ldp-title{ font-weight:800; font-size:14px; color:var(--ink-2); }
+.ldp-nav{
+  background:var(--bg-card-2); border:1px solid var(--line);
+  border-radius:8px; width:28px; height:28px; cursor:pointer;
+  font-size:15px; color:var(--ink-2);
+}
+.ldp-nav:hover{ background:var(--accent); color:#fff; border-color:var(--accent); }
+.ldp-weekdays{
+  display:grid; grid-template-columns:repeat(7,1fr);
+  font-size:10.5px; color:var(--muted); text-align:center; margin-bottom:4px;
+}
+.ldp-grid{
+  display:grid; grid-template-columns:repeat(7,1fr); gap:2px;
+}
+.ldp-day{
+  display:flex; align-items:center; justify-content:center;
+  height:30px; border-radius:8px; cursor:pointer; font-size:12.5px;
+  color:var(--ink-2);
+}
+.ldp-day:hover{ background:var(--bg-card-2); }
+.ldp-day.ldp-empty{ cursor:default; }
+.ldp-day.ldp-today{ font-weight:800; color:var(--accent); }
+.ldp-day.ldp-sel{ background:var(--accent); color:#fff; font-weight:700; }
+.ldp-footer{
+  display:flex; justify-content:space-between; margin-top:10px;
+  border-top:1px solid var(--line); padding-top:8px;
+}
+.ldp-today-btn, .ldp-clear-btn{
+  background:none; border:none; font-size:12px; cursor:pointer;
+  color:var(--accent); font-weight:700; padding:4px 6px;
+}
+.ldp-clear-btn{ color:var(--coral); }
 
 /* رابط رقم القيد في شاشة القيود اليومية */
 .entry-link{
@@ -1582,9 +1628,9 @@ html[dir="ltr"] .brand-center{direction:ltr;}
           <div class="field jrange-field">
             <label>المبلغ</label>
             <div class="jrange-row">
-              <input id="jsAmountFrom" type="number" step="0.01" placeholder="من" oninput="applyJournalSearch()">
+              <input id="jsAmountFrom" type="text" inputmode="decimal" class="numeric-fmt" placeholder="من" oninput="applyJournalSearch()">
               <span class="jrange-sep">إلى</span>
-              <input id="jsAmountTo" type="number" step="0.01" placeholder="إلى" oninput="applyJournalSearch()">
+              <input id="jsAmountTo" type="text" inputmode="decimal" class="numeric-fmt" placeholder="إلى" oninput="applyJournalSearch()">
             </div>
           </div>
           <div class="field" style="align-self:flex-end;display:flex;gap:8px;flex-direction:row">

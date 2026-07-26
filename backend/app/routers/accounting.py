@@ -246,6 +246,10 @@ def create_journal_entry(payload: JournalEntryIn, db: Session = Depends(get_db))
         source_type="manual",
         status="posted",
         total_amount=total,
+        # عمود amount قديم ولا يزال NOT NULL في قاعدة البيانات الفعلية؛
+        # نُبقيه معبّأً دائماً بإجمالي القيد لتفادي كسر القيد بدون الحاجة
+        # لتشغيل migration إضافية الآن.
+        amount=total,
     )
     db.add(entry)
     db.flush()  # للحصول على entry.id قبل إضافة الأسطر
@@ -291,6 +295,7 @@ def update_journal_entry(entry_id: int, payload: JournalEntryIn, db: Session = D
     if payload.branch_id is not None:
         entry.branch_id = payload.branch_id
     entry.total_amount = total
+    entry.amount = total
 
     # استبدال الأسطر بالكامل بالقيمة الجديدة (يحذف تلقائياً توزيعات مركز التكلفة القديمة عبر cascade)
     db.query(JournalEntryLine).filter(JournalEntryLine.entry_id == entry.id).delete()

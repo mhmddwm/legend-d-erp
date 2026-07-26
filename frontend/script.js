@@ -921,8 +921,8 @@ function readJournalFilters(){
     dateTo: document.getElementById('jsDateTo')?.value || '',
     createdFrom: document.getElementById('jsCreatedFrom')?.value || '',
     createdTo: document.getElementById('jsCreatedTo')?.value || '',
-    amountFrom: document.getElementById('jsAmountFrom')?.value ?? '',
-    amountTo: document.getElementById('jsAmountTo')?.value ?? '',
+    amountFrom: cleanNumber(document.getElementById('jsAmountFrom')?.value ?? ''),
+    amountTo: cleanNumber(document.getElementById('jsAmountTo')?.value ?? ''),
     status: document.getElementById('jsStatus')?.value || '',
     costCenter: document.getElementById('jsCostCenter')?.value || '',
   };
@@ -1502,8 +1502,8 @@ function renderJLines(){
       <td class="jline-handle" title="اسحب لتغيير الترتيب">⠿⠿</td>
       <td><input type="text" list="accountsDatalist" placeholder="ابحث بالكود أو اسم الحساب" value="${l.account_code?accountLabel(l.account_code):''}" onchange="onJLineAccountChange(${l.id}, this)"></td>
       <td><input type="text" placeholder="بيان السطر (اختياري)" value="${l.line_description||''}" onchange="onJLineChange(${l.id},'line_description',this.value)"></td>
-      <td><input type="number" step="0.01" min="0" value="${l.debit||0}" onchange="onJLineChange(${l.id},'debit',this.value)"></td>
-      <td><input type="number" step="0.01" min="0" value="${l.credit||0}" onchange="onJLineChange(${l.id},'credit',this.value)"></td>
+      <td><input type="text" inputmode="decimal" class="numeric-fmt" placeholder="0.00" value="${l.debit?window.formatNumberDisplay(l.debit):'0.00'}" onchange="onJLineChange(${l.id},'debit',cleanNumber(this.value))"></td>
+      <td><input type="text" inputmode="decimal" class="numeric-fmt" placeholder="0.00" value="${l.credit?window.formatNumberDisplay(l.credit):'0.00'}" onchange="onJLineChange(${l.id},'credit',cleanNumber(this.value))"></td>
       <td><button type="button" class="cc-btn ${allocs.length && !pctOk ? 'cc-btn-warn':''}" onclick="toggleLineCostPanel(${l.id})">🏷️ ${lineCostSummary(l)}</button></td>
       <td><button class="rm-line" onclick="removeJLine(${l.id})">✕</button></td>
     </tr>`;
@@ -4190,5 +4190,251 @@ window.suppliers = window.suppliers || [];
     document.addEventListener('DOMContentLoaded', function(){
       observer.observe(document.body, {childList:true, subtree:true});
     });
+  }
+})();
+
+// ==============================================================
+// LDP: منتقي تاريخ مخصص بالكامل (بدون استخدام input[type=date] الأصلي)
+// السبب: عندما تكون لغة واجهة المتصفح نفسها عربية، يعرض Chrome أرقام
+// "يوم/شهر/سنة" ووقيم Arabic-Indic داخل عنصر التاريخ الأصلي بغض النظر
+// عن أي محاولة تحكم من الصفحة (lang="en" لا يؤثر على الـ shadow DOM
+// الداخلي لعنصر input[type=date] في هذه الحالة). الحل الوحيد الموثوق
+// هو بناء منتقي تاريخ خاص بنا بالكامل، فلا نعتمد على أي عنصر متصفح
+// أصلي محكوم بلغة النظام.
+// ==============================================================
+(function(){
+  const AR_MONTHS = ['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر'];
+  const AR_WEEKDAYS = ['أحد','اثنين','ثلاثاء','أربعاء','خميس','جمعة','سبت'];
+
+  let popup = null;
+  let activeInput = null;
+  let viewYear = 0, viewMonth = 0;
+
+  function ensurePopup(){
+    if(popup) return popup;
+    popup = document.createElement('div');
+    popup.className = 'ldp-popup';
+    popup.style.display = 'none';
+    document.body.appendChild(popup);
+    popup.addEventListener('click', e=>e.stopPropagation());
+    return popup;
+  }
+
+  function pad2(n){ return String(n).padStart(2,'0'); }
+
+  function parseISO(v){
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(v||'').trim());
+    if(!m) return null;
+    return {y:parseInt(m[1],10), mo:parseInt(m[2],10)-1, d:parseInt(m[3],10)};
+  }
+
+  function render(){
+    if(!popup) return;
+    const first = new Date(viewYear, viewMonth, 1);
+    const startWeekday = first.getDay();
+    const daysInMonth = new Date(viewYear, viewMonth+1, 0).getDate();
+    const selected = parseISO(activeInput ? activeInput.value : '');
+    const todayD = new Date();
+
+    let cells = '';
+    for(let i=0;i<startWeekday;i++) cells += '<span class="ldp-day ldp-empty"></span>';
+    for(let d=1; d<=daysInMonth; d++){
+      const isSel = selected && selected.y===viewYear && selected.mo===viewMonth && selected.d===d;
+      const isToday = todayD.getFullYear()===viewYear && todayD.getMonth()===viewMonth && todayD.getDate()===d;
+      cells += `<span class="ldp-day ${isSel?'ldp-sel':''} ${isToday?'ldp-today':''}" onclick="window.__ldpPick(${d})">${d}</span>`;
+    }
+
+    popup.innerHTML = `
+      <div class="ldp-header">
+        <button type="button" class="ldp-nav" onclick="window.__ldpNav(-1)">‹</button>
+        <span class="ldp-title">${AR_MONTHS[viewMonth]} ${viewYear}</span>
+        <button type="button" class="ldp-nav" onclick="window.__ldpNav(1)">›</button>
+      </div>
+      <div class="ldp-weekdays">${AR_WEEKDAYS.map(w=>`<span>${w}</span>`).join('')}</div>
+      <div class="ldp-grid">${cells}</div>
+      <div class="ldp-footer">
+        <button type="button" class="ldp-today-btn" onclick="window.__ldpToday()">اليوم</button>
+        <button type="button" class="ldp-clear-btn" onclick="window.__ldpClear()">مسح</button>
+      </div>`;
+  }
+
+  window.__ldpNav = function(dir){
+    viewMonth += dir;
+    if(viewMonth<0){ viewMonth=11; viewYear--; }
+    if(viewMonth>11){ viewMonth=0; viewYear++; }
+    render();
+  };
+
+  window.__ldpPick = function(d){
+    if(!activeInput) return;
+    const iso = `${viewYear}-${pad2(viewMonth+1)}-${pad2(d)}`;
+    activeInput.value = iso;
+    activeInput.dispatchEvent(new Event('input', {bubbles:true}));
+    activeInput.dispatchEvent(new Event('change', {bubbles:true}));
+    closeLdp();
+  };
+
+  window.__ldpToday = function(){
+    const t = new Date();
+    viewYear = t.getFullYear(); viewMonth = t.getMonth();
+    window.__ldpPick(t.getDate());
+  };
+
+  window.__ldpClear = function(){
+    if(!activeInput) return;
+    activeInput.value = '';
+    activeInput.dispatchEvent(new Event('input', {bubbles:true}));
+    activeInput.dispatchEvent(new Event('change', {bubbles:true}));
+    closeLdp();
+  };
+
+  function openLdp(input){
+    ensurePopup();
+    activeInput = input;
+    const parsed = parseISO(input.value) || (()=>{ const t=new Date(); return {y:t.getFullYear(), mo:t.getMonth(), d:t.getDate()}; })();
+    viewYear = parsed.y; viewMonth = parsed.mo;
+    render();
+    const rect = input.getBoundingClientRect();
+    popup.style.display = 'block';
+    popup.style.top = (window.scrollY + rect.bottom + 6) + 'px';
+    const left = window.scrollX + rect.left;
+    popup.style.left = Math.max(8, Math.min(left, window.scrollX + document.documentElement.clientWidth - 270)) + 'px';
+  }
+
+  function closeLdp(){
+    if(popup) popup.style.display = 'none';
+    activeInput = null;
+  }
+
+  document.addEventListener('click', function(e){
+    if(popup && popup.style.display!=='none' && !e.target.closest('.ldp-popup') && !e.target.classList.contains('ldp-input')){
+      closeLdp();
+    }
+  });
+
+  function isLdpTarget(el){
+    return el && el.tagName==='INPUT' && el.classList && el.classList.contains('ldp-input');
+  }
+
+  document.addEventListener('focus', function(e){
+    if(isLdpTarget(e.target)) openLdp(e.target);
+  }, true);
+
+  document.addEventListener('click', function(e){
+    if(isLdpTarget(e.target)) openLdp(e.target);
+  }, true);
+
+  // منع الكتابة اليدوية من إدخال أي شيء غير أرقام وشرطات، وتنسيقها كـ YYYY-MM-DD تلقائياً
+  document.addEventListener('input', function(e){
+    if(!isLdpTarget(e.target)) return;
+    let v = normalizeDigits(e.target.value).replace(/[^\d]/g,'').slice(0,8);
+    let out = v;
+    if(v.length > 4) out = v.slice(0,4) + '-' + v.slice(4);
+    if(v.length > 6) out = v.slice(0,4) + '-' + v.slice(4,6) + '-' + v.slice(6);
+    e.target.value = out;
+    if(activeInput===e.target) render();
+  });
+
+  // تحويل أي input[type=date] موجود حالياً أو يُضاف لاحقاً إلى حقل نصي بمنتقي مخصص
+  function convertToLdp(el){
+    if(!el || el.dataset.ldpConverted) return;
+    el.type = 'text';
+    el.classList.add('ldp-input');
+    el.setAttribute('placeholder','YYYY-MM-DD');
+    el.setAttribute('autocomplete','off');
+    el.dataset.ldpConverted = '1';
+  }
+
+  function scanAndConvert(root){
+    (root||document).querySelectorAll('input[type="date"]').forEach(convertToLdp);
+  }
+
+  if(document.readyState === 'loading'){
+    document.addEventListener('DOMContentLoaded', ()=>scanAndConvert(document));
+  } else {
+    scanAndConvert(document);
+  }
+
+  const ldpObserver = new MutationObserver(function(mutations){
+    for(const m of mutations){
+      m.addedNodes && m.addedNodes.forEach(function(node){
+        if(node.nodeType !== 1) return;
+        if(node.matches && node.matches('input[type="date"]')) convertToLdp(node);
+        if(node.querySelectorAll) scanAndConvert(node);
+      });
+    }
+  });
+  if(document.body){
+    ldpObserver.observe(document.body, {childList:true, subtree:true});
+  } else {
+    document.addEventListener('DOMContentLoaded', function(){ ldpObserver.observe(document.body, {childList:true, subtree:true}); });
+  }
+})();
+
+// ==============================================================
+// عرض الأرقام بفاصلة آلاف مريحة للعين (10,000.00) مع إبقاء القيمة
+// الفعلية المخزَّنة/المُصدَّرة نظيفة (10000.00) بدون أي رمز — بحيث
+// عند القراءة البرمجية أو النسخ لإكسل تبقى البيانات رقماً صحيحاً.
+// يعمل فقط على الحقول التي تحمل class="numeric-fmt".
+// ==============================================================
+(function(){
+  function cleanNumber(v){
+    return String(v||'').replace(/,/g,'').trim();
+  }
+  window.cleanNumber = cleanNumber;
+
+  function formatDisplay(v){
+    const n = parseFloat(cleanNumber(v));
+    if(!isFinite(n)) return '';
+    return n.toLocaleString('en', {minimumFractionDigits:2, maximumFractionDigits:2});
+  }
+  window.formatNumberDisplay = formatDisplay;
+
+  function isFmtTarget(el){
+    return el && el.tagName==='INPUT' && el.classList && el.classList.contains('numeric-fmt');
+  }
+
+  // عند الدخول للحقل: أظهر القيمة الخام (بدون فواصل) لتسهيل التعديل
+  document.addEventListener('focus', function(e){
+    if(!isFmtTarget(e.target)) return;
+    e.target.value = cleanNumber(e.target.value);
+    try{ e.target.select(); }catch(err){}
+  }, true);
+
+  // عند الخروج من الحقل: أعد التنسيق بفاصلة آلاف (القيمة النظيفة تكون
+  // قد وصلت بالفعل لأي onchange مرتبط بالحقل، لأن change يسبق blur)
+  document.addEventListener('blur', function(e){
+    if(!isFmtTarget(e.target)) return;
+    if(e.target.value.trim()==='') return;
+    e.target.value = formatDisplay(e.target.value);
+  }, true);
+
+  function scanAndFormat(root){
+    (root||document).querySelectorAll('input.numeric-fmt').forEach(el=>{
+      if(document.activeElement !== el && el.value.trim()!=='' ){
+        el.value = formatDisplay(el.value);
+      }
+    });
+  }
+
+  if(document.readyState === 'loading'){
+    document.addEventListener('DOMContentLoaded', ()=>scanAndFormat(document));
+  } else {
+    scanAndFormat(document);
+  }
+
+  const fmtObserver = new MutationObserver(function(mutations){
+    for(const m of mutations){
+      m.addedNodes && m.addedNodes.forEach(function(node){
+        if(node.nodeType !== 1) return;
+        if(node.matches && node.matches('input.numeric-fmt') && document.activeElement!==node) node.value = formatDisplay(node.value);
+        if(node.querySelectorAll) scanAndFormat(node);
+      });
+    }
+  });
+  if(document.body){
+    fmtObserver.observe(document.body, {childList:true, subtree:true});
+  } else {
+    document.addEventListener('DOMContentLoaded', function(){ fmtObserver.observe(document.body, {childList:true, subtree:true}); });
   }
 })();
