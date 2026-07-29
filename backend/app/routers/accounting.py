@@ -4,7 +4,7 @@ from sqlalchemy import or_, func
 from typing import Optional
 from datetime import date
 from app.database import get_db
-from app.models.models import Account, JournalEntry, JournalEntryLine, CostCenter, LineCostAllocation, JournalEntryAttachment
+from app.models.models import Account, JournalEntry, JournalEntryLine, CostCenter, LineCostAllocation, JournalEntryAttachment, Supplier
 from app.schemas.accounting import (
     AccountIn, AccountUpdate, AccountOut,
     JournalEntryIn, JournalEntryOut,
@@ -208,6 +208,9 @@ def _validate_and_total_lines(payload: JournalEntryIn, db: Session) -> float:
     if len(payload.lines) < 2:
         raise HTTPException(400, "يجب أن يحتوي القيد على سطرين على الأقل")
 
+    if payload.supplier_code and not db.query(Supplier).filter(Supplier.code == payload.supplier_code).first():
+        raise HTTPException(404, "المورد المحدد غير موجود")
+
     total_debit = 0.0
     total_credit = 0.0
     for line in payload.lines:
@@ -215,6 +218,11 @@ def _validate_and_total_lines(payload: JournalEntryIn, db: Session) -> float:
             raise HTTPException(400, "كل سطر يجب أن يكون له مبلغ مدين أو دائن فقط، وليس كلاهما ولا لا شيء")
         if not db.query(Account).filter(Account.code == line.account_code).first():
             raise HTTPException(404, f"الحساب {line.account_code} غير موجود")
+
+        # إن أُدخلت نسبة الضريبة فقط بدون قيمتها، تُحسب تلقائياً من مبلغ السطر
+        if line.tax_rate is not None and line.tax_amount is None:
+            line_amount = line.debit or line.credit
+            line.tax_amount = round(line_amount * line.tax_rate / 100, 2)
 
         if line.cost_allocations:
             total_pct = sum(a.percentage for a in line.cost_allocations)
@@ -244,6 +252,8 @@ def create_journal_entry(payload: JournalEntryIn, db: Session = Depends(get_db))
         description=payload.description,
         created_by_name=payload.created_by_name,
         branch_id=payload.branch_id,
+        invoice_number=payload.invoice_number,
+        supplier_code=payload.supplier_code,
         source_type="manual",
         status="posted",
         total_amount=total,
@@ -263,6 +273,8 @@ def create_journal_entry(payload: JournalEntryIn, db: Session = Depends(get_db))
             debit=line.debit,
             credit=line.credit,
             line_description=line.line_description,
+            tax_rate=line.tax_rate,
+            tax_amount=line.tax_amount,
         )
         db.add(line_row)
         db.flush()  # للحصول على line_row.id قبل إضافة توزيعات مركز التكلفة
@@ -295,6 +307,8 @@ def update_journal_entry(entry_id: int, payload: JournalEntryIn, db: Session = D
     entry.created_by_name = payload.created_by_name
     if payload.branch_id is not None:
         entry.branch_id = payload.branch_id
+    entry.invoice_number = payload.invoice_number
+    entry.supplier_code = payload.supplier_code
     entry.total_amount = total
     entry.amount = total
 
@@ -309,6 +323,8 @@ def update_journal_entry(entry_id: int, payload: JournalEntryIn, db: Session = D
             debit=line.debit,
             credit=line.credit,
             line_description=line.line_description,
+            tax_rate=line.tax_rate,
+            tax_amount=line.tax_amount,
         )
         db.add(line_row)
         db.flush()

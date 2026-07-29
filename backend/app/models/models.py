@@ -71,6 +71,12 @@ class JournalEntry(Base):
     status = Column(String(20), nullable=False, default="posted")
     cost_center_code = Column(String(20), ForeignKey("cost_centers.code"), nullable=True)
 
+    # حقول اختيارية لقيود ذات طبيعة خاصة (مثل مصروف عليه ضريبة) — تربط
+    # القيد برقم فاتورة ومورد لإظهار العملية كاملة بتقارير الضرائب
+    invoice_number = Column(String(50), nullable=True)
+    supplier_code = Column(String(30), ForeignKey("suppliers.code"), nullable=True)
+    supplier = relationship("Supplier")
+
     # إجمالي القيد = مجموع مدين الأسطر = مجموع دائن الأسطر (محسوب عند الترحيل)
     total_amount = Column(Numeric(18, 2), nullable=False, default=0)
 
@@ -122,6 +128,10 @@ class JournalEntryLine(Base):
     debit = Column(Numeric(18, 2), nullable=False, default=0)
     credit = Column(Numeric(18, 2), nullable=False, default=0)
     line_description = Column(String)
+
+    # ضريبة اختيارية على مستوى السطر (مثلاً سطر مصروف عليه ضريبة قيمة مضافة)
+    tax_rate = Column(Numeric(5, 2), nullable=True)
+    tax_amount = Column(Numeric(18, 2), nullable=True)
 
     cost_allocations = relationship(
         "LineCostAllocation",

@@ -114,6 +114,41 @@ table.ledger td.balance{color:var(--accent);font-weight:800}
 .modal-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:14px}
 @media (max-width:600px){.modal-grid{grid-template-columns:1fr}}
 .modal-actions{display:flex;gap:10px;margin-top:20px;justify-content:flex-end}
+
+/* إصلاح شامل: حقول التاريخ تُعرض دائماً بالإنجليزية عبر منتقي مخصص، بدل
+   input[type=date] الأصلي الذي يعرض "يوم/شهر/سنة" وأرقاماً عربية عندما
+   تكون لغة واجهة المتصفح نفسها عربية. */
+input.ldp-input{ direction:ltr; text-align:right; font-variant-numeric:tabular-nums; }
+.ldp-popup{
+  position:absolute; z-index:9999; width:260px;
+  background:var(--bg-card); border:1px solid var(--line);
+  border-radius:14px; box-shadow:var(--shadow-lg);
+  padding:12px; direction:ltr; font-family:inherit;
+}
+.ldp-header{ display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; }
+.ldp-title{ font-weight:800; font-size:14px; color:var(--ink-2); }
+.ldp-nav{
+  background:var(--bg-card-2); border:1px solid var(--line);
+  border-radius:8px; width:28px; height:28px; cursor:pointer; font-size:15px; color:var(--ink-2);
+}
+.ldp-nav:hover{ background:var(--accent); color:#fff; border-color:var(--accent); }
+.ldp-weekdays{ display:grid; grid-template-columns:repeat(7,1fr); font-size:10.5px; color:var(--muted); text-align:center; margin-bottom:4px; }
+.ldp-grid{ display:grid; grid-template-columns:repeat(7,1fr); gap:2px; }
+.ldp-day{ display:flex; align-items:center; justify-content:center; height:30px; border-radius:8px; cursor:pointer; font-size:12.5px; color:var(--ink-2); }
+.ldp-day:hover{ background:var(--bg-card-2); }
+.ldp-day.ldp-empty{ cursor:default; }
+.ldp-day.ldp-today{ font-weight:800; color:var(--accent); }
+.ldp-day.ldp-sel{ background:var(--accent); color:#fff; font-weight:700; }
+.ldp-footer{ display:flex; justify-content:space-between; margin-top:10px; border-top:1px solid var(--line); padding-top:8px; }
+.ldp-today-btn, .ldp-clear-btn{ background:none; border:none; font-size:12px; cursor:pointer; color:var(--accent); font-weight:700; padding:4px 6px; }
+.ldp-clear-btn{ color:var(--coral); }
+
+.export-btn{
+  display:flex; align-items:center; gap:6px; background:var(--bg-card-2);
+  border:1.5px solid var(--line); color:var(--ink-2); padding:10px 16px;
+  border-radius:12px; font-weight:800; font-size:13px; cursor:pointer; transition:.15s;
+}
+.export-btn:hover{ border-color:var(--accent); color:var(--accent); }
 </style>
 </head>
 <body>
@@ -142,7 +177,11 @@ table.ledger td.balance{color:var(--accent);font-weight:800}
 
   <div class="toolbar">
     <div style="font-weight:800;color:var(--ink-2);font-size:14px">📒 كشف الحساب</div>
-    <button class="adv-btn" onclick="openAdvancedSearch()">⭐ بحث متقدم</button>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="export-btn" onclick="exportLedgerExcel()">📊 تصدير Excel</button>
+      <button class="export-btn" onclick="exportLedgerPdf()">🖨️ تصدير PDF</button>
+      <button class="adv-btn" onclick="openAdvancedSearch()">⭐ بحث متقدم</button>
+    </div>
   </div>
 
   <div class="filters-card">
@@ -440,6 +479,220 @@ function applyAdvancedSearch(){
   currentPage = 1;
   closeAdvancedSearch();
   loadLedger();
+}
+
+// ==============================================================
+// إصلاح شامل: كل حقول التاريخ تُعرض دائماً بالإنجليزية عبر منتقي مخصص
+// بدل input[type=date] الأصلي (نسخة مستقلة لأن هذه صفحة منفصلة عن
+// script.js الرئيسي — نفس المنطق المستخدم بشاشة القيود).
+// ==============================================================
+(function(){
+  const DIGIT_MAP = {'٠':'0','١':'1','٢':'2','٣':'3','٤':'4','٥':'5','٦':'6','٧':'7','٨':'8','٩':'9','۰':'0','۱':'1','۲':'2','۳':'3','۴':'4','۵':'5','۶':'6','۷':'7','۸':'8','۹':'9'};
+  function normalizeDigits(str){ return String(str).replace(/[٠-٩۰-۹]/g, ch => DIGIT_MAP[ch] !== undefined ? DIGIT_MAP[ch] : ch); }
+  window.normalizeDigits = normalizeDigits;
+
+  const AR_MONTHS = ['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر'];
+  const AR_WEEKDAYS = ['أحد','اثنين','ثلاثاء','أربعاء','خميس','جمعة','سبت'];
+
+  let popup = null, activeInput = null, viewYear = 0, viewMonth = 0;
+  function ensurePopup(){
+    if(popup) return popup;
+    popup = document.createElement('div');
+    popup.className = 'ldp-popup';
+    popup.style.display = 'none';
+    document.body.appendChild(popup);
+    popup.addEventListener('click', e=>e.stopPropagation());
+    return popup;
+  }
+  function pad2(n){ return String(n).padStart(2,'0'); }
+  function parseISO(v){
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(v||'').trim());
+    if(!m) return null;
+    return {y:parseInt(m[1],10), mo:parseInt(m[2],10)-1, d:parseInt(m[3],10)};
+  }
+  function render(){
+    if(!popup) return;
+    const first = new Date(viewYear, viewMonth, 1);
+    const startWeekday = first.getDay();
+    const daysInMonth = new Date(viewYear, viewMonth+1, 0).getDate();
+    const selected = parseISO(activeInput ? activeInput.value : '');
+    const todayD = new Date();
+    let cells = '';
+    for(let i=0;i<startWeekday;i++) cells += '<span class="ldp-day ldp-empty"></span>';
+    for(let d=1; d<=daysInMonth; d++){
+      const isSel = selected && selected.y===viewYear && selected.mo===viewMonth && selected.d===d;
+      const isToday = todayD.getFullYear()===viewYear && todayD.getMonth()===viewMonth && todayD.getDate()===d;
+      cells += `<span class="ldp-day ${isSel?'ldp-sel':''} ${isToday?'ldp-today':''}" onclick="window.__ldpPick(${d})">${d}</span>`;
+    }
+    popup.innerHTML = `
+      <div class="ldp-header">
+        <button type="button" class="ldp-nav" onclick="window.__ldpNav(-1)">‹</button>
+        <span class="ldp-title">${AR_MONTHS[viewMonth]} ${viewYear}</span>
+        <button type="button" class="ldp-nav" onclick="window.__ldpNav(1)">›</button>
+      </div>
+      <div class="ldp-weekdays">${AR_WEEKDAYS.map(w=>`<span>${w}</span>`).join('')}</div>
+      <div class="ldp-grid">${cells}</div>
+      <div class="ldp-footer">
+        <button type="button" class="ldp-today-btn" onclick="window.__ldpToday()">اليوم</button>
+        <button type="button" class="ldp-clear-btn" onclick="window.__ldpClear()">مسح</button>
+      </div>`;
+  }
+  window.__ldpNav = function(dir){
+    viewMonth += dir;
+    if(viewMonth<0){ viewMonth=11; viewYear--; }
+    if(viewMonth>11){ viewMonth=0; viewYear++; }
+    render();
+  };
+  window.__ldpPick = function(d){
+    if(!activeInput) return;
+    activeInput.value = `${viewYear}-${pad2(viewMonth+1)}-${pad2(d)}`;
+    activeInput.dispatchEvent(new Event('input', {bubbles:true}));
+    activeInput.dispatchEvent(new Event('change', {bubbles:true}));
+    closeLdp();
+  };
+  window.__ldpToday = function(){
+    const t = new Date();
+    viewYear = t.getFullYear(); viewMonth = t.getMonth();
+    window.__ldpPick(t.getDate());
+  };
+  window.__ldpClear = function(){
+    if(!activeInput) return;
+    activeInput.value = '';
+    activeInput.dispatchEvent(new Event('input', {bubbles:true}));
+    activeInput.dispatchEvent(new Event('change', {bubbles:true}));
+    closeLdp();
+  };
+  function openLdp(input){
+    ensurePopup();
+    activeInput = input;
+    const parsed = parseISO(input.value) || (()=>{ const t=new Date(); return {y:t.getFullYear(), mo:t.getMonth(), d:t.getDate()}; })();
+    viewYear = parsed.y; viewMonth = parsed.mo;
+    render();
+    const rect = input.getBoundingClientRect();
+    popup.style.display = 'block';
+    popup.style.top = (window.scrollY + rect.bottom + 6) + 'px';
+    const left = window.scrollX + rect.left;
+    popup.style.left = Math.max(8, Math.min(left, window.scrollX + document.documentElement.clientWidth - 270)) + 'px';
+  }
+  function closeLdp(){ if(popup) popup.style.display = 'none'; activeInput = null; }
+  document.addEventListener('click', function(e){
+    if(popup && popup.style.display!=='none' && !e.target.closest('.ldp-popup') && !e.target.classList.contains('ldp-input')) closeLdp();
+  });
+  function isLdpTarget(el){ return el && el.tagName==='INPUT' && el.classList && el.classList.contains('ldp-input'); }
+  document.addEventListener('focus', function(e){ if(isLdpTarget(e.target)) openLdp(e.target); }, true);
+  document.addEventListener('click', function(e){ if(isLdpTarget(e.target)) openLdp(e.target); }, true);
+  document.addEventListener('input', function(e){
+    if(!isLdpTarget(e.target)) return;
+    let v = normalizeDigits(e.target.value).replace(/[^\d]/g,'').slice(0,8);
+    let out = v;
+    if(v.length > 4) out = v.slice(0,4) + '-' + v.slice(4);
+    if(v.length > 6) out = v.slice(0,4) + '-' + v.slice(4,6) + '-' + v.slice(6);
+    e.target.value = out;
+    if(activeInput===e.target) render();
+  });
+  function convertToLdp(el){
+    if(!el || el.dataset.ldpConverted) return;
+    el.type = 'text';
+    el.classList.add('ldp-input');
+    el.setAttribute('placeholder','YYYY-MM-DD');
+    el.setAttribute('autocomplete','off');
+    el.dataset.ldpConverted = '1';
+  }
+  document.querySelectorAll('input[type="date"]').forEach(convertToLdp);
+})();
+
+// ==============================================================
+// تصدير كشف الحساب — Excel و PDF (يجلب كل الحركات المطابقة للفلاتر
+// الحالية، وليس فقط الصفحة المعروضة)
+// ==============================================================
+async function fetchAllLedgerRowsForExport(){
+  const qs = new URLSearchParams();
+  if(activeFilters.branch_id) qs.set('branch_id', activeFilters.branch_id);
+  if(activeFilters.date_from) qs.set('date_from', activeFilters.date_from);
+  if(activeFilters.date_to) qs.set('date_to', activeFilters.date_to);
+  if(activeFilters.created_by) qs.set('created_by', activeFilters.created_by);
+  if(activeFilters.cost_center_code) qs.set('cost_center_code', activeFilters.cost_center_code);
+  if(activeFilters.fiscal_year) qs.set('fiscal_year', activeFilters.fiscal_year);
+  qs.set('page', 1);
+  qs.set('page_size', 100000);
+  return await api('GET', `/api/accounts/${encodeURIComponent(currentAccountCode)}/ledger?${qs.toString()}`);
+}
+
+function ledgerExportRowsHtml(data, forPrint){
+  return data.transactions.map(t=>`
+    <tr>
+      <td>${t.entry_date}</td>
+      <td>${escHtml(t.operation)}${t.status==='cancelled' ? ' (ملغى)' : ''}</td>
+      <td style="text-align:${forPrint?'left':'right'}">${t.debit ? fmt(t.debit) : ''}</td>
+      <td style="text-align:${forPrint?'left':'right'}">${t.credit ? fmt(t.credit) : ''}</td>
+      <td style="text-align:${forPrint?'left':'right'}">${fmt(t.balance_after)}</td>
+    </tr>`).join('');
+}
+
+async function exportLedgerExcel(){
+  if(!currentAccountCode){ alert('لم يتم تحديد حساب'); return; }
+  let data;
+  try{ data = await fetchAllLedgerRowsForExport(); }
+  catch(e){ alert('تعذر جلب بيانات التصدير: ' + e.message); return; }
+
+  const rowsHtml = ledgerExportRowsHtml(data, false);
+  const html = `<!DOCTYPE html><html dir="rtl"><head><meta charset="utf-8">
+    <style>
+      td,th{mso-number-format:'\\@'; border:1px solid #d9e2ec; padding:6px; font-family:Tahoma; font-size:12px}
+      th{font-weight:bold; background:#eaf4ff}
+      td.num{mso-number-format:'0.00'}
+    </style></head><body>
+    <table>
+      <tr><td colspan="5" style="font-weight:bold;font-size:14px">كشف حساب: ${escHtml(data.account_code)} — ${escHtml(data.account_name_ar)}</td></tr>
+      <tr><td colspan="5"></td></tr>
+      <tr><th>التاريخ</th><th>العملية</th><th>مدين</th><th>دائن</th><th>الرصيد بعد</th></tr>
+      ${rowsHtml}
+    </table></body></html>`;
+  const blob = new Blob(['\ufeff'+html], {type:'application/vnd.ms-excel;charset=utf-8;'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `ledger_${data.account_code}_${new Date().toISOString().slice(0,10)}.xls`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(a.href), 500);
+}
+
+async function exportLedgerPdf(){
+  if(!currentAccountCode){ alert('لم يتم تحديد حساب'); return; }
+  let data;
+  try{ data = await fetchAllLedgerRowsForExport(); }
+  catch(e){ alert('تعذر جلب بيانات التصدير: ' + e.message); return; }
+
+  const rowsHtml = ledgerExportRowsHtml(data, true);
+  const w = window.open('', '_blank');
+  w.document.write(`<!DOCTYPE html><html dir="rtl" lang="ar"><head><meta charset="utf-8">
+    <title>كشف حساب — ${escHtml(data.account_name_ar)}</title>
+    <style>
+      body{font-family:Tahoma,Arial,sans-serif; padding:24px; color:#0D1B2E; direction:rtl}
+      h2{margin:0 0 4px 0; font-size:18px}
+      .sub{color:#5C6B7D; font-size:12px; margin-bottom:16px}
+      .balances{display:flex; gap:24px; margin-bottom:18px}
+      .balances div{font-size:12px}
+      .balances b{display:block; font-size:15px; margin-top:2px}
+      table{width:100%; border-collapse:collapse; direction:ltr}
+      th,td{border:1px solid #D0D8E4; padding:8px 10px; font-size:12px; text-align:right}
+      th{background:#F8FAFD}
+      td:nth-child(3), td:nth-child(4), td:nth-child(5){direction:ltr; text-align:left; font-variant-numeric:tabular-nums}
+      @media print{ body{padding:0} }
+    </style></head><body>
+    <h2>كشف حساب: ${escHtml(data.account_code)} — ${escHtml(data.account_name_ar)}</h2>
+    <div class="sub">تاريخ الطباعة: ${new Date().toISOString().slice(0,10)}</div>
+    <div class="balances">
+      <div>الرصيد الافتتاحي<b>${fmt(data.opening_balance)}</b></div>
+      <div>الرصيد قبل الفترة<b>${fmt(data.balance_before_period)}</b></div>
+      <div>الرصيد الحالي<b>${fmt(data.current_balance)}</b></div>
+    </div>
+    <table>
+      <thead><tr><th>التاريخ</th><th>العملية</th><th>مدين</th><th>دائن</th><th>الرصيد بعد</th></tr></thead>
+      <tbody>${rowsHtml}</tbody>
+    </table>
+    <script>window.onload=()=>{window.print();}<\/script>
+    </body></html>`);
+  w.document.close();
 }
 
 (async function init(){

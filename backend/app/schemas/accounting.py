@@ -96,6 +96,8 @@ class JournalEntryLineIn(BaseModel):
     debit: float = Field(default=0, ge=0)
     credit: float = Field(default=0, ge=0)
     line_description: Optional[str] = None
+    tax_rate: Optional[float] = Field(default=None, ge=0, le=100)
+    tax_amount: Optional[float] = Field(default=None, ge=0)
     cost_allocations: list[LineCostAllocationIn] = []
 
 
@@ -105,6 +107,8 @@ class JournalEntryLineOut(BaseModel):
     debit: float
     credit: float
     line_description: Optional[str] = None
+    tax_rate: Optional[float] = None
+    tax_amount: Optional[float] = None
     cost_allocations: list[LineCostAllocationOut] = []
 
     class Config:
@@ -116,6 +120,8 @@ class JournalEntryIn(BaseModel):
     description: Optional[str] = None
     created_by_name: Optional[str] = None
     branch_id: Optional[int] = None
+    invoice_number: Optional[str] = None
+    supplier_code: Optional[str] = None
     lines: list[JournalEntryLineIn] = Field(min_length=2)
 
 
@@ -150,6 +156,8 @@ class JournalEntryOut(BaseModel):
     created_at: Optional[datetime] = None
     status: str = "posted"
     branch_id: Optional[int] = None
+    invoice_number: Optional[str] = None
+    supplier_code: Optional[str] = None
     total_amount: float = 0
     lines: list[JournalEntryLineOut] = []
     attachments: list[JournalEntryAttachmentOut] = []

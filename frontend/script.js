@@ -1360,6 +1360,10 @@ function refreshJournalAccounts(){
   if(udl){
     udl.innerHTML=(appUsers||[]).map(u=>`<option value="${(u.full_name||'').replace(/"/g,'&quot;')}">`).join('');
   }
+  const sdl=document.getElementById('suppliersDatalist');
+  if(sdl){
+    sdl.innerHTML=(suppliers||[]).map(s=>`<option value="${s.code} — ${(s.name||'').replace(/"/g,'&quot;')}">`).join('');
+  }
   const ccSelects=document.querySelectorAll('.cost-center-select');
   ccSelects.forEach(sel=>{
     const cur=sel.value;
@@ -1396,7 +1400,7 @@ function resolveAccountCode(rawValue){
 
 function addJLine(){
   lineCounter++;
-  jLines.push({id:lineCounter, account_code:'', debit:0, credit:0, line_description:'', cost_allocations:[]});
+  jLines.push({id:lineCounter, account_code:'', debit:0, credit:0, line_description:'', cost_allocations:[], tax_rate:'', tax_amount:''});
   renderJLines();
 }
 
@@ -1515,6 +1519,44 @@ function renderCostCenterOptionsHtml(selected){
     list.map(c=>`<option value="${c.code}" ${c.code===selected?'selected':''}>${whEscCoa(c.code)} — ${whEscCoa(c.name_ar)}</option>`).join('');
 }
 
+// ============================================================
+// ضريبة السطر (اختيارية) — لقيود ذات طبيعة خاصة كمصروف عليه ضريبة قيمة مضافة
+// ============================================================
+let expandedTaxLines = new Set();
+
+function toggleLineTaxPanel(lineId){
+  if(expandedTaxLines.has(lineId)) expandedTaxLines.delete(lineId);
+  else expandedTaxLines.add(lineId);
+  renderJLines();
+}
+
+function lineTaxSummary(line){
+  if(!line.tax_rate && !line.tax_amount) return 'ضريبة';
+  const rate = line.tax_rate ? `${parseFloat(line.tax_rate)}%` : '';
+  const amt = line.tax_amount ? fmt(line.tax_amount) : '';
+  return [rate, amt].filter(Boolean).join(' — ') || 'ضريبة';
+}
+
+function onJLineTaxChange(lineId, field, value){
+  const line = jLines.find(l=>l.id===lineId);
+  if(!line) return;
+  line[field] = value===''? '' : parseFloat(value)||0;
+  // إعادة حساب قيمة الضريبة تلقائياً من النسبة عند تغييرها (ما لم يُدخل المستخدم قيمة يدوية بعدها)
+  if(field==='tax_rate' && line.tax_rate!==''){
+    const lineAmount = parseFloat(line.debit)||parseFloat(line.credit)||0;
+    line.tax_amount = Math.round(lineAmount * line.tax_rate) / 100;
+  }
+  renderJLines();
+}
+
+function clearLineTax(lineId){
+  const line = jLines.find(l=>l.id===lineId);
+  if(!line) return;
+  line.tax_rate = ''; line.tax_amount = '';
+  expandedTaxLines.delete(lineId);
+  renderJLines();
+}
+
 function renderJLines(){
   const body=document.getElementById('journalLinesBody');
   if(!body) return;
@@ -1537,10 +1579,29 @@ function renderJLines(){
       <td><input type="text" inputmode="decimal" class="numeric-fmt" placeholder="0.00" value="${l.debit?window.formatNumberDisplay(l.debit):'0.00'}" onchange="onJLineChange(${l.id},'debit',cleanNumber(this.value))"></td>
       <td><input type="text" inputmode="decimal" class="numeric-fmt" placeholder="0.00" value="${l.credit?window.formatNumberDisplay(l.credit):'0.00'}" onchange="onJLineChange(${l.id},'credit',cleanNumber(this.value))"></td>
       <td><button type="button" class="cc-btn ${allocs.length && !pctOk ? 'cc-btn-warn':''}" onclick="toggleLineCostPanel(${l.id})">🏷️ ${lineCostSummary(l)}</button></td>
+      <td><button type="button" class="cc-btn ${l.tax_rate?'jtax-btn-active':''}" onclick="toggleLineTaxPanel(${l.id})">🧾 ${lineTaxSummary(l)}</button></td>
       <td><button class="rm-line" onclick="removeJLine(${l.id})">✕</button></td>
     </tr>`;
 
-    if(!isExpanded) return mainRow;
+    const isTaxExpanded = expandedTaxLines.has(l.id);
+    const taxPanelRow = isTaxExpanded ? `<tr class="jline-cost-panel-row">
+      <td></td>
+      <td colspan="7">
+        <div class="cc-panel">
+          <div class="cc-panel-head"><span>ضريبة هذا السطر</span></div>
+          <div class="jtax-row">
+            <label>نسبة الضريبة %</label>
+            <input type="number" step="0.01" min="0" max="100" value="${l.tax_rate ?? ''}" placeholder="مثال: 15" onchange="onJLineTaxChange(${l.id},'tax_rate',this.value)">
+            <label>قيمة الضريبة</label>
+            <input type="number" step="0.01" min="0" value="${l.tax_amount ?? ''}" placeholder="تُحسب تلقائياً" onchange="onJLineTaxChange(${l.id},'tax_amount',this.value)">
+            <button type="button" class="rm-line" onclick="clearLineTax(${l.id})" title="إزالة الضريبة">✕</button>
+          </div>
+          <div class="hint" style="margin-top:6px">تُحسب قيمة الضريبة تلقائياً من النسبة إن تُركت فارغة، أو يمكن كتابتها يدوياً.</div>
+        </div>
+      </td>
+    </tr>` : '';
+
+    if(!isExpanded) return mainRow + taxPanelRow;
 
     const allocRows = allocs.map((a,idx)=>`
       <div class="cc-alloc-row">
@@ -1552,7 +1613,7 @@ function renderJLines(){
 
     const panelRow = `<tr class="jline-cost-panel-row">
       <td></td>
-      <td colspan="5">
+      <td colspan="7">
         <div class="cc-panel">
           <div class="cc-panel-head">
             <span>توزيع مركز التكلفة لهذا السطر</span>
@@ -1562,10 +1623,9 @@ function renderJLines(){
           <button type="button" class="btn secondary cc-add-btn" onclick="addLineCostAllocation(${l.id})">+ إضافة مركز تكلفة</button>
         </div>
       </td>
-      <td></td>
     </tr>`;
 
-    return mainRow + panelRow;
+    return mainRow + panelRow + taxPanelRow;
   }).join('');
 
   const totalDebit=jLines.reduce((s,l)=>s+(parseFloat(l.debit)||0),0);
@@ -1588,8 +1648,8 @@ function renderJLines(){
 function resetJournalForm(){
   journalEditingId=null;
   jLines=[];
-  lineCounter++; jLines.push({id:lineCounter, account_code:'', debit:0, credit:0, line_description:'', cost_allocations:[]});
-  lineCounter++; jLines.push({id:lineCounter, account_code:'', debit:0, credit:0, line_description:'', cost_allocations:[]});
+  lineCounter++; jLines.push({id:lineCounter, account_code:'', debit:0, credit:0, line_description:'', cost_allocations:[], tax_rate:'', tax_amount:''});
+  lineCounter++; jLines.push({id:lineCounter, account_code:'', debit:0, credit:0, line_description:'', cost_allocations:[], tax_rate:'', tax_amount:''});
   const titleEl=document.getElementById('journalFormTitle');
   if(titleEl) titleEl.textContent='قيد محاسبي جديد';
   const submitBtn=document.getElementById('jSubmitBtn');
@@ -1597,6 +1657,8 @@ function resetJournalForm(){
   const brSelReset=document.getElementById('jBranch'); if(brSelReset) brSelReset.value='';
   const cb=document.getElementById('jCreatedBy'); if(cb) cb.value='';
   const dateEl=document.getElementById('jDate'); if(dateEl) dateEl.value='';
+  const invEl=document.getElementById('jInvoiceNumber'); if(invEl) invEl.value='';
+  const supEl=document.getElementById('jSupplier'); if(supEl) supEl.value='';
   clearJournalError();
   renderJLines();
 }
@@ -1720,6 +1782,8 @@ async function submitEntry(){
   const created_by_name=document.getElementById('jCreatedBy')?.value.trim() || null;
   const branchVal=document.getElementById('jBranch')?.value || '';
   const branch_id=branchVal ? parseInt(branchVal,10) : null;
+  const invoice_number=document.getElementById('jInvoiceNumber')?.value.trim() || null;
+  const supplier_code=resolveSupplierCode(document.getElementById('jSupplier')?.value || '');
   const err=document.getElementById('jErr');
 
   const validLines=jLines.filter(l=>l.account_code && ((l.debit||0)>0 || (l.credit||0)>0));
@@ -1744,9 +1808,11 @@ async function submitEntry(){
 
   clearJournalError();
   const payload={
-    entry_date, description, created_by_name, branch_id,
+    entry_date, description, created_by_name, branch_id, invoice_number, supplier_code,
     lines: validLines.map(l=>({
       account_code:l.account_code, debit:l.debit||0, credit:l.credit||0, line_description:l.line_description||null,
+      tax_rate: (l.tax_rate!==undefined && l.tax_rate!==null && l.tax_rate!=='') ? parseFloat(l.tax_rate) : null,
+      tax_amount: (l.tax_amount!==undefined && l.tax_amount!==null && l.tax_amount!=='') ? parseFloat(l.tax_amount) : null,
       cost_allocations:(l.cost_allocations||[]).filter(a=>a.cost_center_code).map(a=>({cost_center_code:a.cost_center_code, percentage:parseFloat(a.percentage)||0}))
     }))
   };
@@ -1761,6 +1827,17 @@ async function submitEntry(){
     resetJournalForm();
     if(typeof openSubModule==='function') openSubModule('القيود اليومية');
   }catch(e){showJournalError(e.message);}
+}
+
+function resolveSupplierCode(rawValue){
+  const v=(rawValue||'').trim();
+  if(!v) return null;
+  const dashIdx=v.indexOf(' — ');
+  const candidate=dashIdx>-1 ? v.slice(0,dashIdx).trim() : v;
+  if((suppliers||[]).some(s=>s.code===candidate)) return candidate;
+  const byName=(suppliers||[]).filter(s=>s.name===v);
+  if(byName.length===1) return byName[0].code;
+  return null;
 }
 
 function showJournalError(msg){
@@ -1785,11 +1862,17 @@ function loadEntryIntoForm(id){
     ...(e.debit_account?[{account_code:e.debit_account, debit:e.amount, credit:0, line_description:e.description}]:[]),
     ...(e.credit_account?[{account_code:e.credit_account, debit:0, credit:e.amount, line_description:e.description}]:[]),
   ];
-  jLines=lines.map(l=>{ lineCounter++; return {id:lineCounter, account_code:l.account_code, debit:l.debit||0, credit:l.credit||0, line_description:l.line_description||'', cost_allocations:(l.cost_allocations||[]).map(a=>({cost_center_code:a.cost_center_code, percentage:a.percentage}))}; });
+  jLines=lines.map(l=>{ lineCounter++; return {id:lineCounter, account_code:l.account_code, debit:l.debit||0, credit:l.credit||0, line_description:l.line_description||'', tax_rate:l.tax_rate ?? '', tax_amount:l.tax_amount ?? '', cost_allocations:(l.cost_allocations||[]).map(a=>({cost_center_code:a.cost_center_code, percentage:a.percentage}))}; });
   document.getElementById('jDate').value=e.entry_date||'';
   document.getElementById('jDesc').value=e.description||'';
   const cb=document.getElementById('jCreatedBy'); if(cb) cb.value=e.created_by_name||'';
   const brSel=document.getElementById('jBranch'); if(brSel) brSel.value=e.branch_id||'';
+  const invEl=document.getElementById('jInvoiceNumber'); if(invEl) invEl.value=e.invoice_number||'';
+  const supEl=document.getElementById('jSupplier');
+  if(supEl){
+    const sup=(suppliers||[]).find(s=>s.code===e.supplier_code);
+    supEl.value = sup ? `${sup.code} — ${sup.name}` : '';
+  }
   renderJLines();
   return e;
 }

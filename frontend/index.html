@@ -137,6 +137,12 @@ input.ldp-input, input.numeric-fmt{
 }
 .journal-sort-select:hover{ border-color:var(--accent); }
 
+.hint-inline{ font-size:10.5px; color:var(--muted); font-weight:600; }
+.jtax-btn-active{ border-color:var(--amber,#f0ad4e); color:#a06a00; }
+.jtax-row{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.jtax-row label{ font-size:11.5px; font-weight:700; color:var(--muted); }
+.jtax-row input{ width:100px; }
+
 /* قسم مرفقات القيد */
 .jatt-section{ margin-top:18px; }
 .jatt-title{ font-size:14.5px; font-weight:800; color:var(--ink-2); margin-bottom:8px; }
@@ -1618,13 +1624,17 @@ html[dir="ltr"] .brand-center{direction:ltr;}
         <div class="field"><label>منشئ القيد</label><input id="jCreatedBy" list="usersDatalist" placeholder="اختر أو اكتب اسم المستخدم"></div>
         <div class="field"><label>الفرع</label><select id="jBranch"><option value="">— بدون فرع محدد —</option></select></div>
       </div>
+      <div class="frow">
+        <div class="field"><label>رقم الفاتورة <span class="hint-inline">(اختياري)</span></label><input id="jInvoiceNumber" placeholder="مثال: INV-1042"></div>
+        <div class="field"><label>المورد <span class="hint-inline">(اختياري)</span></label><input id="jSupplier" list="suppliersDatalist" placeholder="ابحث باسم المورد أو كوده"><datalist id="suppliersDatalist"></datalist></div>
+      </div>
       <div class="frow" style="grid-template-columns:1fr">
         <div class="field"><label>البيان العام للقيد</label><input id="jDesc" placeholder="وصف عام للقيد (اختياري)"></div>
       </div>
 
       <div class="gridcard" style="margin:14px 0"><div class="scrollx">
         <table class="grid">
-          <thead><tr><th style="width:36px"></th><th style="width:22%">الحساب</th><th>البيان</th><th style="width:13%">مدين</th><th style="width:13%">دائن</th><th style="width:110px">مركز التكلفة</th><th style="width:40px"></th></tr></thead>
+          <thead><tr><th style="width:36px"></th><th style="width:20%">الحساب</th><th>البيان</th><th style="width:12%">مدين</th><th style="width:12%">دائن</th><th style="width:100px">مركز التكلفة</th><th style="width:90px">الضريبة</th><th style="width:40px"></th></tr></thead>
           <tbody id="journalLinesBody"></tbody>
         </table>
       </div></div>
