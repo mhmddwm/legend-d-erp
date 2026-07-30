@@ -29,6 +29,7 @@ let jLines=[]; // أسطر القيد المحاسبي الجديد (مدين/د
 let lineCounter=0;
 let appUsers=[]; // قائمة المستخدمين لاستخدامها في حقل "منشئ القيد"
 let costCenters=[]; // مراكز التكلفة
+let taxTypes=[]; // أنواع الضرائب المسجلة بالنظام
 let journalEditingId=null; // معرّف القيد الجاري تعديله (null = إنشاء قيد جديد)
 let journalPage=1; // الصفحة الحالية في قائمة القيود
 const JOURNAL_PAGE_SIZE=20;
@@ -179,6 +180,12 @@ appUsers = await safeLoad(
 costCenters = await safeLoad(
 "مراكز التكلفة",
 "/api/cost-centers"
+);
+
+
+taxTypes = await safeLoad(
+"أنواع الضرائب",
+"/api/tax-types"
 );
 
 
@@ -1360,9 +1367,12 @@ function refreshJournalAccounts(){
   if(udl){
     udl.innerHTML=(appUsers||[]).map(u=>`<option value="${(u.full_name||'').replace(/"/g,'&quot;')}">`).join('');
   }
-  const sdl=document.getElementById('suppliersDatalist');
+  const sdl=document.getElementById('jSupplier');
   if(sdl){
-    sdl.innerHTML=(suppliers||[]).map(s=>`<option value="${s.code} — ${(s.name||'').replace(/"/g,'&quot;')}">`).join('');
+    const cur=sdl.value;
+    sdl.innerHTML='<option value="">— بدون مورد —</option>'+
+      (suppliers||[]).map(s=>`<option value="${s.code}">${s.code} — ${(s.name||'').replace(/</g,'&lt;')}</option>`).join('');
+    if(cur) sdl.value=cur;
   }
   const ccSelects=document.querySelectorAll('.cost-center-select');
   ccSelects.forEach(sel=>{
@@ -1400,7 +1410,7 @@ function resolveAccountCode(rawValue){
 
 function addJLine(){
   lineCounter++;
-  jLines.push({id:lineCounter, account_code:'', debit:0, credit:0, line_description:'', cost_allocations:[], tax_rate:'', tax_amount:''});
+  jLines.push({id:lineCounter, account_code:'', debit:0, credit:0, line_description:'', cost_allocations:[], tax_type_code:'', tax_rate:'', tax_amount:''});
   renderJLines();
 }
 
@@ -1530,21 +1540,31 @@ function toggleLineTaxPanel(lineId){
   renderJLines();
 }
 
-function lineTaxSummary(line){
-  if(!line.tax_rate && !line.tax_amount) return 'ضريبة';
-  const rate = line.tax_rate ? `${parseFloat(line.tax_rate)}%` : '';
-  const amt = line.tax_amount ? fmt(line.tax_amount) : '';
-  return [rate, amt].filter(Boolean).join(' — ') || 'ضريبة';
+function renderTaxTypeOptionsHtml(selected){
+  const list = taxTypes || [];
+  return '<option value="">— بدون ضريبة —</option>' +
+    list.map(t=>`<option value="${t.code}" ${t.code===selected?'selected':''}>${t.name_ar} (${parseFloat(t.rate)}%)</option>`).join('');
 }
 
-function onJLineTaxChange(lineId, field, value){
+function lineTaxSummary(line){
+  if(!line.tax_type_code) return 'ضريبة';
+  const t = (taxTypes||[]).find(x=>x.code===line.tax_type_code);
+  const amt = line.tax_amount ? fmt(line.tax_amount) : '';
+  return t ? `${t.name_ar} — ${amt}` : 'ضريبة';
+}
+
+function onJLineTaxTypeChange(lineId, taxTypeCode){
   const line = jLines.find(l=>l.id===lineId);
   if(!line) return;
-  line[field] = value===''? '' : parseFloat(value)||0;
-  // إعادة حساب قيمة الضريبة تلقائياً من النسبة عند تغييرها (ما لم يُدخل المستخدم قيمة يدوية بعدها)
-  if(field==='tax_rate' && line.tax_rate!==''){
+  line.tax_type_code = taxTypeCode || '';
+  if(!taxTypeCode){
+    line.tax_rate = ''; line.tax_amount = '';
+  } else {
+    const t = (taxTypes||[]).find(x=>x.code===taxTypeCode);
+    const rate = t ? parseFloat(t.rate) : 0;
     const lineAmount = parseFloat(line.debit)||parseFloat(line.credit)||0;
-    line.tax_amount = Math.round(lineAmount * line.tax_rate) / 100;
+    line.tax_rate = rate;
+    line.tax_amount = Math.round(lineAmount * rate) / 100;
   }
   renderJLines();
 }
@@ -1552,7 +1572,7 @@ function onJLineTaxChange(lineId, field, value){
 function clearLineTax(lineId){
   const line = jLines.find(l=>l.id===lineId);
   if(!line) return;
-  line.tax_rate = ''; line.tax_amount = '';
+  line.tax_type_code = ''; line.tax_rate = ''; line.tax_amount = '';
   expandedTaxLines.delete(lineId);
   renderJLines();
 }
@@ -1590,13 +1610,13 @@ function renderJLines(){
         <div class="cc-panel">
           <div class="cc-panel-head"><span>ضريبة هذا السطر</span></div>
           <div class="jtax-row">
-            <label>نسبة الضريبة %</label>
-            <input type="number" step="0.01" min="0" max="100" value="${l.tax_rate ?? ''}" placeholder="مثال: 15" onchange="onJLineTaxChange(${l.id},'tax_rate',this.value)">
+            <label>نوع الضريبة</label>
+            <select onchange="onJLineTaxTypeChange(${l.id},this.value)">${renderTaxTypeOptionsHtml(l.tax_type_code)}</select>
             <label>قيمة الضريبة</label>
-            <input type="number" step="0.01" min="0" value="${l.tax_amount ?? ''}" placeholder="تُحسب تلقائياً" onchange="onJLineTaxChange(${l.id},'tax_amount',this.value)">
+            <input type="number" step="0.01" min="0" value="${l.tax_amount ?? ''}" placeholder="تُحسب تلقائياً" readonly>
             <button type="button" class="rm-line" onclick="clearLineTax(${l.id})" title="إزالة الضريبة">✕</button>
           </div>
-          <div class="hint" style="margin-top:6px">تُحسب قيمة الضريبة تلقائياً من النسبة إن تُركت فارغة، أو يمكن كتابتها يدوياً.</div>
+          <div class="hint" style="margin-top:6px">اختر نوع الضريبة المسجّل بالنظام وستُحسب القيمة تلقائياً من نسبته — بدون إدخال أي رقم يدوياً.</div>
         </div>
       </td>
     </tr>` : '';
@@ -1648,8 +1668,8 @@ function renderJLines(){
 function resetJournalForm(){
   journalEditingId=null;
   jLines=[];
-  lineCounter++; jLines.push({id:lineCounter, account_code:'', debit:0, credit:0, line_description:'', cost_allocations:[], tax_rate:'', tax_amount:''});
-  lineCounter++; jLines.push({id:lineCounter, account_code:'', debit:0, credit:0, line_description:'', cost_allocations:[], tax_rate:'', tax_amount:''});
+  lineCounter++; jLines.push({id:lineCounter, account_code:'', debit:0, credit:0, line_description:'', cost_allocations:[], tax_type_code:'', tax_rate:'', tax_amount:''});
+  lineCounter++; jLines.push({id:lineCounter, account_code:'', debit:0, credit:0, line_description:'', cost_allocations:[], tax_type_code:'', tax_rate:'', tax_amount:''});
   const titleEl=document.getElementById('journalFormTitle');
   if(titleEl) titleEl.textContent='قيد محاسبي جديد';
   const submitBtn=document.getElementById('jSubmitBtn');
@@ -1783,7 +1803,7 @@ async function submitEntry(){
   const branchVal=document.getElementById('jBranch')?.value || '';
   const branch_id=branchVal ? parseInt(branchVal,10) : null;
   const invoice_number=document.getElementById('jInvoiceNumber')?.value.trim() || null;
-  const supplier_code=resolveSupplierCode(document.getElementById('jSupplier')?.value || '');
+  const supplier_code=document.getElementById('jSupplier')?.value || null;
   const err=document.getElementById('jErr');
 
   const validLines=jLines.filter(l=>l.account_code && ((l.debit||0)>0 || (l.credit||0)>0));
@@ -1811,6 +1831,7 @@ async function submitEntry(){
     entry_date, description, created_by_name, branch_id, invoice_number, supplier_code,
     lines: validLines.map(l=>({
       account_code:l.account_code, debit:l.debit||0, credit:l.credit||0, line_description:l.line_description||null,
+      tax_type_code: l.tax_type_code || null,
       tax_rate: (l.tax_rate!==undefined && l.tax_rate!==null && l.tax_rate!=='') ? parseFloat(l.tax_rate) : null,
       tax_amount: (l.tax_amount!==undefined && l.tax_amount!==null && l.tax_amount!=='') ? parseFloat(l.tax_amount) : null,
       cost_allocations:(l.cost_allocations||[]).filter(a=>a.cost_center_code).map(a=>({cost_center_code:a.cost_center_code, percentage:parseFloat(a.percentage)||0}))
@@ -1862,17 +1883,14 @@ function loadEntryIntoForm(id){
     ...(e.debit_account?[{account_code:e.debit_account, debit:e.amount, credit:0, line_description:e.description}]:[]),
     ...(e.credit_account?[{account_code:e.credit_account, debit:0, credit:e.amount, line_description:e.description}]:[]),
   ];
-  jLines=lines.map(l=>{ lineCounter++; return {id:lineCounter, account_code:l.account_code, debit:l.debit||0, credit:l.credit||0, line_description:l.line_description||'', tax_rate:l.tax_rate ?? '', tax_amount:l.tax_amount ?? '', cost_allocations:(l.cost_allocations||[]).map(a=>({cost_center_code:a.cost_center_code, percentage:a.percentage}))}; });
+  jLines=lines.map(l=>{ lineCounter++; return {id:lineCounter, account_code:l.account_code, debit:l.debit||0, credit:l.credit||0, line_description:l.line_description||'', tax_type_code:l.tax_type_code ?? '', tax_rate:l.tax_rate ?? '', tax_amount:l.tax_amount ?? '', cost_allocations:(l.cost_allocations||[]).map(a=>({cost_center_code:a.cost_center_code, percentage:a.percentage}))}; });
   document.getElementById('jDate').value=e.entry_date||'';
   document.getElementById('jDesc').value=e.description||'';
   const cb=document.getElementById('jCreatedBy'); if(cb) cb.value=e.created_by_name||'';
   const brSel=document.getElementById('jBranch'); if(brSel) brSel.value=e.branch_id||'';
   const invEl=document.getElementById('jInvoiceNumber'); if(invEl) invEl.value=e.invoice_number||'';
   const supEl=document.getElementById('jSupplier');
-  if(supEl){
-    const sup=(suppliers||[]).find(s=>s.code===e.supplier_code);
-    supEl.value = sup ? `${sup.code} — ${sup.name}` : '';
-  }
+  if(supEl) supEl.value = e.supplier_code || '';
   renderJLines();
   return e;
 }

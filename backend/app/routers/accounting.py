@@ -4,19 +4,26 @@ from sqlalchemy import or_, func
 from typing import Optional
 from datetime import date
 from app.database import get_db
-from app.models.models import Account, JournalEntry, JournalEntryLine, CostCenter, LineCostAllocation, JournalEntryAttachment, Supplier
+from app.models.models import Account, JournalEntry, JournalEntryLine, CostCenter, LineCostAllocation, JournalEntryAttachment, Supplier, TaxType
 from app.schemas.accounting import (
     AccountIn, AccountUpdate, AccountOut,
     JournalEntryIn, JournalEntryOut,
     CostCenterIn, CostCenterOut,
     LedgerResponseOut, LedgerTransactionOut,
     JournalEntryAttachmentIn, JournalEntryAttachmentOut,
+    TaxTypeOut,
 )
 from app.services import account_rollup_balance, account_direct_balance
 
 router = APIRouter(prefix="/api/accounts", tags=["Accounts"])
 journal_router = APIRouter(prefix="/api/journal", tags=["Journal"])
 cost_center_router = APIRouter(prefix="/api/cost-centers", tags=["Cost Centers"])
+tax_type_router = APIRouter(prefix="/api/tax-types", tags=["Tax Types"])
+
+
+@tax_type_router.get("", response_model=list[TaxTypeOut])
+def list_tax_types(db: Session = Depends(get_db)):
+    return db.query(TaxType).filter(TaxType.is_active == True).order_by(TaxType.code).all()
 
 
 @cost_center_router.get("", response_model=list[CostCenterOut])
@@ -219,7 +226,16 @@ def _validate_and_total_lines(payload: JournalEntryIn, db: Session) -> float:
         if not db.query(Account).filter(Account.code == line.account_code).first():
             raise HTTPException(404, f"الحساب {line.account_code} غير موجود")
 
-        # إن أُدخلت نسبة الضريبة فقط بدون قيمتها، تُحسب تلقائياً من مبلغ السطر
+        # إن اختار المستخدم نوع ضريبة من القائمة، تُجلب نسبتها من النظام
+        # مباشرة (نسخة مجمّدة بالسطر)، ولا تُقبل نسبة يدوية إلا إذا لم
+        # يُختر نوع ضريبة (توافقاً مع الإدخال اليدوي القديم إن وُجد)
+        if line.tax_type_code:
+            tax_type = db.query(TaxType).filter(TaxType.code == line.tax_type_code).first()
+            if not tax_type:
+                raise HTTPException(404, f"نوع الضريبة {line.tax_type_code} غير موجود")
+            line.tax_rate = float(tax_type.rate)
+
+        # إن وُجدت نسبة ضريبة (من نوع مُختار أو مُدخلة يدوياً) بدون قيمة، تُحسب تلقائياً
         if line.tax_rate is not None and line.tax_amount is None:
             line_amount = line.debit or line.credit
             line.tax_amount = round(line_amount * line.tax_rate / 100, 2)
@@ -273,6 +289,7 @@ def create_journal_entry(payload: JournalEntryIn, db: Session = Depends(get_db))
             debit=line.debit,
             credit=line.credit,
             line_description=line.line_description,
+            tax_type_code=line.tax_type_code,
             tax_rate=line.tax_rate,
             tax_amount=line.tax_amount,
         )
@@ -323,6 +340,7 @@ def update_journal_entry(entry_id: int, payload: JournalEntryIn, db: Session = D
             debit=line.debit,
             credit=line.credit,
             line_description=line.line_description,
+            tax_type_code=line.tax_type_code,
             tax_rate=line.tax_rate,
             tax_amount=line.tax_amount,
         )

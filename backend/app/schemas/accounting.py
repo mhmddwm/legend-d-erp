@@ -91,11 +91,23 @@ class LedgerResponseOut(BaseModel):
     transactions: list[LedgerTransactionOut]
 
 
+class TaxTypeOut(BaseModel):
+    code: str
+    name_ar: str
+    name_en: Optional[str] = None
+    rate: float
+    is_active: bool
+
+    class Config:
+        from_attributes = True
+
+
 class JournalEntryLineIn(BaseModel):
     account_code: str
     debit: float = Field(default=0, ge=0)
     credit: float = Field(default=0, ge=0)
     line_description: Optional[str] = None
+    tax_type_code: Optional[str] = None
     tax_rate: Optional[float] = Field(default=None, ge=0, le=100)
     tax_amount: Optional[float] = Field(default=None, ge=0)
     cost_allocations: list[LineCostAllocationIn] = []
@@ -107,6 +119,7 @@ class JournalEntryLineOut(BaseModel):
     debit: float
     credit: float
     line_description: Optional[str] = None
+    tax_type_code: Optional[str] = None
     tax_rate: Optional[float] = None
     tax_amount: Optional[float] = None
     cost_allocations: list[LineCostAllocationOut] = []

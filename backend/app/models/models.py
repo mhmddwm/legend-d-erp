@@ -116,6 +116,19 @@ class JournalEntry(Base):
     )
 
 
+class TaxType(Base):
+    """نوع ضريبة مسجّل بالنظام (مثل: ضريبة قيمة مضافة 15%، معفى، صفري)
+    يُختار من قائمة عند إضافة ضريبة على سطر قيد، بدل إدخال نسبة يدوياً."""
+    __tablename__ = "tax_types"
+
+    code = Column(String(20), primary_key=True)
+    name_ar = Column(String(100), nullable=False)
+    name_en = Column(String(100))
+    rate = Column(Numeric(5, 2), nullable=False)
+    is_active = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
 class JournalEntryLine(Base):
     """سطر واحد بقيد مركب: حساب واحد + مبلغ مدين أو دائن (وليس كلاهما).
     يمكن توزيع السطر على أكثر من مركز تكلفة بنسب مئوية عبر cost_allocations."""
@@ -130,6 +143,7 @@ class JournalEntryLine(Base):
     line_description = Column(String)
 
     # ضريبة اختيارية على مستوى السطر (مثلاً سطر مصروف عليه ضريبة قيمة مضافة)
+    tax_type_code = Column(String(20), ForeignKey("tax_types.code"), nullable=True)
     tax_rate = Column(Numeric(5, 2), nullable=True)
     tax_amount = Column(Numeric(18, 2), nullable=True)
 

@@ -60,6 +60,7 @@ app.include_router(localization.router)
 app.include_router(accounting.router)
 app.include_router(accounting.journal_router)
 app.include_router(accounting.cost_center_router)
+app.include_router(accounting.tax_type_router)
 
 
 # Branches (تم إضافة مسار الفروع)
