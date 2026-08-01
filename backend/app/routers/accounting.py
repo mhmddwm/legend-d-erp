@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 from sqlalchemy import or_, func
 from typing import Optional
 from datetime import date
@@ -11,7 +11,7 @@ from app.schemas.accounting import (
     CostCenterIn, CostCenterOut,
     LedgerResponseOut, LedgerTransactionOut,
     JournalEntryAttachmentIn, JournalEntryAttachmentOut,
-    TaxTypeOut,
+    TaxTypeIn, TaxTypeUpdate, TaxTypeOut,
 )
 from app.services import account_rollup_balance, account_direct_balance
 
@@ -24,6 +24,34 @@ tax_type_router = APIRouter(prefix="/api/tax-types", tags=["Tax Types"])
 @tax_type_router.get("", response_model=list[TaxTypeOut])
 def list_tax_types(db: Session = Depends(get_db)):
     return db.query(TaxType).filter(TaxType.is_active == True).order_by(TaxType.code).all()
+
+
+@tax_type_router.post("", response_model=TaxTypeOut, status_code=201)
+def create_tax_type(payload: TaxTypeIn, db: Session = Depends(get_db)):
+    if db.query(TaxType).filter(TaxType.code == payload.code).first():
+        raise HTTPException(400, "كود نوع الضريبة مستخدم من قبل")
+    if payload.account_code and not db.query(Account).filter(Account.code == payload.account_code).first():
+        raise HTTPException(404, "الحساب المحدد للضريبة غير موجود")
+    t = TaxType(**payload.model_dump())
+    db.add(t)
+    db.commit()
+    db.refresh(t)
+    return t
+
+
+@tax_type_router.put("/{code}", response_model=TaxTypeOut)
+def update_tax_type(code: str, payload: TaxTypeUpdate, db: Session = Depends(get_db)):
+    t = db.query(TaxType).filter(TaxType.code == code).first()
+    if not t:
+        raise HTTPException(404, "نوع الضريبة غير موجود")
+    data = payload.model_dump(exclude_unset=True)
+    if data.get("account_code") and not db.query(Account).filter(Account.code == data["account_code"]).first():
+        raise HTTPException(404, "الحساب المحدد للضريبة غير موجود")
+    for k, v in data.items():
+        setattr(t, k, v)
+    db.commit()
+    db.refresh(t)
+    return t
 
 
 @cost_center_router.get("", response_model=list[CostCenterOut])
@@ -150,7 +178,10 @@ def list_journal_entries(
     branch_id: Optional[int] = Query(None, description="الفرع"),
     db: Session = Depends(get_db)
 ):
-    query = db.query(JournalEntry)
+    query = db.query(JournalEntry).options(
+        selectinload(JournalEntry.lines).selectinload(JournalEntryLine.cost_allocations),
+        selectinload(JournalEntry.attachments),
+    )
 
     if entry_no:
         query = query.filter(JournalEntry.id == entry_no)
@@ -259,6 +290,66 @@ def _validate_and_total_lines(payload: JournalEntryIn, db: Session) -> float:
     return total_debit
 
 
+def _persist_entry_lines(db: Session, entry: JournalEntry, lines):
+    """يحفظ أسطر القيد. إن كان لسطر ضريبة مرتبطة بحساب فعلي بدليل الحسابات،
+    يُقسَّم تلقائياً إلى سطرين: صافي المبلغ على الحساب الأصلي + قيمة
+    الضريبة على حساب الضريبة (نفس الجهة مدين/دائن)، حتى تظهر الضريبة
+    كسطر قيد مستقل عند فتح حساب أستاذها — بدل أن تبقى مجرد قيمة
+    معلوماتية على سطر المصروف فقط."""
+    line_no = 1
+    for line in lines:
+        tax_type = None
+        if line.tax_type_code:
+            tax_type = db.query(TaxType).filter(TaxType.code == line.tax_type_code).first()
+
+        splits_tax = bool(tax_type and tax_type.account_code and line.tax_amount)
+
+        net_debit = line.debit
+        net_credit = line.credit
+        if splits_tax:
+            if line.debit:
+                net_debit = round(line.debit - line.tax_amount, 2)
+            else:
+                net_credit = round(line.credit - line.tax_amount, 2)
+
+        line_row = JournalEntryLine(
+            entry_id=entry.id,
+            line_no=line_no,
+            account_code=line.account_code,
+            debit=net_debit,
+            credit=net_credit,
+            line_description=line.line_description,
+            tax_type_code=line.tax_type_code,
+            tax_rate=line.tax_rate,
+            tax_amount=line.tax_amount,
+        )
+        db.add(line_row)
+        db.flush()
+        line_no += 1
+        for alloc in line.cost_allocations:
+            db.add(LineCostAllocation(
+                line_id=line_row.id,
+                cost_center_code=alloc.cost_center_code,
+                percentage=alloc.percentage,
+            ))
+
+        if splits_tax:
+            tax_line = JournalEntryLine(
+                entry_id=entry.id,
+                line_no=line_no,
+                account_code=tax_type.account_code,
+                debit=line.tax_amount if line.debit else 0,
+                credit=line.tax_amount if line.credit else 0,
+                line_description=f"ضريبة: {tax_type.name_ar}",
+                tax_type_code=line.tax_type_code,
+                tax_rate=line.tax_rate,
+                tax_amount=line.tax_amount,
+            )
+            db.add(tax_line)
+            db.flush()
+            line_no += 1
+
+
 @journal_router.post("", response_model=JournalEntryOut, status_code=201)
 def create_journal_entry(payload: JournalEntryIn, db: Session = Depends(get_db)):
     total = _validate_and_total_lines(payload, db)
@@ -281,26 +372,7 @@ def create_journal_entry(payload: JournalEntryIn, db: Session = Depends(get_db))
     db.add(entry)
     db.flush()  # للحصول على entry.id قبل إضافة الأسطر
 
-    for idx, line in enumerate(payload.lines, start=1):
-        line_row = JournalEntryLine(
-            entry_id=entry.id,
-            line_no=idx,
-            account_code=line.account_code,
-            debit=line.debit,
-            credit=line.credit,
-            line_description=line.line_description,
-            tax_type_code=line.tax_type_code,
-            tax_rate=line.tax_rate,
-            tax_amount=line.tax_amount,
-        )
-        db.add(line_row)
-        db.flush()  # للحصول على line_row.id قبل إضافة توزيعات مركز التكلفة
-        for alloc in line.cost_allocations:
-            db.add(LineCostAllocation(
-                line_id=line_row.id,
-                cost_center_code=alloc.cost_center_code,
-                percentage=alloc.percentage,
-            ))
+    _persist_entry_lines(db, entry, payload.lines)
 
     db.commit()
     db.refresh(entry)
@@ -332,26 +404,7 @@ def update_journal_entry(entry_id: int, payload: JournalEntryIn, db: Session = D
     # استبدال الأسطر بالكامل بالقيمة الجديدة (يحذف تلقائياً توزيعات مركز التكلفة القديمة عبر cascade)
     db.query(JournalEntryLine).filter(JournalEntryLine.entry_id == entry.id).delete()
     db.flush()
-    for idx, line in enumerate(payload.lines, start=1):
-        line_row = JournalEntryLine(
-            entry_id=entry.id,
-            line_no=idx,
-            account_code=line.account_code,
-            debit=line.debit,
-            credit=line.credit,
-            line_description=line.line_description,
-            tax_type_code=line.tax_type_code,
-            tax_rate=line.tax_rate,
-            tax_amount=line.tax_amount,
-        )
-        db.add(line_row)
-        db.flush()
-        for alloc in line.cost_allocations:
-            db.add(LineCostAllocation(
-                line_id=line_row.id,
-                cost_center_code=alloc.cost_center_code,
-                percentage=alloc.percentage,
-            ))
+    _persist_entry_lines(db, entry, payload.lines)
 
     db.commit()
     db.refresh(entry)

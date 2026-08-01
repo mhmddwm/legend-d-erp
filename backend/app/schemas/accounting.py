@@ -91,11 +91,28 @@ class LedgerResponseOut(BaseModel):
     transactions: list[LedgerTransactionOut]
 
 
+class TaxTypeIn(BaseModel):
+    code: str
+    name_ar: str
+    name_en: Optional[str] = None
+    rate: float = Field(ge=0, le=100)
+    account_code: Optional[str] = None
+
+
+class TaxTypeUpdate(BaseModel):
+    name_ar: Optional[str] = None
+    name_en: Optional[str] = None
+    rate: Optional[float] = Field(default=None, ge=0, le=100)
+    account_code: Optional[str] = None
+    is_active: Optional[bool] = None
+
+
 class TaxTypeOut(BaseModel):
     code: str
     name_ar: str
     name_en: Optional[str] = None
     rate: float
+    account_code: Optional[str] = None
     is_active: bool
 
     class Config:

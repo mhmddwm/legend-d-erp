@@ -126,6 +126,9 @@ class TaxType(Base):
     name_en = Column(String(100))
     rate = Column(Numeric(5, 2), nullable=False)
     is_active = Column(Boolean, nullable=False, default=True)
+    # حساب الضريبة بدليل الحسابات — بدون هذا الربط لن تُرحّل الضريبة
+    # كسطر قيد مستقل، وتبقى مجرد قيمة معلوماتية على سطر المصروف فقط
+    account_code = Column(String(20), ForeignKey("accounts.code"), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
