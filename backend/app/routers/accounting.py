@@ -267,9 +267,13 @@ def _validate_and_total_lines(payload: JournalEntryIn, db: Session) -> float:
             line.tax_rate = float(tax_type.rate)
 
         # إن وُجدت نسبة ضريبة (من نوع مُختار أو مُدخلة يدوياً) بدون قيمة، تُحسب تلقائياً
+        # كنسبة مستخرجة من داخل المبلغ الشامل (gross)، وليست مضافة فوقه
         if line.tax_rate is not None and line.tax_amount is None:
             line_amount = line.debit or line.credit
-            line.tax_amount = round(line_amount * line.tax_rate / 100, 2)
+            if line.tax_rate > 0:
+                line.tax_amount = round(line_amount * line.tax_rate / (100 + line.tax_rate), 2)
+            else:
+                line.tax_amount = 0
 
         if line.cost_allocations:
             total_pct = sum(a.percentage for a in line.cost_allocations)

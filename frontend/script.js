@@ -1562,9 +1562,12 @@ function onJLineTaxTypeChange(lineId, taxTypeCode){
   } else {
     const t = (taxTypes||[]).find(x=>x.code===taxTypeCode);
     const rate = t ? parseFloat(t.rate) : 0;
-    const lineAmount = parseFloat(line.debit)||parseFloat(line.credit)||0;
+    const grossAmount = parseFloat(line.debit)||parseFloat(line.credit)||0;
     line.tax_rate = rate;
-    line.tax_amount = Math.round(lineAmount * rate) / 100;
+    // المبلغ المكتوب بالسطر (مدين/دائن) هو الإجمالي شامل الضريبة، لذلك
+    // نستخرج نسبة الضريبة من داخله (gross × rate ÷ (100 + rate))
+    // بدل إضافتها فوقه — مثال: 11,500 شامل 15% = 1,500 ضريبة، وليس 1,725.
+    line.tax_amount = rate>0 ? Math.round(grossAmount * rate / (100+rate) * 100) / 100 : 0;
   }
   renderJLines();
 }
