@@ -1374,6 +1374,15 @@ html[dir="ltr"] .brand-center{direction:ltr;}
       <button class="nav-dd-item" data-tab="journal">القيود اليومية</button>
     </div>
   </div>
+  <div class="nav-item" data-group="users_permissions">
+    <button class="nav-item-btn" onclick="toggleNavItem(this)">
+      المستخدمون والصلاحيات <span class="nav-arrow">▾</span>
+    </button>
+    <div class="nav-dropdown">
+      <button class="nav-dd-item" data-tab="users_list">المستخدمون</button>
+      <button class="nav-dd-item" data-tab="roles_permissions">الأدوار والصلاحيات</button>
+    </div>
+  </div>
 </nav>
 
 <!-- ===== VERTICAL SIDEBAR ===== -->
@@ -1534,6 +1543,15 @@ html[dir="ltr"] .brand-center{direction:ltr;}
       <button class="sb-item" data-tab="apps_management">إدارة التطبيقات</button>
       <button class="sb-item" data-tab="themes_backgrounds">السمات والخلفيات</button>
       <button class="sb-item" data-tab="core_architecture">نواة النظام والذكاء</button>
+    </div>
+  </div>
+  <div class="sb-section" data-group="users_permissions">
+    <button class="sb-section-btn" onclick="toggleSbSection(this)">
+      <span>المستخدمون والصلاحيات</span><span class="sb-arrow">◀</span>
+    </button>
+    <div class="sb-items">
+      <button class="sb-item" data-tab="users_list">المستخدمون</button>
+      <button class="sb-item" data-tab="roles_permissions">الأدوار والصلاحيات</button>
     </div>
   </div>
 </aside>
@@ -2863,11 +2881,207 @@ html[dir="ltr"] .brand-center{direction:ltr;}
 </div>
 <div class="panel" id="panel-barcode_settings"><div class="formcard"><h3>إعدادات الباركود</h3><div class="empty-msg">جاهزة للتطوير</div></div></div>
 <div class="panel" id="panel-extra_fields"><div class="formcard"><h3>الحقول الإضافية</h3><div class="empty-msg">جاهزة للتطوير</div></div></div>
+
+<!-- ========================================================
+     المستخدمون والصلاحيات (Users & Roles/Permissions)
+     شاشة إدارة المستخدمين المرتبطة بمنظومة الأدوار والصلاحيات.
+     ======================================================== -->
+<style>
+.uz-toolbar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;justify-content:space-between}
+.uz-toolbar-filters{display:flex;gap:8px;flex-wrap:wrap;flex:1;min-width:260px}
+.uz-toolbar-filters input,.uz-toolbar-filters select{
+  border:1.5px solid var(--line);border-radius:9px;padding:9px 12px;font-family:inherit;
+  font-size:13px;background:var(--bg-card);color:var(--ink);min-width:150px;
+}
+.uz-toolbar-filters input:focus,.uz-toolbar-filters select:focus{outline:none;border-color:var(--accent)}
+.uz-kpi-row{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:14px}
+.uz-kpi{background:var(--bg-card);border:1px solid var(--line);border-radius:14px;padding:14px 16px;
+  box-shadow:var(--shadow);display:flex;flex-direction:column;gap:4px}
+.uz-kpi small{color:var(--muted);font-size:11.5px;font-weight:700}
+.uz-kpi b{font-size:22px;color:var(--ink-2)}
+.uz-kpi.uz-kpi-accent b{color:var(--accent)}
+.uz-kpi.uz-kpi-success b{color:var(--success)}
+.uz-kpi.uz-kpi-coral b{color:var(--coral)}
+@media(max-width:900px){.uz-kpi-row{grid-template-columns:1fr 1fr}}
+
+/* المستخدم: أفاتار + اسم + بريد */
+.uz-user-cell{display:flex;align-items:center;gap:10px}
+.uz-avatar{
+  width:36px;height:36px;border-radius:50%;flex-shrink:0;display:flex;align-items:center;justify-content:center;
+  font-weight:800;font-size:13px;color:#fff;background:linear-gradient(135deg,var(--accent),var(--accent-hover));
+}
+.uz-user-meta b{display:block;font-size:13.5px;color:var(--ink-2)}
+.uz-user-meta span{display:block;font-size:11.5px;color:var(--muted)}
+
+/* شارات الأدوار — ألوان دورية حسب رمز الدور */
+.uz-role-badge{font-size:11px;font-weight:700;padding:4px 12px;border-radius:20px;display:inline-block;white-space:nowrap}
+.uz-role-c0{background:var(--coral-bg);color:var(--coral)}
+.uz-role-c1{background:var(--accent-light);color:var(--accent)}
+.uz-role-c2{background:var(--teal-bg);color:var(--teal)}
+.uz-role-c3{background:var(--amber-bg);color:var(--amber)}
+.uz-role-c4{background:var(--success-bg);color:var(--success)}
+.uz-role-c5{background:var(--bg-page);color:var(--muted)}
+
+.uz-row-actions{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+.uz-icon-btn{
+  border:1.5px solid var(--line);background:var(--bg-card);border-radius:8px;width:30px;height:30px;
+  display:inline-flex;align-items:center;justify-content:center;cursor:pointer;font-size:14px;color:var(--ink-2);
+  transition:.15s;
+}
+.uz-icon-btn:hover{border-color:var(--accent);color:var(--accent);background:var(--accent-light)}
+.uz-icon-btn.uz-danger:hover{border-color:var(--coral);color:var(--coral);background:var(--coral-bg)}
+
+/* نموذج إضافة/تعديل مستخدم — بطاقة منسدلة بنفس أسلوب باقي الشاشات */
+#uzUserFormBox{display:none;margin-bottom:14px}
+.uz-form-head{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:4px}
+.uz-toggle-row{display:flex;align-items:center;gap:10px;padding:9px 2px}
+.uz-switch{position:relative;width:44px;height:24px;flex-shrink:0}
+.uz-switch input{opacity:0;width:0;height:0}
+.uz-switch-track{position:absolute;inset:0;background:var(--line);border-radius:999px;cursor:pointer;transition:.2s}
+.uz-switch-track::before{content:'';position:absolute;width:18px;height:18px;left:3px;top:3px;background:#fff;
+  border-radius:50%;transition:.2s;box-shadow:0 1px 3px rgba(0,0,0,.25)}
+.uz-switch input:checked+.uz-switch-track{background:var(--success)}
+.uz-switch input:checked+.uz-switch-track::before{transform:translateX(-20px)}
+
+/* شاشة الأدوار: بطاقات */
+.uz-roles-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:14px;margin-bottom:18px}
+.uz-role-card{background:var(--bg-card);border:1px solid var(--line);border-radius:16px;padding:16px;
+  box-shadow:var(--shadow);display:flex;flex-direction:column;gap:8px;transition:.15s}
+.uz-role-card:hover{box-shadow:var(--shadow-lg);border-color:var(--accent)}
+.uz-role-card.uz-role-selected{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-light)}
+.uz-role-card-head{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
+.uz-role-card-head h4{margin:0;font-size:15px;color:var(--ink-2)}
+.uz-role-card-head small{display:block;color:var(--muted);font-family:monospace;font-size:11px;margin-top:2px}
+.uz-role-desc{font-size:12.5px;color:var(--muted);line-height:1.6;min-height:36px}
+.uz-role-card-foot{display:flex;justify-content:space-between;align-items:center;margin-top:4px;
+  border-top:1px solid var(--line-2);padding-top:10px}
+.uz-role-users-count{font-size:11.5px;color:var(--ink-3);font-weight:700}
+.uz-badge-system{background:var(--amber-bg);color:var(--amber);font-size:10.5px;font-weight:800;
+  padding:2px 9px;border-radius:20px;white-space:nowrap}
+.uz-new-role-card{border:2px dashed var(--line);display:flex;align-items:center;justify-content:center;
+  flex-direction:column;gap:6px;cursor:pointer;color:var(--muted);min-height:140px;background:transparent}
+.uz-new-role-card:hover{border-color:var(--accent);color:var(--accent);background:var(--accent-light)}
+.uz-new-role-card span:first-child{font-size:26px}
+
+/* مصفوفة الصلاحيات */
+#uzMatrixBox{display:none}
+.uz-matrix-head{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:12px}
+.uz-matrix-head h3{margin:0;display:flex;align-items:center;gap:8px}
+.uz-matrix-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:12px}
+table.uz-matrix{width:100%;border-collapse:collapse;font-size:12.5px;min-width:760px}
+table.uz-matrix th,table.uz-matrix td{padding:10px 8px;text-align:center;border-bottom:1px solid var(--line-2)}
+table.uz-matrix thead th{background:var(--bg-card-2);color:var(--ink-2);font-weight:800;position:sticky;top:0}
+table.uz-matrix td:first-child,table.uz-matrix th:first-child{
+  text-align:right;font-weight:700;color:var(--ink-2);position:sticky;right:0;background:var(--bg-card);
+  min-width:190px;border-inline-start:0;
+}
+table.uz-matrix thead th:first-child{background:var(--bg-card-2)}
+table.uz-matrix tbody tr:hover{background:#F4F7FC}
+table.uz-matrix input[type=checkbox]{width:16px;height:16px;cursor:pointer;accent-color:var(--accent)}
+.uz-matrix-row-all{cursor:pointer;color:var(--accent);font-size:11px;font-weight:700;margin-inline-start:6px}
+.uz-empty-hint{padding:40px 16px;text-align:center;color:var(--muted);font-size:13px}
+</style>
+
+<div class="panel" id="panel-users_list">
+  <div class="uz-kpi-row" id="uzKpiRow"></div>
+
+  <div class="formcard">
+    <div class="uz-toolbar">
+      <div class="uz-toolbar-filters">
+        <input id="uzSearchInput" placeholder="بحث بالاسم أو البريد الإلكتروني" oninput="uzRenderUsers()">
+        <select id="uzRoleFilter" onchange="uzRenderUsers()"><option value="">كل الأدوار</option></select>
+        <select id="uzStatusFilter" onchange="uzRenderUsers()">
+          <option value="">كل الحالات</option>
+          <option value="active">نشط</option>
+          <option value="suspended">موقوف</option>
+        </select>
+      </div>
+      <button class="btn" onclick="uzOpenUserForm()">+ إضافة مستخدم</button>
+    </div>
+  </div>
+
+  <div class="formcard" id="uzUserFormBox">
+    <div class="uz-form-head">
+      <h3 id="uzUserFormTitle">إضافة مستخدم جديد</h3>
+      <button class="btn secondary small" onclick="uzCloseUserForm()">إغلاق</button>
+    </div>
+    <div class="frow">
+      <div class="field"><label>الاسم الكامل <span class="req">*</span></label><input id="uzFullName" placeholder="مثال: أحمد محمد"></div>
+      <div class="field"><label>البريد الإلكتروني <span class="req">*</span></label><input id="uzEmail" type="email" placeholder="user@company.com"></div>
+      <div class="field"><label>رقم الهاتف</label><input id="uzPhone" placeholder="05xxxxxxxx"></div>
+      <div class="field"><label>الدور الوظيفي <span class="req">*</span></label><select id="uzRoleSelect"></select></div>
+      <div class="field" id="uzPasswordField"><label>كلمة المرور <span class="req">*</span></label><input id="uzPassword" type="password" placeholder="6 أحرف على الأقل"></div>
+    </div>
+    <div class="uz-toggle-row">
+      <label class="uz-switch"><input type="checkbox" id="uzActiveToggle" checked><span class="uz-switch-track"></span></label>
+      <span>الحساب نشط ويمكنه الدخول للنظام</span>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:6px">
+      <button class="btn" onclick="uzSaveUser()">حفظ</button>
+      <button class="btn secondary" onclick="uzCloseUserForm()">إلغاء</button>
+    </div>
+  </div>
+
+  <div class="gridcard">
+    <div class="scrollx">
+      <table class="grid">
+        <thead><tr>
+          <th>المستخدم</th><th>الهاتف</th><th>الدور</th><th>الحالة</th><th>آخر دخول</th><th></th>
+        </tr></thead>
+        <tbody id="uzUsersBody"></tbody>
+      </table>
+      <div class="uz-empty-hint" id="uzUsersEmpty" style="display:none">لا يوجد مستخدمون مطابقون</div>
+    </div>
+  </div>
+</div>
+
+<div class="panel" id="panel-roles_permissions">
+  <div class="formcard">
+    <div class="uz-form-head" style="margin-bottom:10px">
+      <h3>الأدوار الوظيفية</h3>
+      <span class="hint-inline">كل دور يحدد ما يستطيع المستخدمون المرتبطون به رؤيته أو تعديله بالنظام</span>
+    </div>
+    <div class="uz-roles-grid" id="uzRolesGrid"></div>
+  </div>
+
+  <div class="formcard" id="uzRoleFormBox" style="display:none">
+    <div class="uz-form-head">
+      <h3 id="uzRoleFormTitle">دور جديد</h3>
+      <button class="btn secondary small" onclick="uzCloseRoleForm()">إغلاق</button>
+    </div>
+    <div class="frow">
+      <div class="field"><label>رمز الدور (English) <span class="req">*</span></label><input id="uzRoleCode" placeholder="sales_manager"></div>
+      <div class="field"><label>اسم الدور بالعربية <span class="req">*</span></label><input id="uzRoleNameAr" placeholder="مدير المبيعات"></div>
+      <div class="field"><label>الاسم بالإنجليزية</label><input id="uzRoleNameEn" placeholder="Sales Manager"></div>
+      <div class="field" style="grid-column:1/-1"><label>الوصف</label><input id="uzRoleDesc" placeholder="وصف مختصر لمهام هذا الدور"></div>
+    </div>
+    <div style="display:flex;gap:8px">
+      <button class="btn" onclick="uzSaveRole()">حفظ الدور</button>
+      <button class="btn secondary" onclick="uzCloseRoleForm()">إلغاء</button>
+    </div>
+  </div>
+
+  <div class="formcard" id="uzMatrixBox">
+    <div class="uz-matrix-head">
+      <h3>مصفوفة الصلاحيات — <span id="uzMatrixRoleName" style="color:var(--accent)"></span></h3>
+      <div style="display:flex;gap:8px">
+        <button class="btn" onclick="uzSaveMatrix()">حفظ الصلاحيات</button>
+        <button class="btn secondary" onclick="uzCloseMatrix()">إغلاق</button>
+      </div>
+    </div>
+    <div class="uz-matrix-wrap">
+      <table class="uz-matrix" id="uzMatrixTable"></table>
+    </div>
+  </div>
+</div>
+
 </div><!-- end .wrap -->
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script src="i18n.js"></script>
-<script src="script.js">
+<script src="script.js"></script>
+<script src="users_roles.js"></script>
+<script>
 
 /* FIX v15: تفعيل حقول أسعار البيع اليدوية عند الإضافة أو التعديل */
 (function(){

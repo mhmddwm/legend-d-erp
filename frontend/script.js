@@ -173,7 +173,7 @@ entries = await safeLoad(
 
 appUsers = await safeLoad(
 "المستخدمون",
-"/users"
+"/api/users"
 );
 
 
@@ -2857,6 +2857,7 @@ const MODULE_TAGS = {
   customer_reports:'التقارير', inventory_reports:'التقارير', activity_reports:'التقارير',
   print_templates:'قوالب الطباعة', whatsapp_templates:'قوالب الطباعة', email_templates:'قوالب الطباعة', auto_send_rules:'قوالب الطباعة',
   account_info:'الإعدادات العامة', account_settings_general:'الإعدادات العامة', sequence_settings:'الإعدادات العامة', apps_management:'الإعدادات العامة', themes_backgrounds:'الإعدادات العامة',
+  users_list:'المستخدمون والصلاحيات', roles_permissions:'المستخدمون والصلاحيات',
 };
 
 // تفعيل تبويب محدد

@@ -14,6 +14,8 @@ from app.routers import (
     purchasing,
     localization,
     users,
+    roles,
+    permissions_catalog,
     warehouse,
     warehouse_locations,
     branches  # تم إضافة branches هنا
@@ -80,8 +82,10 @@ app.include_router(purchasing.pinv_router)
 app.include_router(purchasing.prt_router)
 
 
-# Users
+# Users, Roles & Permissions
 app.include_router(users.router)
+app.include_router(roles.router)
+app.include_router(permissions_catalog.router)
 
 
 # Warehouses
