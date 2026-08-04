@@ -39,13 +39,40 @@ class CostCenterIn(BaseModel):
     code: str
     name_ar: str
     name_en: Optional[str] = None
+    parent_code: Optional[str] = None
+    cc_type: str = Field(default="cost", pattern="^(cost|profit)$")
+    manager_name: Optional[str] = None
+    budget_amount: float = 0
+    notes: Optional[str] = None
+    is_active: bool = True
+
+
+class CostCenterUpdate(BaseModel):
+    name_ar: Optional[str] = None
+    name_en: Optional[str] = None
+    parent_code: Optional[str] = None
+    cc_type: Optional[str] = Field(default=None, pattern="^(cost|profit)$")
+    manager_name: Optional[str] = None
+    budget_amount: Optional[float] = None
+    notes: Optional[str] = None
+    is_active: Optional[bool] = None
 
 
 class CostCenterOut(BaseModel):
     code: str
     name_ar: str
     name_en: Optional[str] = None
+    parent_code: Optional[str] = None
+    cc_type: str = "cost"
+    manager_name: Optional[str] = None
+    budget_amount: float = 0
+    notes: Optional[str] = None
     is_active: bool
+    created_at: Optional[datetime] = None
+    # مؤشرات تُحسب من بيانات القيود الفعلية (غير مخزّنة بالجدول)
+    actual_amount: float = 0
+    entries_count: int = 0
+    children_count: int = 0
 
     class Config:
         from_attributes = True

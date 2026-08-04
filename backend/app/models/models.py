@@ -1,6 +1,6 @@
 from sqlalchemy import (
     Column, String, Numeric, Boolean, Date, DateTime, Integer,
-    ForeignKey, CheckConstraint, func
+    ForeignKey, CheckConstraint, Text, func
 )
 from sqlalchemy.orm import relationship
 from app.database import Base
@@ -42,13 +42,32 @@ class Account(Base):
 
 
 class CostCenter(Base):
+    """مركز التكلفة — يدعم التسلسل الهرمي (مركز رئيسي/فرعي) حتى يناسب
+    الشركات الصغيرة (تسطيح بدون تفريع) والكبيرة (فروع/إدارات/أقسام
+    متداخلة) على حد سواء، بنفس الطريقة المتبعة في أوراكل وساب وأودو."""
     __tablename__ = "cost_centers"
 
     code = Column(String(20), primary_key=True)
     name_ar = Column(String(200), nullable=False)
     name_en = Column(String(200))
+
+    parent_code = Column(String(20), ForeignKey("cost_centers.code"), nullable=True)
+    parent = relationship("CostCenter", remote_side=[code], backref="children")
+
+    # نوع المركز: تكلفة (cost) أو ربحية (profit) — يفيد الشركات الكبيرة
+    # التي تتابع مراكز ربحية مستقلة، بينما تتجاهله الشركات الصغيرة.
+    cc_type = Column(String(20), nullable=False, default="cost")
+    manager_name = Column(String(150), nullable=True)
+    budget_amount = Column(Numeric(18, 2), nullable=False, default=0)
+    notes = Column(Text, nullable=True)
+
     is_active = Column(Boolean, nullable=False, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        CheckConstraint("cc_type IN ('cost','profit')", name="ck_cost_center_type"),
+    )
 
 
 class JournalEntry(Base):

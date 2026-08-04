@@ -44,3 +44,10 @@
 - Added Purchase Intelligence Panel in RFQ comparison with last purchase price, average net price, average price including tax, current best quote, and last 3 purchase prices.
 - Added clickable product rows in the comparison table to inspect historical purchase price context.
 - Added demo purchase order generation from the approved/recommended RFQ supplier.
+
+## ACC-CC-001 — Cost Centers screen (complete build)
+- Replaced the "جاهزة للتطوير" placeholder with a full Cost Centers (مراكز التكلفة) screen: KPI summary cards, hierarchical (parent/child) or flat table view, search and filters (type, status), and an inline add/edit form.
+- Backend: extended `cost_centers` with hierarchy (`parent_code`), type (`cost`/`profit`), manager, budget, and notes (migration `017_cost_centers_extended.sql`).
+- Backend: added update, activate/deactivate, and delete endpoints; delete is blocked for centers with sub-centers and auto-deactivates centers already referenced by posted journal entries instead of hard-deleting, preserving historical report integrity.
+- Backend: list/detail responses now include computed `actual_amount` and `entries_count` aggregated live from posted journal entry cost allocations, so budget-vs-actual is always driven by real ledger data.
+- Frontend: budget consumption bar with over/near-budget highlighting, cycle-safe parent selector, CSV export, and automatic refresh of every cost-center dropdown across the system (journal entry lines, filters) after any change.

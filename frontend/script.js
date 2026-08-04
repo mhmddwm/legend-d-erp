@@ -359,6 +359,8 @@ function renderAll(){
 
   renderWarehousesScreen();
 
+  if(typeof renderCostCenters === 'function') renderCostCenters();
+
 }
 
 // ============================================================
@@ -571,6 +573,266 @@ async function deleteWarehouse(id){
     await api('DELETE', `/api/warehouses/${id}`);
     await loadAll();
   }catch(e){ alert(e.message); }
+}
+
+// ============================================================
+// مراكز التكلفة (Cost Centers) — شاشة إدارة كاملة: هيكل هرمي،
+// موازنة تقديرية مقابل فعلي محسوب من القيود المرحّلة، وربط مباشر
+// بجميع شاشات وتقارير النظام عبر مصفوفة costCenters المشتركة.
+// ============================================================
+function ccEsc(s){ return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function ccFmt(n){ return (parseFloat(n)||0).toLocaleString('en',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+
+function renderCostCenterParentOptions(excludeCode){
+  const sel = document.getElementById('ccParent');
+  if(!sel) return;
+  const cur = sel.value;
+  const list = (costCenters||[]).filter(c=>c.code!==excludeCode);
+  sel.innerHTML = '<option value="">— بدون (مركز رئيسي) —</option>' +
+    list.map(c=>`<option value="${ccEsc(c.code)}">${ccEsc(c.code)} — ${ccEsc(c.name_ar)}</option>`).join('');
+  sel.value = cur;
+}
+
+function renderCostCentersKpis(){
+  const box = document.getElementById('ccKpis');
+  if(!box) return;
+  const all = costCenters || [];
+  const active = all.filter(c=>c.is_active).length;
+  const totalBudget = all.reduce((s,c)=>s+(parseFloat(c.budget_amount)||0),0);
+  const totalActual = all.reduce((s,c)=>s+(parseFloat(c.actual_amount)||0),0);
+  const overBudget = all.filter(c=>{
+    const b=parseFloat(c.budget_amount)||0, a=parseFloat(c.actual_amount)||0;
+    return b>0 && a>b;
+  }).length;
+  box.innerHTML = `
+    <div class="cc-kpi">
+      <div class="lbl">إجمالي مراكز التكلفة</div>
+      <div class="val">${all.length}</div>
+      <div class="sub">${active} مركز نشط</div>
+    </div>
+    <div class="cc-kpi ok">
+      <div class="lbl">إجمالي الموازنات التقديرية</div>
+      <div class="val">${ccFmt(totalBudget)}</div>
+      <div class="sub">لكل المراكز</div>
+    </div>
+    <div class="cc-kpi">
+      <div class="lbl">إجمالي الفعلي من القيود</div>
+      <div class="val">${ccFmt(totalActual)}</div>
+      <div class="sub">محسوب مباشرة من القيود المرحّلة</div>
+    </div>
+    <div class="cc-kpi ${overBudget?'danger':'ok'}">
+      <div class="lbl">مراكز تجاوزت الموازنة</div>
+      <div class="val">${overBudget}</div>
+      <div class="sub">${overBudget?'تحتاج مراجعة':'كل شيء ضمن الحدود'}</div>
+    </div>
+  `;
+}
+
+function ccBuildTree(list){
+  const byCode = new Map(list.map(c=>[c.code,c]));
+  const childrenMap = new Map();
+  list.forEach(c=>{
+    const p = c.parent_code && byCode.has(c.parent_code) ? c.parent_code : null;
+    if(!childrenMap.has(p)) childrenMap.set(p,[]);
+    childrenMap.get(p).push(c);
+  });
+  const ordered=[];
+  function walk(parent, depth){
+    const kids=(childrenMap.get(parent)||[]).slice().sort((a,b)=>String(a.code).localeCompare(String(b.code)));
+    kids.forEach(k=>{ ordered.push({cc:k, depth}); walk(k.code, depth+1); });
+  }
+  walk(null,0);
+  return ordered;
+}
+
+function renderCostCenters(){
+  const search = (document.getElementById('ccSearch')?.value||'').trim().toLowerCase();
+  const typeFilter = document.getElementById('ccFilterType')?.value || '';
+  const statusFilter = document.getElementById('ccFilterStatus')?.value || 'active';
+  const viewMode = document.getElementById('ccViewMode')?.value || 'tree';
+
+  let list = costCenters || [];
+  if(statusFilter==='active') list = list.filter(c=>c.is_active);
+  else if(statusFilter==='inactive') list = list.filter(c=>!c.is_active);
+  if(typeFilter) list = list.filter(c=>(c.cc_type||'cost')===typeFilter);
+  if(search){
+    list = list.filter(c =>
+      String(c.code||'').toLowerCase().includes(search) ||
+      String(c.name_ar||'').toLowerCase().includes(search) ||
+      String(c.name_en||'').toLowerCase().includes(search)
+    );
+  }
+
+  renderCostCentersKpis();
+
+  const countEl = document.getElementById('ccCount');
+  if(countEl) countEl.textContent = `${list.length} مركز`;
+
+  const body = document.getElementById('costCenterBody');
+  const emptyEl = document.getElementById('ccEmpty');
+  if(!body) return;
+
+  const rows = (viewMode==='tree')
+    ? ccBuildTree(list)
+    : list.slice().sort((a,b)=>String(a.code).localeCompare(String(b.code))).map(cc=>({cc, depth:0}));
+
+  body.innerHTML = rows.map(({cc, depth})=>{
+    const budget = parseFloat(cc.budget_amount)||0;
+    const actual = parseFloat(cc.actual_amount)||0;
+    const pct = budget>0 ? (actual/budget*100) : 0;
+    const barClass = budget<=0 ? '' : (actual>budget ? 'over' : (pct>=80 ? 'warn' : ''));
+    const indent = depth>0
+      ? `<span class="cc-tree-indent" style="width:${depth*18}px"></span><span class="cc-tree-branch">└</span>`
+      : '';
+    return `
+      <tr>
+        <td><span class="cc-code-chip">${ccEsc(cc.code)}</span></td>
+        <td>
+          <div class="cc-name-cell">${indent}<div>
+            <b>${ccEsc(cc.name_ar)}</b>
+            ${cc.name_en ? `<div style="font-size:11px;color:var(--muted)">${ccEsc(cc.name_en)}</div>` : ''}
+          </div></div>
+        </td>
+        <td><span class="cc-type-badge ${cc.cc_type||'cost'}">${cc.cc_type==='profit' ? 'مركز ربحية' : 'مركز تكلفة'}</span></td>
+        <td class="cc-manager-cell">${ccEsc(cc.manager_name||'-')}</td>
+        <td>
+          <div class="cc-budget-wrap">
+            <span class="cc-muted-num">${ccFmt(budget)}</span>
+            ${budget>0 ? `<div class="cc-budget-bar ${barClass}"><span style="width:${Math.min(100,pct)}%"></span></div><div class="cc-budget-pct">${pct.toFixed(0)}% مستهلك</div>` : ''}
+          </div>
+        </td>
+        <td class="cc-muted-num">${ccFmt(actual)}</td>
+        <td class="cc-muted-num">${cc.entries_count||0}</td>
+        <td><button type="button" class="cc-status-badge ${cc.is_active?'active':'inactive'}" onclick="toggleCostCenterActive('${cc.code}')">${cc.is_active?'نشط':'موقف'}</button></td>
+        <td>
+          <div class="cc-row-actions">
+            <button type="button" class="icon-btn edit" title="تعديل" onclick="editCostCenter('${cc.code}')">✎</button>
+            <button type="button" class="icon-btn" title="إضافة مركز فرعي تابع له" onclick="openCostCenterForm('${cc.code}')">＋</button>
+            <button type="button" class="icon-btn del" title="حذف" onclick="deleteCostCenter('${cc.code}')">🗑</button>
+          </div>
+        </td>
+      </tr>
+    `;
+  }).join('');
+
+  if(emptyEl) emptyEl.style.display = rows.length ? 'none' : 'block';
+}
+
+function openCostCenterForm(parentCode){
+  const box = document.getElementById('ccFormBox');
+  if(!box) return;
+  document.getElementById('ccEditCode').value = '';
+  const codeEl = document.getElementById('ccCode');
+  codeEl.value = ''; codeEl.disabled = false;
+  document.getElementById('ccNameAr').value = '';
+  document.getElementById('ccNameEn').value = '';
+  document.getElementById('ccManager').value = '';
+  document.getElementById('ccBudget').value = '';
+  document.getElementById('ccNotes').value = '';
+  document.getElementById('ccType').value = 'cost';
+  document.getElementById('ccActive').value = 'true';
+  document.getElementById('ccErr').textContent = '';
+  document.getElementById('ccFormTitle').textContent = 'مركز تكلفة جديد';
+  renderCostCenterParentOptions('');
+  document.getElementById('ccParent').value = parentCode || '';
+  box.style.display = 'block';
+  box.scrollIntoView({behavior:'smooth', block:'nearest'});
+}
+
+function closeCostCenterForm(){
+  const box = document.getElementById('ccFormBox');
+  if(box) box.style.display = 'none';
+}
+
+function editCostCenter(code){
+  const cc = (costCenters||[]).find(c=>c.code===code);
+  if(!cc) return;
+  openCostCenterForm();
+  document.getElementById('ccFormTitle').textContent = 'تعديل مركز التكلفة: ' + cc.code;
+  document.getElementById('ccEditCode').value = cc.code;
+  const codeEl = document.getElementById('ccCode');
+  codeEl.value = cc.code; codeEl.disabled = true;
+  document.getElementById('ccNameAr').value = cc.name_ar || '';
+  document.getElementById('ccNameEn').value = cc.name_en || '';
+  document.getElementById('ccManager').value = cc.manager_name || '';
+  document.getElementById('ccBudget').value = cc.budget_amount || '';
+  document.getElementById('ccNotes').value = cc.notes || '';
+  document.getElementById('ccType').value = cc.cc_type || 'cost';
+  document.getElementById('ccActive').value = cc.is_active ? 'true' : 'false';
+  renderCostCenterParentOptions(cc.code);
+  document.getElementById('ccParent').value = cc.parent_code || '';
+}
+
+async function saveCostCenter(){
+  const errEl = document.getElementById('ccErr');
+  if(errEl) errEl.textContent = '';
+  const editCode = document.getElementById('ccEditCode').value;
+  const code = document.getElementById('ccCode').value.trim();
+  const name_ar = document.getElementById('ccNameAr').value.trim();
+  const name_en = document.getElementById('ccNameEn').value.trim();
+  const parent_code = document.getElementById('ccParent').value || null;
+  const cc_type = document.getElementById('ccType').value;
+  const manager_name = document.getElementById('ccManager').value.trim();
+  const budget_amount = parseFloat(document.getElementById('ccBudget').value) || 0;
+  const notes = document.getElementById('ccNotes').value.trim();
+  const is_active = document.getElementById('ccActive').value === 'true';
+
+  if(!code || !name_ar){
+    if(errEl) errEl.textContent = 'كود المركز والاسم بالعربي حقلان مطلوبان';
+    return;
+  }
+  if(parent_code && parent_code === (editCode || code)){
+    if(errEl) errEl.textContent = 'لا يمكن أن يكون المركز رئيسياً لنفسه';
+    return;
+  }
+
+  try{
+    if(editCode){
+      await api('PUT', `/api/cost-centers/${encodeURIComponent(editCode)}`, {
+        name_ar, name_en: name_en || null, parent_code, cc_type,
+        manager_name: manager_name || null, budget_amount, notes: notes || null, is_active
+      });
+    }else{
+      await api('POST', '/api/cost-centers', {
+        code, name_ar, name_en: name_en || null, parent_code, cc_type,
+        manager_name: manager_name || null, budget_amount, notes: notes || null, is_active
+      });
+    }
+    closeCostCenterForm();
+    await loadAll();
+  }catch(e){
+    if(errEl) errEl.textContent = e.message;
+  }
+}
+
+async function toggleCostCenterActive(code){
+  try{
+    await api('PATCH', `/api/cost-centers/${encodeURIComponent(code)}/toggle-active`);
+    await loadAll();
+  }catch(e){ alert(e.message); }
+}
+
+async function deleteCostCenter(code){
+  if(!confirm(`تأكيد حذف مركز التكلفة "${code}"؟ إن كان مستخدماً بقيود سابقة سيتم إيقافه بدل حذفه حفاظاً على سلامة التقارير.`)) return;
+  try{
+    const res = await api('DELETE', `/api/cost-centers/${encodeURIComponent(code)}`);
+    await loadAll();
+    if(res && res.deactivated) alert(res.message || 'تم إيقاف المركز بدل حذفه لأنه مستخدم بقيود سابقة');
+  }catch(e){ alert(e.message); }
+}
+
+function exportCostCentersCsv(){
+  const rows = costCenters || [];
+  let csv = 'الكود,الاسم بالعربي,الاسم بالإنجليزي,النوع,المسؤول,المركز الرئيسي,الموازنة,الفعلي,عدد القيود,الحالة\n';
+  csv += rows.map(c => [
+    c.code, c.name_ar, c.name_en||'', c.cc_type==='profit'?'ربحية':'تكلفة',
+    c.manager_name||'', c.parent_code||'', c.budget_amount||0, c.actual_amount||0,
+    c.entries_count||0, c.is_active?'نشط':'موقف'
+  ].map(v => `"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
+  const a = document.createElement('a');
+  a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent('\uFEFF' + csv);
+  a.download = 'cost_centers.csv';
+  a.click();
 }
 
 // ============================================================

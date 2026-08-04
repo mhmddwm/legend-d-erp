@@ -8,7 +8,7 @@ from app.models.models import Account, JournalEntry, JournalEntryLine, CostCente
 from app.schemas.accounting import (
     AccountIn, AccountUpdate, AccountOut,
     JournalEntryIn, JournalEntryOut,
-    CostCenterIn, CostCenterOut,
+    CostCenterIn, CostCenterUpdate, CostCenterOut,
     LedgerResponseOut, LedgerTransactionOut,
     JournalEntryAttachmentIn, JournalEntryAttachmentOut,
     TaxTypeIn, TaxTypeUpdate, TaxTypeOut,
@@ -54,20 +54,180 @@ def update_tax_type(code: str, payload: TaxTypeUpdate, db: Session = Depends(get
     return t
 
 
+def _cost_center_stats(db: Session):
+    """يحسب لكل مركز تكلفة: عدد القيود الفعلي (posted فقط) وإجمالي المبلغ
+    المخصّص له عبر LineCostAllocation، بحيث تُبنى شاشة مراكز التكلفة
+    وتقاريرها مباشرة من بيانات القيود الحقيقية بدل أرقام ثابتة."""
+    rows = (
+        db.query(
+            LineCostAllocation.cost_center_code,
+            func.count(func.distinct(JournalEntryLine.entry_id)).label("entries_count"),
+            func.coalesce(
+                func.sum(
+                    (JournalEntryLine.debit + JournalEntryLine.credit)
+                    * LineCostAllocation.percentage / 100.0
+                ),
+                0,
+            ).label("actual_amount"),
+        )
+        .join(JournalEntryLine, LineCostAllocation.line_id == JournalEntryLine.id)
+        .join(JournalEntry, JournalEntry.id == JournalEntryLine.entry_id)
+        .filter(JournalEntry.status == "posted")
+        .group_by(LineCostAllocation.cost_center_code)
+        .all()
+    )
+    return {r.cost_center_code: {"entries_count": r.entries_count, "actual_amount": float(r.actual_amount)} for r in rows}
+
+
+def _children_counts(db: Session):
+    rows = (
+        db.query(CostCenter.parent_code, func.count(CostCenter.code))
+        .filter(CostCenter.parent_code.isnot(None))
+        .group_by(CostCenter.parent_code)
+        .all()
+    )
+    return {p: c for p, c in rows}
+
+
+def _to_cost_center_out(cc: CostCenter, stats: dict, children: dict) -> CostCenterOut:
+    s = stats.get(cc.code, {})
+    return CostCenterOut(
+        code=cc.code,
+        name_ar=cc.name_ar,
+        name_en=cc.name_en,
+        parent_code=cc.parent_code,
+        cc_type=cc.cc_type or "cost",
+        manager_name=cc.manager_name,
+        budget_amount=float(cc.budget_amount or 0),
+        notes=cc.notes,
+        is_active=cc.is_active,
+        created_at=cc.created_at,
+        actual_amount=s.get("actual_amount", 0),
+        entries_count=s.get("entries_count", 0),
+        children_count=children.get(cc.code, 0),
+    )
+
+
 @cost_center_router.get("", response_model=list[CostCenterOut])
-def list_cost_centers(db: Session = Depends(get_db)):
-    return db.query(CostCenter).filter(CostCenter.is_active == True).order_by(CostCenter.code).all()
+def list_cost_centers(
+    include_inactive: bool = Query(False, description="تضمين المراكز الموقفة"),
+    search: Optional[str] = Query(None, description="بحث بالكود أو الاسم"),
+    cc_type: Optional[str] = Query(None, description="فلترة حسب النوع: cost / profit"),
+    parent_code: Optional[str] = Query(None, description="فلترة حسب المركز الرئيسي"),
+    db: Session = Depends(get_db),
+):
+    query = db.query(CostCenter)
+    if not include_inactive:
+        query = query.filter(CostCenter.is_active == True)
+    if search:
+        query = query.filter(
+            or_(
+                CostCenter.code.ilike(f"%{search}%"),
+                CostCenter.name_ar.ilike(f"%{search}%"),
+                CostCenter.name_en.ilike(f"%{search}%"),
+            )
+        )
+    if cc_type:
+        query = query.filter(CostCenter.cc_type == cc_type)
+    if parent_code:
+        query = query.filter(CostCenter.parent_code == parent_code)
+
+    rows = query.order_by(CostCenter.code).all()
+    stats = _cost_center_stats(db)
+    children = _children_counts(db)
+    return [_to_cost_center_out(cc, stats, children) for cc in rows]
+
+
+@cost_center_router.get("/{code}", response_model=CostCenterOut)
+def get_cost_center(code: str, db: Session = Depends(get_db)):
+    cc = db.query(CostCenter).filter(CostCenter.code == code).first()
+    if not cc:
+        raise HTTPException(404, "مركز التكلفة غير موجود")
+    stats = _cost_center_stats(db)
+    children = _children_counts(db)
+    return _to_cost_center_out(cc, stats, children)
 
 
 @cost_center_router.post("", response_model=CostCenterOut, status_code=201)
 def create_cost_center(payload: CostCenterIn, db: Session = Depends(get_db)):
     if db.query(CostCenter).filter(CostCenter.code == payload.code).first():
         raise HTTPException(400, "كود مركز التكلفة مستخدم من قبل")
+    if payload.parent_code:
+        if payload.parent_code == payload.code:
+            raise HTTPException(400, "لا يمكن أن يكون المركز رئيسياً لنفسه")
+        if not db.query(CostCenter).filter(CostCenter.code == payload.parent_code).first():
+            raise HTTPException(404, "المركز الرئيسي المحدد غير موجود")
     cc = CostCenter(**payload.model_dump())
     db.add(cc)
     db.commit()
     db.refresh(cc)
-    return cc
+    return _to_cost_center_out(cc, {}, {})
+
+
+@cost_center_router.put("/{code}", response_model=CostCenterOut)
+def update_cost_center(code: str, payload: CostCenterUpdate, db: Session = Depends(get_db)):
+    cc = db.query(CostCenter).filter(CostCenter.code == code).first()
+    if not cc:
+        raise HTTPException(404, "مركز التكلفة غير موجود")
+    data = payload.model_dump(exclude_unset=True)
+    if "parent_code" in data and data["parent_code"]:
+        if data["parent_code"] == code:
+            raise HTTPException(400, "لا يمكن أن يكون المركز رئيسياً لنفسه")
+        if not db.query(CostCenter).filter(CostCenter.code == data["parent_code"]).first():
+            raise HTTPException(404, "المركز الرئيسي المحدد غير موجود")
+        # امنع حلقة تسلسل هرمي (جعل أحد الأبناء أباً لأبيه)
+        cursor = data["parent_code"]
+        seen = set()
+        while cursor:
+            if cursor == code:
+                raise HTTPException(400, "لا يمكن إنشاء تسلسل هرمي دائري بين مراكز التكلفة")
+            if cursor in seen:
+                break
+            seen.add(cursor)
+            parent = db.query(CostCenter).filter(CostCenter.code == cursor).first()
+            cursor = parent.parent_code if parent else None
+    for k, v in data.items():
+        setattr(cc, k, v)
+    db.commit()
+    db.refresh(cc)
+    stats = _cost_center_stats(db)
+    children = _children_counts(db)
+    return _to_cost_center_out(cc, stats, children)
+
+
+@cost_center_router.patch("/{code}/toggle-active", response_model=CostCenterOut)
+def toggle_cost_center_active(code: str, db: Session = Depends(get_db)):
+    cc = db.query(CostCenter).filter(CostCenter.code == code).first()
+    if not cc:
+        raise HTTPException(404, "مركز التكلفة غير موجود")
+    cc.is_active = not cc.is_active
+    db.commit()
+    db.refresh(cc)
+    stats = _cost_center_stats(db)
+    children = _children_counts(db)
+    return _to_cost_center_out(cc, stats, children)
+
+
+@cost_center_router.delete("/{code}", status_code=200)
+def delete_cost_center(code: str, db: Session = Depends(get_db)):
+    cc = db.query(CostCenter).filter(CostCenter.code == code).first()
+    if not cc:
+        raise HTTPException(404, "مركز التكلفة غير موجود")
+    if db.query(CostCenter).filter(CostCenter.parent_code == code).first():
+        raise HTTPException(400, "لا يمكن حذف مركز تكلفة له مراكز فرعية — عدّل أو احذف الفروع أولاً")
+    used = (
+        db.query(LineCostAllocation).filter(LineCostAllocation.cost_center_code == code).first()
+        or db.query(JournalEntry).filter(JournalEntry.cost_center_code == code).first()
+    )
+    if used:
+        # لا يمكن حذف مركز مستخدَم فعلياً بقيود محاسبية — يتم إيقافه فقط
+        # حفاظاً على سلامة السجل التاريخي للتقارير.
+        cc.is_active = False
+        db.commit()
+        return {"deleted": False, "deactivated": True, "message": "المركز مستخدم بقيود سابقة، تم إيقافه بدل حذفه للحفاظ على سلامة التقارير"}
+    db.delete(cc)
+    db.commit()
+    return {"deleted": True, "deactivated": False, "message": "تم حذف مركز التكلفة بنجاح"}
 
 # ============================================================
 # الحسابات (Accounts)

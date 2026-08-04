@@ -2601,7 +2601,113 @@ html[dir="ltr"] .brand-center{direction:ltr;}
     </div>
   </div>
 </div>
-  <div class="panel" id="panel-cost"><div class="formcard"><h3>مراكز التكلفة</h3><div class="empty-msg">جاهزة للتطوير</div></div></div>
+  <div class="panel" id="panel-cost">
+  <div class="cc-page">
+    <div class="formcard cc-head">
+      <div>
+        <span class="cc-mini-label">الحسابات / مراكز التكلفة</span>
+        <h2>مراكز التكلفة</h2>
+        <p>إدارة مراكز التكلفة والربحية وهيكلها الهرمي (رئيسي/فرعي)، مع متابعة الموازنة التقديرية مقابل الفعلي المحسوب مباشرة من القيود المرحّلة — تناسب المنشأة الصغيرة بمركز واحد كما تناسب الشركة الكبيرة متعددة الفروع والإدارات.</p>
+      </div>
+      <div class="cc-head-actions">
+        <button type="button" class="btn secondary" onclick="exportCostCentersCsv()">تصدير Excel</button>
+        <button type="button" class="btn" onclick="openCostCenterForm()">＋ مركز تكلفة جديد</button>
+      </div>
+    </div>
+
+    <div class="cc-kpis" id="ccKpis"></div>
+
+    <div class="formcard cc-toolbar">
+      <div class="frow four">
+        <div class="field"><label>بحث</label><input id="ccSearch" placeholder="ابحث بالكود أو الاسم..." oninput="renderCostCenters()"></div>
+        <div class="field"><label>النوع</label>
+          <select id="ccFilterType" onchange="renderCostCenters()">
+            <option value="">كل الأنواع</option>
+            <option value="cost">مركز تكلفة</option>
+            <option value="profit">مركز ربحية</option>
+          </select>
+        </div>
+        <div class="field"><label>الحالة</label>
+          <select id="ccFilterStatus" onchange="renderCostCenters()">
+            <option value="active">نشطة فقط</option>
+            <option value="all">الكل (نشطة وموقفة)</option>
+            <option value="inactive">موقفة فقط</option>
+          </select>
+        </div>
+        <div class="field"><label>طريقة العرض</label>
+          <select id="ccViewMode" onchange="renderCostCenters()">
+            <option value="tree">هرمي (شجرة)</option>
+            <option value="flat">قائمة مسطحة</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <div class="formcard cc-form-box" id="ccFormBox" style="display:none">
+      <input type="hidden" id="ccEditCode">
+      <div class="cc-form-head">
+        <h3 id="ccFormTitle">مركز تكلفة جديد</h3>
+        <button type="button" class="btn secondary" onclick="closeCostCenterForm()">إغلاق</button>
+      </div>
+      <div class="frow">
+        <div class="field"><label>الكود <span class="req">*</span></label><input id="ccCode" placeholder="مثال: CC-01"></div>
+        <div class="field"><label>الاسم بالعربي <span class="req">*</span></label><input id="ccNameAr" placeholder="مثال: إدارة المبيعات"></div>
+        <div class="field"><label>الاسم بالإنجليزي</label><input id="ccNameEn" placeholder="Sales Department"></div>
+      </div>
+      <div class="frow">
+        <div class="field"><label>المركز الرئيسي</label><select id="ccParent"><option value="">— بدون (مركز رئيسي) —</option></select></div>
+        <div class="field"><label>نوع المركز</label>
+          <select id="ccType">
+            <option value="cost">مركز تكلفة</option>
+            <option value="profit">مركز ربحية</option>
+          </select>
+        </div>
+        <div class="field"><label>المسؤول عن المركز</label><input id="ccManager" placeholder="اسم مسؤول المركز"></div>
+      </div>
+      <div class="frow">
+        <div class="field"><label>الموازنة التقديرية</label><input id="ccBudget" type="number" step="0.01" min="0" placeholder="0.00"></div>
+        <div class="field"><label>الحالة</label>
+          <select id="ccActive">
+            <option value="true">نشط</option>
+            <option value="false">موقف</option>
+          </select>
+        </div>
+        <div class="field"><label>ملاحظات</label><input id="ccNotes" placeholder="ملاحظات اختيارية"></div>
+      </div>
+      <div id="ccErr" class="err"></div>
+      <div class="cc-form-actions">
+        <button type="button" class="btn" onclick="saveCostCenter()">حفظ</button>
+        <button type="button" class="btn secondary" onclick="closeCostCenterForm()">إلغاء</button>
+      </div>
+    </div>
+
+    <div class="gridcard">
+      <div class="gridcard-header">
+        <h4>قائمة مراكز التكلفة</h4>
+        <span id="ccCount" class="cc-count-badge">0 مركز</span>
+      </div>
+      <div class="scrollx">
+        <table class="grid cc-table">
+          <thead>
+            <tr>
+              <th>الكود</th>
+              <th>اسم المركز</th>
+              <th>النوع</th>
+              <th>المسؤول</th>
+              <th>الموازنة التقديرية</th>
+              <th>الفعلي (من القيود)</th>
+              <th>عدد القيود</th>
+              <th>الحالة</th>
+              <th>إجراءات</th>
+            </tr>
+          </thead>
+          <tbody id="costCenterBody"></tbody>
+        </table>
+      </div>
+      <div class="empty-msg" id="ccEmpty" style="display:none">لا توجد مراكز تكلفة مطابقة لبحثك — جرّب تغيير الفلاتر أو أضف مركزاً جديداً</div>
+    </div>
+  </div>
+  </div>
 
   <div class="panel" id="panel-print_templates"><div class="formcard"><h3>قوالب الطباعة</h3><div class="empty-msg">جاهزة للتطوير</div></div></div>
   <div class="panel" id="panel-whatsapp_templates"><div class="formcard"><h3>قوالب الواتس اب</h3><div class="empty-msg">جاهزة للتطوير</div></div></div>
@@ -5012,6 +5118,55 @@ table.uz-matrix input[type=checkbox]{width:16px;height:16px;cursor:pointer;accen
 .tax-info-strip{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px}.tax-info-strip>div{background:linear-gradient(135deg,#f8fbff,#eef6ff);border:1px solid #dbe7f6;border-radius:16px;padding:14px 16px}.tax-info-strip b{display:block;color:#0f3768;font-size:15px;margin-bottom:5px}.tax-info-strip span{display:block;color:#64748b;font-size:12px;line-height:1.6}
 .tax-table-wrap{border:1px solid #dbe7f6;border-radius:18px;overflow:hidden;background:#fff}.tax-table{width:100%;border-collapse:collapse}.tax-table th{background:#edf4fb;color:#203a5c;font-weight:950;padding:12px;border-bottom:1px solid #dbe7f6}.tax-table td{padding:10px;border-bottom:1px solid #edf2f7;vertical-align:middle}.tax-table input,.tax-table select{width:100%;height:42px;border:1px solid #cbd8ea;border-radius:12px;background:#fff;padding:0 12px;font-family:inherit;font-weight:800;color:#132b49}.tax-table input:focus,.tax-table select:focus{outline:0;border-color:#1f78d1;box-shadow:0 0 0 3px rgba(31,120,209,.12)}.tax-rate-wrap{display:flex;align-items:center;gap:8px}.tax-percent-badge{display:inline-flex;align-items:center;justify-content:center;width:42px;height:42px;border:1px solid #cbd8ea;border-radius:12px;background:#f8fbff;color:#0b5db8;font-weight:950}.tax-percent-fixed{display:inline-flex;justify-content:center;align-items:center;width:100%;height:42px;border-radius:12px;background:#eef6ff;color:#0b5db8;border:1px solid #cfe4ff;font-weight:950}.tax-delete-btn{border:0;background:#fee2e2;color:#991b1b;border-radius:12px;padding:10px 13px;font-weight:900;cursor:pointer}.tax-delete-btn:hover{background:#fecaca}.tax-msg{margin-top:12px;font-weight:900;color:#166534;min-height:22px}.tax-empty{padding:22px;text-align:center;color:#64748b;font-weight:800;background:#fbfdff}
 @media(max-width:900px){.tax-info-strip{grid-template-columns:1fr}.tax-watermark{font-size:36px}.tax-table-wrap{overflow:auto}.tax-table{min-width:780px}.tax-page-head{flex-direction:column}}
+
+/* ===== شاشة مراكز التكلفة (Cost Centers) ===== */
+.cc-page{direction:rtl}
+.cc-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap}
+.cc-head h2{margin:6px 0 4px;color:var(--ink-2);font-size:24px;font-weight:900}
+.cc-head p{margin:0;color:var(--muted);line-height:1.7;max-width:640px}
+.cc-mini-label{display:inline-flex;background:var(--accent-light);color:var(--accent);border:1px solid #cfe4ff;border-radius:999px;padding:5px 11px;font-size:12px;font-weight:900}
+.cc-head-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+
+.cc-kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:20px}
+.cc-kpi{background:var(--bg-card);border:1px solid var(--line);border-radius:14px;padding:16px 18px;box-shadow:var(--shadow);position:relative;overflow:hidden}
+.cc-kpi::before{content:'';position:absolute;inset-inline-start:0;top:0;bottom:0;width:4px;background:var(--accent)}
+.cc-kpi.warn::before{background:var(--amber)}
+.cc-kpi.danger::before{background:var(--coral)}
+.cc-kpi.ok::before{background:var(--success)}
+.cc-kpi .lbl{font-size:12px;color:var(--muted);font-weight:700}
+.cc-kpi .val{font-size:22px;font-weight:900;color:var(--ink-2);margin-top:6px}
+.cc-kpi .sub{font-size:11px;color:var(--muted);margin-top:4px}
+
+.cc-toolbar .frow{margin-bottom:0}
+.cc-count-badge{background:var(--accent-light);color:var(--accent);font-size:12px;font-weight:800;padding:4px 12px;border-radius:20px}
+
+.cc-form-box{border:1.5px dashed var(--accent);background:var(--bg-card-2)}
+.cc-form-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}
+.cc-form-head h3{font-size:15px;font-weight:800;color:var(--ink-2)}
+.cc-form-actions{display:flex;gap:10px;margin-top:6px}
+
+.cc-table td,.cc-table th{white-space:nowrap}
+.cc-name-cell{display:flex;align-items:center;gap:8px}
+.cc-tree-indent{display:inline-block}
+.cc-tree-branch{color:var(--line);font-family:monospace;margin-inline-end:2px}
+.cc-code-chip{display:inline-block;background:var(--bg-page);color:var(--ink-2);border:1px solid var(--line);border-radius:7px;padding:2px 8px;font-size:11.5px;font-weight:800;font-family:monospace}
+.cc-type-badge{font-size:11px;font-weight:800;padding:3px 11px;border-radius:20px;display:inline-block;white-space:nowrap}
+.cc-type-badge.cost{background:var(--accent-light);color:var(--accent)}
+.cc-type-badge.profit{background:var(--teal-bg);color:var(--teal)}
+.cc-status-badge{font-size:11px;font-weight:800;padding:3px 11px;border-radius:20px;display:inline-block;white-space:nowrap;cursor:pointer;border:none}
+.cc-status-badge.active{background:var(--success-bg);color:var(--success)}
+.cc-status-badge.inactive{background:var(--bg-page);color:var(--muted)}
+.cc-budget-wrap{min-width:120px}
+.cc-budget-bar{height:6px;border-radius:4px;background:var(--line-2);overflow:hidden;margin-top:5px}
+.cc-budget-bar > span{display:block;height:100%;background:var(--success)}
+.cc-budget-bar.over > span{background:var(--coral)}
+.cc-budget-bar.warn > span{background:var(--amber)}
+.cc-budget-pct{font-size:11px;color:var(--muted);font-weight:700}
+.cc-row-actions{display:flex;gap:4px;align-items:center}
+.cc-manager-cell{color:var(--ink-3);font-size:12.5px}
+.cc-muted-num{color:var(--muted);font-family:monospace,'Cairo'}
+@media(max-width:1100px){.cc-kpis{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:900px){.cc-head{flex-direction:column}.cc-kpis{grid-template-columns:1fr}.cc-table{min-width:920px}}
 </style>
 
 <script>
