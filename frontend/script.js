@@ -1890,13 +1890,26 @@ function clearLineTax(lineId){
 // إظهار حقلي "المورد" و"رقم فاتورة المورد" فقط عند التعامل مع ضريبة
 // القيمة المضافة بالقيد (فتح لوحة الضريبة بأي سطر أو تفعيل ضريبة فعلياً)
 // — بدل إظهارهما دائماً حتى في القيود التي لا علاقة لها بالموردين.
+// إظهار حقلي "المورد" و"رقم فاتورة المورد" فقط عند التعامل مع ضريبة
+// القيمة المضافة بالقيد (فتح لوحة الضريبة بأي سطر أو تفعيل ضريبة فعلياً)
+// — أو عند الضغط يدوياً على زر "ضريبة القيمة المضافة" أعلى الشاشة —
+// بدل إظهارهما دائماً حتى في القيود التي لا علاقة لها بالموردين.
+let jSupplierFieldsManuallyShown = false;
+
+function toggleSupplierFieldsManually(){
+  jSupplierFieldsManuallyShown = !jSupplierFieldsManuallyShown;
+  renderJLines();
+}
+
 function updateSupplierFieldsVisibility(){
   const row = document.getElementById('jSupplierFieldsRow');
+  const btn = document.getElementById('jVatToggleBtn');
   if(!row) return;
   const invVal = document.getElementById('jInvoiceNumber')?.value?.trim();
   const supVal = document.getElementById('jSupplier')?.value;
-  const shouldShow = expandedTaxLines.size > 0 || jLines.some(l=>l.tax_type_code) || !!invVal || !!supVal;
+  const shouldShow = jSupplierFieldsManuallyShown || expandedTaxLines.size > 0 || jLines.some(l=>l.tax_type_code) || !!invVal || !!supVal;
   row.style.display = shouldShow ? 'grid' : 'none';
+  if(btn) btn.classList.toggle('jvat-active', shouldShow);
 }
 
 function renderJLines(){
@@ -1991,6 +2004,7 @@ function renderJLines(){
 function resetJournalForm(){
   journalEditingId=null;
   jLines=[];
+  jSupplierFieldsManuallyShown=false;
   expandedTaxLines.clear();
   expandedCostLines.clear();
   lineCounter++; jLines.push({id:lineCounter, account_code:'', debit:0, credit:0, line_description:'', cost_allocations:[], tax_type_code:'', tax_rate:'', tax_amount:''});
@@ -2302,6 +2316,7 @@ function loadEntryIntoForm(id){
   const invEl=document.getElementById('jInvoiceNumber'); if(invEl) invEl.value=e.invoice_number||'';
   const supEl=document.getElementById('jSupplier');
   if(supEl) supEl.value = e.supplier_code || '';
+  jSupplierFieldsManuallyShown = !!(e.invoice_number || e.supplier_code);
   renderJLines();
   return e;
 }

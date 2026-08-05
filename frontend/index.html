@@ -692,6 +692,8 @@ table.grid td.muted{color:var(--muted);font-size:12px;}
 }
 .acc-actions-menu button:hover{background:var(--accent-light);color:var(--accent);}
 .acc-actions-menu button.danger:hover{background:var(--coral-bg);color:var(--coral);}.acc-add-bar{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;flex-wrap:wrap;gap:10px;}
+.jvat-toggle-wrap{display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap}
+.jvat-toggle-btn.jvat-active{background:var(--accent);color:#fff;border-color:var(--accent)}
 .acc-add-bar-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .acc-sys-badge{display:inline-flex;align-items:center;gap:3px;font-size:10px;font-weight:800;color:var(--muted);background:var(--bg-page);border:1px solid var(--line);border-radius:20px;padding:1px 8px;margin-inline-start:6px;vertical-align:middle}
 .acc-add-bar h2{font-size:17px;font-weight:700;color:var(--ink-2);}
@@ -1647,6 +1649,10 @@ html[dir="ltr"] .brand-center{direction:ltr;}
         <div class="field"><label>التاريخ</label><input id="jDate" type="date"></div>
         <div class="field"><label>منشئ القيد</label><input id="jCreatedBy" list="usersDatalist" placeholder="اختر أو اكتب اسم المستخدم"></div>
         <div class="field"><label>الفرع</label><select id="jBranch"><option value="">— بدون فرع محدد —</option></select></div>
+      </div>
+      <div class="jvat-toggle-wrap">
+        <button type="button" class="btn secondary jvat-toggle-btn" id="jVatToggleBtn" onclick="toggleSupplierFieldsManually()">🧾 ضريبة القيمة المضافة</button>
+        <span class="hint-inline">اضغط لإظهار بيانات المورد ورقم الفاتورة (تظهر تلقائياً أيضاً عند إضافة ضريبة لأي سطر)</span>
       </div>
       <div class="frow" id="jSupplierFieldsRow" style="display:none">
         <div class="field"><label>رقم فاتورة المورد <span class="hint-inline">(اختياري)</span></label><input id="jInvoiceNumber" placeholder="مثال: INV-1042"></div>

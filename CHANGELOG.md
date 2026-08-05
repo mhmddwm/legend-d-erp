@@ -65,3 +65,7 @@
 - Journal entries: the same tax type can no longer be applied to more than one line within the same entry — blocked both in the UI (duplicate option disabled in the per-line tax dropdown, plus a clear alert if attempted) and on the backend (`POST`/`PUT /api/journal` now reject a duplicate `tax_type_code` across an entry's lines with a 400 error), since duplicating a tax within one entry double-counts it.
 - Journal entry form: "المورد" and "رقم فاتورة المورد" are now hidden by default and only appear once a line's tax panel is opened or a tax is actually applied to a line (or when editing an entry that already has one of them set) — keeping the form clean for entries that have nothing to do with VAT/suppliers.
 - Confirmed the per-line tax type dropdown is already sourced live from the registered Tax Settings list (`/api/tax-types`), not a hardcoded list.
+
+## ACC-JRN-004 — Explicit VAT toggle button in journal entry form
+- Added a clearly-labeled "🧾 ضريبة القيمة المضافة" button above the journal entry lines table; clicking it explicitly reveals/hides the "المورد" and "رقم فاتورة المورد" fields — in addition to them still auto-revealing when a tax is applied to any line, or when editing an entry that already has one of them set.
+- The button highlights (active state) whenever the supplier/invoice fields are currently visible, so it's obvious how to get back to them.
