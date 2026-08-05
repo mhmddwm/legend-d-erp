@@ -10,6 +10,15 @@
 -- علامة "حساب نظامي" حتى لا يُحذف بالخطأ من شاشة دليل الحسابات
 ALTER TABLE accounts ADD COLUMN IF NOT EXISTS is_system BOOLEAN NOT NULL DEFAULT FALSE;
 
+-- تأكيد وجود سلسلة الحسابات الأساسية (الخصوم -> الخصوم المتداولة -> الموردون)
+-- قبل إضافة فروع الموردين — بعض قواعد البيانات لم يُطبَّق عليها بذر
+-- الحسابات الافتراضي من schema.sql فتنقصها هذه الحسابات الجذرية.
+INSERT INTO accounts (code, name_ar, name_en, account_type, nature, parent_code, opening_balance) VALUES
+('2',   'الخصوم',             'Liabilities',       'liabilities', 'دائن', NULL,  0),
+('21',  'الخصوم المتداولة',    'Current Liabilities','liabilities', 'دائن', '2',   0),
+('211', 'الموردون',           'Accounts Payable',  'liabilities', 'دائن', '21',  0)
+ON CONFLICT (code) DO NOTHING;
+
 -- الحسابات الفرعية الثابتة تحت حساب الموردين (211)
 INSERT INTO accounts (code, name_ar, name_en, account_type, nature, parent_code, opening_balance, is_system) VALUES
 ('2111', 'موردون - نشاط الشركة الأساسي', 'Suppliers - Core Business Activity', 'liabilities', 'دائن', '211', 0, TRUE),
