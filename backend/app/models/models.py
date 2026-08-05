@@ -32,6 +32,9 @@ class Account(Base):
 
     opening_balance = Column(Numeric(18, 2), nullable=False, default=0)
     is_active = Column(Boolean, nullable=False, default=True)
+    # حساب نظامي أساسي (مثل حساب الموردين وفروعه) لا يمكن حذفه من الشاشة
+    # لأن مديولات أخرى بالنظام (المشتريات/الموردون) تعتمد عليه.
+    is_system = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     sub_accounts = relationship(
@@ -284,6 +287,11 @@ class Supplier(Base):
     phone = Column(String(30))
     email = Column(String(150))
     notes = Column(String)
+
+    # الحساب المحاسبي بدليل الحسابات (فرع من حساب الموردين 211) — يحدد
+    # هل المورد ضمن "موردين النشاط الأساسي" أو "موردين آخرين"، أسوة
+    # بأنظمة أودو/ساب حيث لكل مورد حساب دفع افتراضي بدليل الحسابات.
+    account_code = Column(String(20), ForeignKey("accounts.code"), nullable=True)
 
     is_active = Column(Boolean, nullable=False, default=True)
 

@@ -60,6 +60,7 @@ class SupplierIn(BaseModel):
     phone: Optional[str] = None
     email: Optional[str] = None
     notes: Optional[str] = None
+    account_code: Optional[str] = None
 
 
 class SupplierUpdate(BaseModel):
@@ -68,6 +69,7 @@ class SupplierUpdate(BaseModel):
     phone: Optional[str] = None
     email: Optional[str] = None
     notes: Optional[str] = None
+    account_code: Optional[str] = None
 
 
 class SupplierOut(BaseModel):
@@ -76,6 +78,7 @@ class SupplierOut(BaseModel):
     phone: Optional[str]
     email: Optional[str]
     notes: Optional[str]
+    account_code: Optional[str] = None
     payable_balance: float = 0
 
     class Config:

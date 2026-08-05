@@ -1029,6 +1029,7 @@ tr.innerHTML = `
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"></polyline></svg>
             </span>` : `<span style="display:inline-block;width:22px;"></span>`}
             <strong class="account-main-link" onclick="openAccountPage('${acc.code}')">${acc.name_ar || ''}</strong>
+            ${acc.is_system ? `<span class="acc-sys-badge" title="حساب نظامي أساسي من مديولات النظام — لا يمكن حذفه">🔒 نظامي</span>` : ''}
             ${acc.name_en ? `<div style="font-size:11px;color:#777">${acc.name_en}</div>` : ''}
           </td>
           <td>${typeof TYPE_LABELS !== 'undefined' ? (TYPE_LABELS[acc.account_type] || '') : (acc.account_type || '')}</td>
@@ -1651,7 +1652,34 @@ function refreshJournalAccounts(){
       sel.dataset.filled='1';
     }
   });
+  renderSupplierAccountOptions();
   renderJLines();
+}
+
+// حسابات المورد المسموحة: حساب الموردين الرئيسي (211) وكل فروعه — حتى
+// تظهر أي حسابات فرعية جديدة يضيفها المستخدم بشاشة دليل الحسابات مباشرة
+// بنموذج المورد بدون أي تعديل إضافي بالكود.
+function supplierAccountOptionsList(){
+  const all=accounts||[];
+  const result=[];
+  function walk(parentCode){
+    all.filter(a=>String(a.parent_code||'')===String(parentCode))
+       .sort((a,b)=>String(a.code).localeCompare(String(b.code),undefined,{numeric:true}))
+       .forEach(a=>{ result.push(a); walk(a.code); });
+  }
+  walk('211');
+  return result;
+}
+
+function renderSupplierAccountOptions(){
+  const sel=document.getElementById('supAccountCode');
+  if(!sel) return;
+  const cur=sel.value;
+  const list=supplierAccountOptionsList();
+  sel.innerHTML = list.length
+    ? list.map(a=>`<option value="${a.code}">${a.code} — ${(a.name_ar||'').replace(/</g,'&lt;')}${a.code==='2111'?' (افتراضي)':''}</option>`).join('')
+    : '<option value="2111">موردون - نشاط الشركة الأساسي (افتراضي)</option><option value="2112">موردون - أنشطة أخرى</option>';
+  sel.value = cur || '2111';
 }
 
 // ============================================================
@@ -2052,10 +2080,94 @@ function createChildAccount(parentCode){
 async function deleteAccount(code){
   const account=accounts.find(a=>a.code===code);
   if(!account) return;
+  if(account.is_system){alert('هذا حساب نظامي أساسي من أساسيات النظام (مثل حساب الموردين وفروعه) ولا يمكن حذفه.'); return;}
   if((account.balance||0)!==0){alert('لا يمكن حذف الحساب لأنه يحتوي على حركات أو أرصدة'); return;}
   if(!confirm('تأكيد حذف الحساب؟')) return;
   try{await api('DELETE',`/api/accounts/${code}`); await loadAll();}
   catch(e){alert(e.message);}
+}
+
+// ============================================================
+// تصدير دليل الحسابات (Excel / PDF) — بنفس الترتيب الهرمي المعروض بالشجرة
+// ============================================================
+function buildAccountsExportRows(){
+  const rows=[];
+  function walk(parentCode, level){
+    (accounts||[])
+      .filter(a=>String(a.parent_code||'')===String(parentCode||''))
+      .sort((a,b)=>String(a.code).localeCompare(String(b.code),undefined,{numeric:true}))
+      .forEach(acc=>{
+        rows.push({acc, level});
+        walk(acc.code, level+1);
+      });
+  }
+  walk(null,0);
+  return rows;
+}
+
+function exportAccountsCsv(){
+  const rows=buildAccountsExportRows();
+  if(!rows.length){ alert('لا توجد حسابات لتصديرها'); return; }
+  let csv='الكود,اسم الحساب,النوع,الحساب الأب,الرصيد الافتتاحي,الرصيد الحالي\n';
+  csv+=rows.map(({acc,level})=>{
+    const indentedName=(level>0?'  '.repeat(level)+'└ ':'')+(acc.name_ar||'');
+    return [
+      acc.code,
+      indentedName,
+      (typeof TYPE_LABELS!=='undefined' ? (TYPE_LABELS[acc.account_type]||acc.account_type) : acc.account_type) || '',
+      acc.parent_code || '',
+      fmt(acc.opening_balance),
+      fmt(acc.balance)
+    ].map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',');
+  }).join('\n');
+  const a=document.createElement('a');
+  a.href='data:text/csv;charset=utf-8,'+encodeURIComponent('\uFEFF'+csv);
+  a.download='chart_of_accounts.csv';
+  a.click();
+}
+
+function exportAccountsPdf(){
+  const rows=buildAccountsExportRows();
+  if(!rows.length){ alert('لا توجد حسابات لتصديرها'); return; }
+  const w=window.open('','_blank');
+  if(!w){ alert('يرجى السماح بالنوافذ المنبثقة بالمتصفح حتى يمكن تصدير التقرير كـ PDF'); return; }
+  const todayStr=new Date().toLocaleDateString('ar-SA');
+  const bodyRows=rows.map(({acc,level})=>`
+    <tr>
+      <td style="direction:ltr;text-align:left">${whEscCoa(acc.code||'')}</td>
+      <td style="padding-inline-start:${level*18}px">${level>0?'└ ':''}<b>${whEscCoa(acc.name_ar||'')}</b>${acc.name_en?`<br><small style="color:#889">${whEscCoa(acc.name_en)}</small>`:''}${acc.is_system?' <small style="color:#a58a2a">(نظامي)</small>':''}</td>
+      <td>${whEscCoa((typeof TYPE_LABELS!=='undefined' ? (TYPE_LABELS[acc.account_type]||acc.account_type) : acc.account_type) || '')}</td>
+      <td style="direction:ltr;text-align:center">${whEscCoa(acc.parent_code||'-')}</td>
+      <td style="text-align:left;direction:ltr">${fmt(acc.opening_balance)}</td>
+      <td style="text-align:left;direction:ltr">${fmt(acc.balance)}</td>
+    </tr>`).join('');
+  w.document.write(`<!DOCTYPE html><html dir="rtl" lang="ar"><head><meta charset="utf-8">
+    <title>دليل الحسابات — LEGEND D ERP SYS</title>
+    <style>
+      body{font-family:'Segoe UI',Tahoma,Arial,sans-serif;padding:26px;color:#1c2430}
+      .rpt-head{display:flex;justify-content:space-between;align-items:flex-end;border-bottom:3px solid #1c3faa;padding-bottom:10px;margin-bottom:16px}
+      .rpt-head h1{font-size:19px;margin:0}
+      .rpt-head .meta{color:#667;font-size:12px;margin-top:4px}
+      table{width:100%;border-collapse:collapse;font-size:12px}
+      th,td{border:1px solid #d7dce2;padding:6px 9px;text-align:right;vertical-align:top}
+      th{background:#eef2fa;font-weight:800;color:#1c2430}
+      tr:nth-child(even) td{background:#fafbfd}
+      .rpt-foot{margin-top:14px;font-size:11px;color:#889}
+      @media print{ body{padding:0} }
+    </style></head><body>
+    <div class="rpt-head">
+      <div><h1>دليل الحسابات</h1><div class="meta">LEGEND D ERP SYS</div></div>
+      <div class="meta">تاريخ التصدير: ${todayStr}<br>إجمالي الحسابات: ${rows.length}</div>
+    </div>
+    <table>
+      <thead><tr><th>الكود</th><th>اسم الحساب</th><th>النوع</th><th>الحساب الأب</th><th>الرصيد الافتتاحي</th><th>الرصيد الحالي</th></tr></thead>
+      <tbody>${bodyRows}</tbody>
+    </table>
+    <div class="rpt-foot">تم إنشاء هذا التقرير آلياً من نظام LEGEND D ERP SYS</div>
+    </body></html>`);
+  w.document.close();
+  w.focus();
+  w.print();
 }
 
 // ============================================================
@@ -2758,6 +2870,7 @@ function supplierPayloadFromForm(){
     balance:parseFloat(document.getElementById('supOpeningBalance').value)||0,
     opening_date:document.getElementById('supOpeningDate').value,
     payment_terms_days:parseInt(document.getElementById('supPaymentTerms').value)||0,
+    account_code:document.getElementById('supAccountCode')?.value || '2111',
     contacts:supplierContactsFromForm(),
     contracts:supplierContractsFromForm()
   };
@@ -2820,6 +2933,8 @@ function editSupplier(code){
   setVal('supOpeningBalance',s.opening_balance ?? s.balance ?? 0);
   setVal('supOpeningDate',s.opening_date||'');
   setVal('supPaymentTerms',s.payment_terms_days||'');
+  renderSupplierAccountOptions();
+  setVal('supAccountCode',s.account_code||'2111');
   const contractBox=document.getElementById('supContractsBox'); if(contractBox) contractBox.innerHTML='';
   (Array.isArray(s.contracts)&&s.contracts.length?s.contracts:[]).forEach(c=>addSupplierContractRow(c));
   const box=document.getElementById('supContactsBox'); if(box) box.innerHTML='';
@@ -2835,6 +2950,7 @@ function editSupplier(code){
 function cancelSupEdit(){
   ['supEditCode','supCode','supTradeName','supFirstName','supLastName','supPhone','supMobile','supBuildingNo','supStreet','supAdditionalNo','supDistrict','supCity','supPostalCode','supVatNo','supCommercialReg','supPaymentTerms'].forEach(id=>setVal(id,''));
   setVal('supType','commercial'); setVal('supCurrency','SAR'); setVal('supOpeningBalance',0); setVal('supOpeningDate','');
+  renderSupplierAccountOptions(); setVal('supAccountCode','2111');
   const code=document.getElementById('supCode'); if(code){ code.disabled=false; code.readOnly=false; code.classList.remove('auto-code-field'); }
   const cbox=document.getElementById('supContractsBox'); if(cbox){ cbox.innerHTML=''; }
   const box=document.getElementById('supContactsBox'); if(box){ box.innerHTML=''; addSupplierContactRow(); }

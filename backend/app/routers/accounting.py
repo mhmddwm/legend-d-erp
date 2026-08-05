@@ -246,7 +246,8 @@ def list_accounts(branch_id: Optional[int] = Query(None, description="فلترة
             nature=acc.nature, 
             parent_code=acc.parent_code,
             opening_balance=float(acc.opening_balance),
-            balance=account_rollup_balance(db, acc.code, branch_id)
+            balance=account_rollup_balance(db, acc.code, branch_id),
+            is_system=bool(acc.is_system),
         ))
     return result
 
@@ -271,7 +272,8 @@ def create_account(payload: AccountIn, db: Session = Depends(get_db)):
         nature=acc.nature, 
         parent_code=acc.parent_code,
         opening_balance=float(acc.opening_balance), 
-        balance=float(acc.opening_balance)
+        balance=float(acc.opening_balance),
+        is_system=bool(acc.is_system),
     )
 
 @router.put("/{code}", response_model=AccountOut)
@@ -288,6 +290,9 @@ def update_account(code: str, payload: AccountUpdate, db: Session = Depends(get_
     if "parent_code" in data and data["parent_code"] and not db.query(Account).filter(Account.code == data["parent_code"]).first():
         raise HTTPException(400, "الحساب الأب الجديد غير موجود")
 
+    if acc.is_system and "parent_code" in data and data["parent_code"] != acc.parent_code:
+        raise HTTPException(400, "هذا حساب نظامي أساسي، لا يمكن تغيير موضعه بالشجرة")
+
     for k, v in data.items():
         setattr(acc, k, v)
     db.commit()
@@ -297,7 +302,8 @@ def update_account(code: str, payload: AccountUpdate, db: Session = Depends(get_
         code=acc.code, name_ar=acc.name_ar, name_en=acc.name_en,
         account_type=acc.account_type, nature=acc.nature, parent_code=acc.parent_code,
         opening_balance=float(acc.opening_balance),
-        balance=account_rollup_balance(db, acc.code)
+        balance=account_rollup_balance(db, acc.code),
+        is_system=bool(acc.is_system),
     )
 
 @router.delete("/{code}", status_code=204)
@@ -305,7 +311,10 @@ def delete_account(code: str, db: Session = Depends(get_db)):
     acc = db.query(Account).filter(Account.code == code).first()
     if not acc:
         raise HTTPException(404, "الحساب غير موجود")
-    
+
+    if acc.is_system:
+        raise HTTPException(400, "هذا حساب نظامي أساسي (من أساسيات النظام) ولا يمكن حذفه")
+
     if db.query(Account).filter(Account.parent_code == code).first():
         raise HTTPException(400, "لا يمكن حذف حساب له حسابات فرعية")
 

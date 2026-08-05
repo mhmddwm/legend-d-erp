@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 from datetime import date as date_type
 from app.database import get_db
-from app.models.models import Item, StockMove, Supplier, PurchaseInvoice, PurchaseReturn
+from app.models.models import Item, StockMove, Supplier, PurchaseInvoice, PurchaseReturn, Account
 from app.schemas.inventory import ItemIn, ItemUpdate, ItemOut, StockMoveOut, SupplierIn, SupplierUpdate, SupplierOut
 
 router = APIRouter(prefix="/api/items", tags=["Items"])
@@ -108,6 +108,27 @@ def list_stock_moves(item_code: str = None, db: Session = Depends(get_db)):
 # SUPPLIERS
 # ============================================================
 
+DEFAULT_SUPPLIER_ACCOUNT = "2111"  # موردون - نشاط الشركة الأساسي
+
+
+def _validate_supplier_account(db: Session, account_code: str) -> str:
+    """يتأكد أن الحساب المحاسبي المختار للمورد فرع فعلي من حساب الموردين
+    الرئيسي (211) — أسوة بمنطق Default Payable Account بأودو/ساب،
+    ويمنع ربط المورد بأي حساب آخر بالخطأ (نقدية، مصروفات...)."""
+    acc = db.query(Account).filter(Account.code == account_code).first()
+    if not acc:
+        raise HTTPException(400, "الحساب المحاسبي المحدد للمورد غير موجود")
+    cursor, seen = acc, set()
+    while cursor:
+        if cursor.code == "211":
+            return account_code
+        if cursor.code in seen:
+            break
+        seen.add(cursor.code)
+        cursor = db.query(Account).filter(Account.code == cursor.parent_code).first() if cursor.parent_code else None
+    raise HTTPException(400, "يجب أن يكون حساب المورد فرعاً من حساب الموردين (211) بدليل الحسابات")
+
+
 def calc_payable(db: Session, supplier_code: str) -> float:
     invoiced = db.query(func.coalesce(func.sum(PurchaseInvoice.total), 0)).filter(
         PurchaseInvoice.supplier_code == supplier_code
@@ -125,7 +146,7 @@ def list_suppliers(db: Session = Depends(get_db)):
     for s in suppliers:
         out = SupplierOut(
             code=s.code, name=s.name, phone=s.phone,
-            email=s.email, notes=s.notes,
+            email=s.email, notes=s.notes, account_code=s.account_code,
             payable_balance=calc_payable(db, s.code)
         )
         result.append(out)
@@ -136,12 +157,14 @@ def list_suppliers(db: Session = Depends(get_db)):
 def create_supplier(payload: SupplierIn, db: Session = Depends(get_db)):
     if db.query(Supplier).filter(Supplier.code == payload.code).first():
         raise HTTPException(400, "كود المورد مستخدم من قبل")
-    s = Supplier(**payload.model_dump())
+    data = payload.model_dump()
+    data["account_code"] = _validate_supplier_account(db, data.get("account_code") or DEFAULT_SUPPLIER_ACCOUNT)
+    s = Supplier(**data)
     db.add(s)
     db.commit()
     db.refresh(s)
     return SupplierOut(code=s.code, name=s.name, phone=s.phone,
-                       email=s.email, notes=s.notes, payable_balance=0)
+                       email=s.email, notes=s.notes, account_code=s.account_code, payable_balance=0)
 
 
 @supplier_router.put("/{code}", response_model=SupplierOut)
@@ -152,6 +175,8 @@ def update_supplier(code: str, payload: SupplierUpdate, db: Session = Depends(ge
 
     data = payload.model_dump(exclude_unset=True)
     new_code = data.pop("code", None)
+    if "account_code" in data:
+        data["account_code"] = _validate_supplier_account(db, data.get("account_code") or DEFAULT_SUPPLIER_ACCOUNT)
 
     for k, v in data.items():
         setattr(s, k, v)
@@ -164,7 +189,7 @@ def update_supplier(code: str, payload: SupplierUpdate, db: Session = Depends(ge
     db.commit()
     db.refresh(s)
     return SupplierOut(code=s.code, name=s.name, phone=s.phone,
-                       email=s.email, notes=s.notes,
+                       email=s.email, notes=s.notes, account_code=s.account_code,
                        payable_balance=calc_payable(db, s.code))
 
 

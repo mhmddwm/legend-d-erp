@@ -30,6 +30,7 @@ class AccountOut(BaseModel):
     parent_code: Optional[str] = None # تحديث لضمان التوافق
     opening_balance: float
     balance: float = 0
+    is_system: bool = False
 
     class Config:
         from_attributes = True

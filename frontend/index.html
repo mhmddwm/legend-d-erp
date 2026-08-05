@@ -691,7 +691,9 @@ table.grid td.muted{color:var(--muted);font-size:12px;}
   display:block;font-family:inherit;transition:background .12s;
 }
 .acc-actions-menu button:hover{background:var(--accent-light);color:var(--accent);}
-.acc-actions-menu button.danger:hover{background:var(--coral-bg);color:var(--coral);}.acc-add-bar{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;}
+.acc-actions-menu button.danger:hover{background:var(--coral-bg);color:var(--coral);}.acc-add-bar{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;flex-wrap:wrap;gap:10px;}
+.acc-add-bar-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.acc-sys-badge{display:inline-flex;align-items:center;gap:3px;font-size:10px;font-weight:800;color:var(--muted);background:var(--bg-page);border:1px solid var(--line);border-radius:20px;padding:1px 8px;margin-inline-start:6px;vertical-align:middle}
 .acc-add-bar h2{font-size:17px;font-weight:700;color:var(--ink-2);}
 .account-form-box{margin-bottom:22px;}
 
@@ -1584,7 +1586,11 @@ html[dir="ltr"] .brand-center{direction:ltr;}
     <!-- شريط الإضافة -->
     <div class="acc-add-bar">
       <h2>دليل الحسابات</h2>
-      <button class="btn small" onclick="toggleAccForm()">＋ إضافة حساب</button>
+      <div class="acc-add-bar-actions">
+        <button class="btn secondary" onclick="exportAccountsCsv()">⭳ تصدير Excel</button>
+        <button class="btn secondary" onclick="exportAccountsPdf()">⭳ تصدير PDF</button>
+        <button class="btn small" onclick="toggleAccForm()">＋ إضافة حساب</button>
+      </div>
     </div>
 
     <!-- نموذج الإضافة / التعديل — مخفي افتراضياً -->
@@ -2138,6 +2144,16 @@ html[dir="ltr"] .brand-center{direction:ltr;}
         <div class="field"><label>تاريخ الافتتاحي</label><input id="supOpeningDate" type="date"></div>
         <div class="field"><label>شروط الدفع بالأيام</label><input id="supPaymentTerms" type="number" min="0" placeholder="مثال: 30"></div>
       </div>
+      <div class="frow">
+        <div class="field" style="grid-column:span 2">
+          <label>حساب المورد بدليل الحسابات</label>
+          <select id="supAccountCode">
+            <option value="2111">موردون - نشاط الشركة الأساسي (افتراضي)</option>
+            <option value="2112">موردون - أنشطة أخرى</option>
+          </select>
+        </div>
+      </div>
+      <div class="hint">كل مورد يُدرج تلقائياً تحت حساب "الموردون" (211) بدليل الحسابات — اختر هل هو من موردي نشاط الشركة الأساسي أم من أنشطة أخرى؛ يمكن أيضاً اختيار أي حساب فرعي آخر أضفته تحت حساب الموردين من شاشة دليل الحسابات.</div>
       <div class="hint">في فواتير المشتريات سيتم استخدام شروط الدفع لإظهار ملاحظة عند تجاوز فترة السداد المتفق عليها.</div>
 
       <div class="supplier-section-title">عقود المورد وحوافز الشراء</div>

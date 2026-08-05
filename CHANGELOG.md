@@ -51,3 +51,12 @@
 - Backend: added update, activate/deactivate, and delete endpoints; delete is blocked for centers with sub-centers and auto-deactivates centers already referenced by posted journal entries instead of hard-deleting, preserving historical report integrity.
 - Backend: list/detail responses now include computed `actual_amount` and `entries_count` aggregated live from posted journal entry cost allocations, so budget-vs-actual is always driven by real ledger data.
 - Frontend: budget consumption bar with over/near-budget highlighting, cycle-safe parent selector, CSV export, and automatic refresh of every cost-center dropdown across the system (journal entry lines, filters) after any change.
+
+## ACC-COA-002 — Chart of Accounts export + professional Suppliers control account
+- Chart of Accounts screen: added "تصدير Excel" and "تصدير PDF" buttons at the top of the screen. Excel export is a UTF-8 CSV preserving the tree order/indentation; PDF export opens a clean, print-ready report (LEGEND D letterhead, generation date, totals) via the browser print dialog — "Save as PDF".
+- Accounts gained an `is_system` flag; system/foundational accounts (Suppliers 211 and its two new sub-accounts) show a "🔒 نظامي" badge in the tree and are protected from deletion and from being moved elsewhere in the hierarchy, both in the UI and the API.
+- New fixed foundational sub-accounts under the Suppliers control account (211), matching Odoo/SAP default-payable-account practice:
+  - `2111` — موردون - نشاط الشركة الأساسي (default for every new supplier)
+  - `2112` — موردون - أنشطة أخرى
+- Suppliers now carry an `account_code` linking them to one of these (or any other sub-account of 211 created later); the supplier form has a new "حساب المورد بدليل الحسابات" field, dynamically populated from the live chart of accounts and defaulting to `2111`. The API validates that a supplier's account is always a descendant of 211.
+- Migration `018_supplier_accounts.sql`: adds `accounts.is_system`, seeds the two sub-accounts, adds `suppliers.account_code`, and backfills existing suppliers to `2111`.
