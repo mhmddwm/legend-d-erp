@@ -1707,6 +1707,8 @@ function addJLine(){
 function removeJLine(id){
   if(jLines.length<=2){alert('يجب أن يحتوي القيد على سطرين على الأقل'); return;}
   jLines=jLines.filter(l=>l.id!==id);
+  expandedTaxLines.delete(id);
+  expandedCostLines.delete(id);
   renderJLines();
 }
 
@@ -1830,10 +1832,14 @@ function toggleLineTaxPanel(lineId){
   renderJLines();
 }
 
-function renderTaxTypeOptionsHtml(selected){
+function renderTaxTypeOptionsHtml(selected, lineId){
   const list = taxTypes || [];
+  const usedElsewhere = new Set(jLines.filter(l=>l.id!==lineId && l.tax_type_code).map(l=>l.tax_type_code));
   return '<option value="">— بدون ضريبة —</option>' +
-    list.map(t=>`<option value="${t.code}" ${t.code===selected?'selected':''}>${t.name_ar} (${parseFloat(t.rate)}%)</option>`).join('');
+    list.map(t=>{
+      const disabled = usedElsewhere.has(t.code) && t.code!==selected;
+      return `<option value="${t.code}" ${t.code===selected?'selected':''} ${disabled?'disabled':''}>${t.name_ar} (${parseFloat(t.rate)}%)${disabled?' — مستخدمة بسطر آخر':''}</option>`;
+    }).join('');
 }
 
 function lineTaxSummary(line){
@@ -1846,6 +1852,17 @@ function lineTaxSummary(line){
 function onJLineTaxTypeChange(lineId, taxTypeCode){
   const line = jLines.find(l=>l.id===lineId);
   if(!line) return;
+  if(taxTypeCode){
+    // لا يجوز تكرار نفس نوع الضريبة أكثر من مرة داخل نفس القيد — هذا غير
+    // وارد محاسبياً (يضاعف قيمة الضريبة المستحقة/القابلة للخصم بالقيد).
+    const dup = jLines.some(l => l.id!==lineId && l.tax_type_code === taxTypeCode);
+    if(dup){
+      const t = (taxTypes||[]).find(x=>x.code===taxTypeCode);
+      alert(`تم استخدام ضريبة "${t ? t.name_ar : taxTypeCode}" بالفعل في سطر آخر بنفس القيد — لا يمكن تكرار نفس الضريبة أكثر من مرة في القيد الواحد.`);
+      renderJLines();
+      return;
+    }
+  }
   line.tax_type_code = taxTypeCode || '';
   if(!taxTypeCode){
     line.tax_rate = ''; line.tax_amount = '';
@@ -1868,6 +1885,18 @@ function clearLineTax(lineId){
   line.tax_type_code = ''; line.tax_rate = ''; line.tax_amount = '';
   expandedTaxLines.delete(lineId);
   renderJLines();
+}
+
+// إظهار حقلي "المورد" و"رقم فاتورة المورد" فقط عند التعامل مع ضريبة
+// القيمة المضافة بالقيد (فتح لوحة الضريبة بأي سطر أو تفعيل ضريبة فعلياً)
+// — بدل إظهارهما دائماً حتى في القيود التي لا علاقة لها بالموردين.
+function updateSupplierFieldsVisibility(){
+  const row = document.getElementById('jSupplierFieldsRow');
+  if(!row) return;
+  const invVal = document.getElementById('jInvoiceNumber')?.value?.trim();
+  const supVal = document.getElementById('jSupplier')?.value;
+  const shouldShow = expandedTaxLines.size > 0 || jLines.some(l=>l.tax_type_code) || !!invVal || !!supVal;
+  row.style.display = shouldShow ? 'grid' : 'none';
 }
 
 function renderJLines(){
@@ -1904,7 +1933,7 @@ function renderJLines(){
           <div class="cc-panel-head"><span>ضريبة هذا السطر</span></div>
           <div class="jtax-row">
             <label>نوع الضريبة</label>
-            <select onchange="onJLineTaxTypeChange(${l.id},this.value)">${renderTaxTypeOptionsHtml(l.tax_type_code)}</select>
+            <select onchange="onJLineTaxTypeChange(${l.id},this.value)">${renderTaxTypeOptionsHtml(l.tax_type_code, l.id)}</select>
             <label>قيمة الضريبة</label>
             <input type="number" step="0.01" min="0" value="${l.tax_amount ?? ''}" placeholder="تُحسب تلقائياً" readonly>
             <button type="button" class="rm-line" onclick="clearLineTax(${l.id})" title="إزالة الضريبة">✕</button>
@@ -1956,11 +1985,14 @@ function renderJLines(){
     diffEl.style.color = diff===0 ? 'var(--success)' : 'var(--coral)';
   }
   if(submitBtn) submitBtn.disabled = !(diff===0 && totalDebit>0);
+  updateSupplierFieldsVisibility();
 }
 
 function resetJournalForm(){
   journalEditingId=null;
   jLines=[];
+  expandedTaxLines.clear();
+  expandedCostLines.clear();
   lineCounter++; jLines.push({id:lineCounter, account_code:'', debit:0, credit:0, line_description:'', cost_allocations:[], tax_type_code:'', tax_rate:'', tax_amount:''});
   lineCounter++; jLines.push({id:lineCounter, account_code:'', debit:0, credit:0, line_description:'', cost_allocations:[], tax_type_code:'', tax_rate:'', tax_amount:''});
   const titleEl=document.getElementById('journalFormTitle');
@@ -2256,6 +2288,8 @@ function clearJournalError(){
 function loadEntryIntoForm(id){
   const e=(entries||[]).find(x=>x.id===id);
   if(!e) return null;
+  expandedTaxLines.clear();
+  expandedCostLines.clear();
   const lines=(e.lines&&e.lines.length) ? e.lines : [
     ...(e.debit_account?[{account_code:e.debit_account, debit:e.amount, credit:0, line_description:e.description}]:[]),
     ...(e.credit_account?[{account_code:e.credit_account, debit:0, credit:e.amount, line_description:e.description}]:[]),

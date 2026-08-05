@@ -420,6 +420,7 @@ def _validate_and_total_lines(payload: JournalEntryIn, db: Session) -> float:
 
     total_debit = 0.0
     total_credit = 0.0
+    seen_tax_types = set()
     for line in payload.lines:
         if (line.debit and line.credit) or (not line.debit and not line.credit):
             raise HTTPException(400, "كل سطر يجب أن يكون له مبلغ مدين أو دائن فقط، وليس كلاهما ولا لا شيء")
@@ -430,6 +431,12 @@ def _validate_and_total_lines(payload: JournalEntryIn, db: Session) -> float:
         # مباشرة (نسخة مجمّدة بالسطر)، ولا تُقبل نسبة يدوية إلا إذا لم
         # يُختر نوع ضريبة (توافقاً مع الإدخال اليدوي القديم إن وُجد)
         if line.tax_type_code:
+            # لا يجوز تكرار نفس نوع الضريبة أكثر من مرة داخل نفس القيد —
+            # هذا غير وارد محاسبياً (يضاعف قيمة الضريبة بالقيد الواحد)
+            if line.tax_type_code in seen_tax_types:
+                raise HTTPException(400, f"لا يمكن تكرار نفس الضريبة ({line.tax_type_code}) أكثر من مرة في القيد الواحد")
+            seen_tax_types.add(line.tax_type_code)
+
             tax_type = db.query(TaxType).filter(TaxType.code == line.tax_type_code).first()
             if not tax_type:
                 raise HTTPException(404, f"نوع الضريبة {line.tax_type_code} غير موجود")
