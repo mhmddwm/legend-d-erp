@@ -69,3 +69,7 @@
 ## ACC-JRN-004 — Explicit VAT toggle button in journal entry form
 - Added a clearly-labeled "🧾 ضريبة القيمة المضافة" button above the journal entry lines table; clicking it explicitly reveals/hides the "المورد" and "رقم فاتورة المورد" fields — in addition to them still auto-revealing when a tax is applied to any line, or when editing an entry that already has one of them set.
 - The button highlights (active state) whenever the supplier/invoice fields are currently visible, so it's obvious how to get back to them.
+
+## ACC-JRN-005 — Tax amount number formatting + cache-busting
+- Journal entry line tax panel: the "قيمة الضريبة" (tax amount) field now uses the same text-based numeric formatting as the debit/credit fields (comma-grouped Western digits) instead of a native `<input type="number">`, which was rendering as Arabic-Indic numerals and getting visually truncated in some browser/OS locale settings.
+- Added a cache-busting version query string to script.js/i18n.js/users_roles.js so browsers and any CDN/proxy in front of the app reliably pick up new frontend code after each deployment instead of serving a stale cached copy — relevant since the last couple of fixes reportedly weren't showing up immediately.

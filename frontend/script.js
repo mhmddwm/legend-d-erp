@@ -1889,9 +1889,6 @@ function clearLineTax(lineId){
 
 // إظهار حقلي "المورد" و"رقم فاتورة المورد" فقط عند التعامل مع ضريبة
 // القيمة المضافة بالقيد (فتح لوحة الضريبة بأي سطر أو تفعيل ضريبة فعلياً)
-// — بدل إظهارهما دائماً حتى في القيود التي لا علاقة لها بالموردين.
-// إظهار حقلي "المورد" و"رقم فاتورة المورد" فقط عند التعامل مع ضريبة
-// القيمة المضافة بالقيد (فتح لوحة الضريبة بأي سطر أو تفعيل ضريبة فعلياً)
 // — أو عند الضغط يدوياً على زر "ضريبة القيمة المضافة" أعلى الشاشة —
 // بدل إظهارهما دائماً حتى في القيود التي لا علاقة لها بالموردين.
 let jSupplierFieldsManuallyShown = false;
@@ -1948,7 +1945,7 @@ function renderJLines(){
             <label>نوع الضريبة</label>
             <select onchange="onJLineTaxTypeChange(${l.id},this.value)">${renderTaxTypeOptionsHtml(l.tax_type_code, l.id)}</select>
             <label>قيمة الضريبة</label>
-            <input type="number" step="0.01" min="0" value="${l.tax_amount ?? ''}" placeholder="تُحسب تلقائياً" readonly>
+            <input type="text" inputmode="decimal" class="numeric-fmt" value="${l.tax_amount ? window.formatNumberDisplay(l.tax_amount) : ''}" placeholder="تُحسب تلقائياً" readonly>
             <button type="button" class="rm-line" onclick="clearLineTax(${l.id})" title="إزالة الضريبة">✕</button>
           </div>
           <div class="hint" style="margin-top:6px">اختر نوع الضريبة المسجّل بالنظام وستُحسب القيمة تلقائياً من نسبته — بدون إدخال أي رقم يدوياً.</div>
