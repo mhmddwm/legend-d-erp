@@ -9,7 +9,7 @@
 // نستخدم مسار نسبي (نفس العنوان الحالي) بدل عنوان محلي ثابت لا يعمل
 // إلا على جهاز المطوّر.
 const API = (["127.0.0.1", "localhost"].includes(location.hostname))
-  ? "http://127.0.0.1:8080"
+  ? "http://127.0.0.1:8000"
   : "";
 const TYPE_LABELS = {
   assets:'أصول', liabilities:'خصوم',
@@ -124,172 +124,94 @@ async function loadAll(){
 
 const bar = document.getElementById('apiStatusBar');
 
-console.log("بدء تحميل البيانات...");
+console.log("🚀 بدء تحميل النظام...");
+
+console.time("ERP_LOAD_TIME");
 
 
 async function safeLoad(name,url){
 
+    try{
+
+        const data = await api('GET',url);
+
+        console.log("✓",name,data);
+
+        return data || [];
+
+    }
+    catch(e){
+
+        console.warn(
+            "⚠️ تعذر تحميل "+name,
+            e.message
+        );
+
+        return [];
+
+    }
+
+}
+
+
 try{
 
-const data = await api('GET',url);
 
-console.log(name,data);
+/*
+================================
+تحميل البيانات الأساسية أولاً
+================================
+*/
 
-return data;
+[
+accounts,
+branches,
+appUsers,
+costCenters,
+taxTypes
 
-}
-catch(e){
-
-console.warn(
-"تعذر تحميل "+name,
-e.message
-);
-
-return [];
-
-}
-
-}
+] = await Promise.all([
 
 
-
-try{
-
-
-accounts = await safeLoad(
+safeLoad(
 "الحسابات",
 "/api/accounts"
-);
-branches = await safeLoad(
-  "الفروع",
- "/api/branches"
-);
-
-entries = await safeLoad(
-"القيود",
-"/api/journal"
-);
+),
 
 
-appUsers = await safeLoad(
+safeLoad(
+"الفروع",
+"/api/branches"
+),
+
+
+safeLoad(
 "المستخدمون",
 "/api/users"
-);
+),
 
 
-costCenters = await safeLoad(
+safeLoad(
 "مراكز التكلفة",
 "/api/cost-centers"
-);
+),
 
 
-taxTypes = await safeLoad(
+safeLoad(
 "أنواع الضرائب",
 "/api/tax-types"
-);
+)
 
-
-items = await safeLoad(
-"الأصناف",
-"/api/items"
-);
-// في حالة عدم توفر الخادم أو رجوع بيانات قديمة، ندمج آخر تعديلات محفوظة محليًا
-try{
-  const cachedItems = JSON.parse(localStorage.getItem('items_cache') || '[]');
-  if(Array.isArray(cachedItems) && cachedItems.length){
-    const byCode = new Map((items||[]).map(x=>[String(x.code), x]));
-    cachedItems.forEach(x=>{ if(x && x.code) byCode.set(String(x.code), {...(byCode.get(String(x.code))||{}), ...x}); });
-    items = Array.from(byCode.values());
-  }
-}catch(e){}
-
-
-stockMoves = await safeLoad(
-"المخزون",
-"/api/stock-moves"
-);
-
-
-suppliers = await safeLoad(
-"الموردين",
-"/api/suppliers"
-);
-// دمج نسخة الموردين المحفوظة محليًا حتى تظهر الإضافات والتعديلات في وضع الديمو
-try{
-  const cachedSuppliers = JSON.parse(localStorage.getItem('suppliers_cache') || '[]');
-  if(Array.isArray(cachedSuppliers) && cachedSuppliers.length){
-    const byCode = new Map((suppliers||[]).map(x=>[String(x.code), x]));
-    cachedSuppliers.forEach(x=>{ if(x && x.code) byCode.set(String(x.code), {...(byCode.get(String(x.code))||{}), ...x}); });
-    suppliers = Array.from(byCode.values());
-  }
-}catch(e){}
-
-
-purchaseOrders = await safeLoad(
-"طلبات الشراء",
-"/api/purchase-orders"
-);
-
-
-grns = await safeLoad(
-"الاستلامات",
-"/api/grn"
-);
-
-
-invoices = await safeLoad(
-"الفواتير",
-"/api/purchase-invoices"
-);
-
-
-returns_ = await safeLoad(
-"المرتجعات",
-"/api/purchase-returns"
-);
-
-
-warehouses = await safeLoad(
-"المستودعات",
-"/api/warehouses"
-);
-
-
-stockIssueRequests = await safeLoad(
-"طلبات صرف المخزون",
-"/api/stock-issue-requests"
-);
-
-
-stockTransfersList = await safeLoad(
-"تحويلات المستودعات",
-"/api/stock-transfers"
-);
-
-
-warehouseStockBalances = await safeLoad(
-"رصيد المستودعات",
-"/api/warehouse-stock"
-);
+]);
 
 
 
 window.accounts = accounts;
 
-// تحميل بيانات إعدادات المنتجات
-window.categories = JSON.parse(localStorage.getItem("categories") || "[]");
-window.unitTemplates = JSON.parse(localStorage.getItem("unitTemplates") || "[]");
-
-console.log(
-"الحسابات النهائية",
-accounts
-);
 
 
-
+// عرض النظام فوراً
 renderAll();
-
-
 
 refreshSelects();
 
@@ -302,13 +224,132 @@ refreshJournalAccounts();
 if(bar){
 
 bar.innerHTML =
-'<span class="api-status ok">✓ تم تحديث البيانات</span>';
+'<span class="api-status ok">✓ النظام جاهز</span>';
 
 }
 
 
-}
 
+
+/*
+================================
+تحميل باقي البيانات بالخلفية
+================================
+*/
+
+
+Promise.all([
+
+
+safeLoad(
+"القيود",
+"/api/journal"
+).then(x=>entries=x),
+
+
+
+safeLoad(
+"الأصناف",
+"/api/items"
+).then(x=>items=x),
+
+
+
+safeLoad(
+"المخزون",
+"/api/stock-moves"
+).then(x=>stockMoves=x),
+
+
+
+safeLoad(
+"الموردين",
+"/api/suppliers"
+).then(x=>suppliers=x),
+
+
+
+safeLoad(
+"طلبات الشراء",
+"/api/purchase-orders"
+).then(x=>purchaseOrders=x),
+
+
+
+safeLoad(
+"الاستلامات",
+"/api/grn"
+).then(x=>grns=x),
+
+
+
+safeLoad(
+"الفواتير",
+"/api/purchase-invoices"
+).then(x=>invoices=x),
+
+
+
+safeLoad(
+"المرتجعات",
+"/api/purchase-returns"
+).then(x=>returns_=x),
+
+
+
+safeLoad(
+"المستودعات",
+"/api/warehouses"
+).then(x=>warehouses=x),
+
+
+
+safeLoad(
+"طلبات الصرف",
+"/api/stock-issue-requests"
+).then(x=>stockIssueRequests=x),
+
+
+
+safeLoad(
+"التحويلات",
+"/api/stock-transfers"
+).then(x=>stockTransfersList=x),
+
+
+
+safeLoad(
+"رصيد المستودعات",
+"/api/warehouse-stock"
+).then(x=>warehouseStockBalances=x)
+
+
+])
+.then(()=>{
+
+
+console.log("✓ اكتمل تحميل البيانات الثانوية");
+
+
+renderAll();
+
+
+console.timeEnd("ERP_LOAD_TIME");
+
+
+})
+.catch(e=>{
+
+console.warn(
+"خطأ في تحميل البيانات الثانوية",
+e
+);
+
+});
+
+
+
+}
 catch(error){
 
 console.error(
