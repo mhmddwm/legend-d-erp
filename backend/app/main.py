@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
+
 from app.routers import (
     accounting,
     inventory,
@@ -18,16 +19,29 @@ from app.routers import (
     permissions_catalog,
     warehouse,
     warehouse_locations,
-    branches  # تم إضافة branches هنا
+    branches,
 )
+
+
+# ============================================================
+# Logging
+# ============================================================
 
 logger = logging.getLogger("uvicorn.error")
 
+
+# ============================================================
+# Application
+# ============================================================
+
 app = FastAPI(
-    title="ERP System"
+    title="LEGEND D ERP System"
 )
 
-# ================= CORS =================
+
+# ============================================================
+# CORS
+# ============================================================
 
 app.add_middleware(
     CORSMiddleware,
@@ -38,97 +52,177 @@ app.add_middleware(
 )
 
 
-# ================= معالج أخطاء شامل =================
-# بدون هذا، أي خطأ غير متوقع (عمود غير موجود بقاعدة البيانات، migration
-# لم تُشغَّل، إلخ) يرجع للواجهة كـ 500 فارغ فتظهر رسالة "خطأ في الخادم"
-# العامة بدون أي تفاصيل تساعد على التشخيص. هذا المعالج يسجّل الخطأ
-# الكامل بالـ logs (لك أنت فقط، بلوحة Render) ويرجع رسالة واضحة للواجهة.
+# ============================================================
+# Global Exception Handler
+# ============================================================
+
 @app.exception_handler(Exception)
-async def unhandled_exception_handler(request: Request, exc: Exception):
-    logger.error("خطأ غير متوقع في %s: %s\n%s", request.url.path, exc, traceback.format_exc())
+async def global_exception_handler(
+    request: Request,
+    exc: Exception
+):
+
+    logger.error(
+        "\n========== SERVER ERROR ==========\n"
+        "PATH: %s\n"
+        "ERROR: %s\n"
+        "%s"
+        "\n==================================",
+        request.url.path,
+        exc,
+        traceback.format_exc(),
+    )
+
     return JSONResponse(
         status_code=500,
-        content={"detail": f"خطأ غير متوقع في الخادم: {type(exc).__name__}: {str(exc)}"},
+        content={
+            "detail": str(exc),
+            "type": type(exc).__name__,
+            "path": request.url.path,
+        },
     )
 
 
-# ================= ROUTERS =================
+# ============================================================
+# Routers
+# ============================================================
 
 # Localization
-app.include_router(localization.router)
+app.include_router(
+    localization.router
+)
 
 
 # Accounting
-app.include_router(accounting.router)
-app.include_router(accounting.journal_router)
-app.include_router(accounting.cost_center_router)
-app.include_router(accounting.tax_type_router)
+app.include_router(
+    accounting.router
+)
+
+app.include_router(
+    accounting.journal_router
+)
+
+app.include_router(
+    accounting.cost_center_router
+)
+
+app.include_router(
+    accounting.tax_type_router
+)
 
 
-# Branches (تم إضافة مسار الفروع)
-app.include_router(branches.router)
+# Branches
+app.include_router(
+    branches.router
+)
 
 
 # Inventory
-app.include_router(inventory.router)
-app.include_router(inventory.stock_router)
-app.include_router(inventory.supplier_router)
+app.include_router(
+    inventory.router
+)
+
+app.include_router(
+    inventory.stock_router
+)
+
+app.include_router(
+    inventory.supplier_router
+)
 
 
 # Purchasing
-app.include_router(purchasing.po_router)
-app.include_router(purchasing.grn_router)
-app.include_router(purchasing.pinv_router)
-app.include_router(purchasing.prt_router)
+app.include_router(
+    purchasing.po_router
+)
+
+app.include_router(
+    purchasing.grn_router
+)
+
+app.include_router(
+    purchasing.pinv_router
+)
+
+app.include_router(
+    purchasing.prt_router
+)
 
 
-# Users, Roles & Permissions
-app.include_router(users.router)
-app.include_router(roles.router)
-app.include_router(permissions_catalog.router)
+# Users / Roles / Permissions
+app.include_router(
+    users.router
+)
+
+app.include_router(
+    roles.router
+)
+
+app.include_router(
+    permissions_catalog.router
+)
 
 
-# Warehouses
-app.include_router(warehouse.router)
+# Warehouse
+app.include_router(
+    warehouse.router
+)
+
+app.include_router(
+    warehouse_locations.router
+)
 
 
-# Warehouse Locations
-app.include_router(warehouse_locations.router)
-
-
-# ================= API HEALTH CHECK =================
+# ============================================================
+# Health Check
+# ============================================================
 
 @app.get("/api")
 def api_home():
+
     return {
         "message": "ERP API is running",
         "system": "LEGEND D ERP"
     }
 
 
-# ================= FRONTEND =================
+# ============================================================
+# Frontend
+# ============================================================
 
 BASE_DIR = Path(__file__).resolve().parents[2]
+
 FRONTEND_DIR = BASE_DIR / "frontend"
 
+
 if FRONTEND_DIR.exists():
+
     app.mount(
         "/",
         StaticFiles(
             directory=str(FRONTEND_DIR),
             html=True
         ),
-        name="frontend"
+        name="frontend",
     )
 
 
-# ================= LOCAL RUN =================
+# ============================================================
+# Local Run
+# ============================================================
 
 if __name__ == "__main__":
+
     import uvicorn
+
     uvicorn.run(
         "app.main:app",
         host="0.0.0.0",
-        port=int(os.environ.get("PORT", 8000)),
-        reload=True
+        port=int(
+            os.environ.get(
+                "PORT",
+                8000
+            )
+        ),
+        reload=True,
     )
