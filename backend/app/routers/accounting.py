@@ -13,7 +13,11 @@ from app.schemas.accounting import (
     JournalEntryAttachmentIn, JournalEntryAttachmentOut,
     TaxTypeIn, TaxTypeUpdate, TaxTypeOut,
 )
-from app.services import account_rollup_balance, account_direct_balance
+from app.services import (
+    account_rollup_balance,
+    account_direct_balance,
+    accounts_balances_tree
+)
 
 router = APIRouter(prefix="/api/accounts", tags=["Accounts"])
 journal_router = APIRouter(prefix="/api/journal", tags=["Journal"])
@@ -234,48 +238,135 @@ def delete_cost_center(code: str, db: Session = Depends(get_db)):
 # ============================================================
 
 @router.get("", response_model=list[AccountOut])
-def list_accounts(branch_id: Optional[int] = Query(None, description="فلترة الأرصدة حسب فرع معيّن"), db: Session = Depends(get_db)):
-    accounts = db.query(Account).filter(Account.is_active == True).all()
-    result = []
-    for acc in accounts:
-        result.append(AccountOut(
-            code=acc.code, 
-            name_ar=acc.name_ar, 
-            name_en=acc.name_en,
-            account_type=acc.account_type, 
-            nature=acc.nature, 
-            parent_code=acc.parent_code,
-            opening_balance=float(acc.opening_balance),
-            balance=account_rollup_balance(db, acc.code, branch_id),
-            is_system=bool(acc.is_system),
-        ))
-    return result
+def list_accounts(
+    branch_id: Optional[int] = Query(
+        None,
+        description="فلترة الأرصدة حسب فرع معيّن"
+    ),
+    db: Session = Depends(get_db)
+):
 
-@router.post("", response_model=AccountOut, status_code=201)
-def create_account(payload: AccountIn, db: Session = Depends(get_db)):
-    if db.query(Account).filter(Account.code == payload.code).first():
-        raise HTTPException(400, "كود الحساب مستخدم من قبل")
-    
-    if payload.parent_code and not db.query(Account).filter(Account.code == payload.parent_code).first():
-        raise HTTPException(400, "الحساب الأب غير موجود")
-
-    acc = Account(**payload.model_dump())
-    db.add(acc)
-    db.commit()
-    db.refresh(acc)
-    
-    return AccountOut(
-        code=acc.code, 
-        name_ar=acc.name_ar, 
-        name_en=acc.name_en,
-        account_type=acc.account_type, 
-        nature=acc.nature, 
-        parent_code=acc.parent_code,
-        opening_balance=float(acc.opening_balance), 
-        balance=float(acc.opening_balance),
-        is_system=bool(acc.is_system),
+    accounts = (
+        db.query(Account)
+        .filter(Account.is_active == True)
+        .all()
     )
 
+
+    # حساب جميع الأرصدة مرة واحدة
+    # بدلاً من تشغيل Query لكل حساب
+    balances = accounts_balances_tree(
+        db,
+        branch_id
+    )
+
+
+    result = []
+
+
+    for acc in accounts:
+
+        result.append(
+            AccountOut(
+
+                code=acc.code,
+
+                name_ar=acc.name_ar,
+
+                name_en=acc.name_en,
+
+                account_type=acc.account_type,
+
+                nature=acc.nature,
+
+                parent_code=acc.parent_code,
+
+                opening_balance=float(
+                    acc.opening_balance or 0
+                ),
+
+                balance=float(
+                    balances.get(
+                        acc.code,
+                        0
+                    )
+                ),
+
+                is_system=bool(
+                    acc.is_system
+                ),
+            )
+        )
+
+
+    return result
+
+
+
+@router.post("", response_model=AccountOut, status_code=201)
+def create_account(
+    payload: AccountIn,
+    db: Session = Depends(get_db)
+):
+
+    if db.query(Account).filter(
+        Account.code == payload.code
+    ).first():
+
+        raise HTTPException(
+            400,
+            "كود الحساب مستخدم من قبل"
+        )
+
+
+    if payload.parent_code and not db.query(Account).filter(
+        Account.code == payload.parent_code
+    ).first():
+
+        raise HTTPException(
+            400,
+            "الحساب الأب غير موجود"
+        )
+
+
+    acc = Account(
+        **payload.model_dump()
+    )
+
+
+    db.add(acc)
+
+    db.commit()
+
+    db.refresh(acc)
+
+
+    return AccountOut(
+
+        code=acc.code,
+
+        name_ar=acc.name_ar,
+
+        name_en=acc.name_en,
+
+        account_type=acc.account_type,
+
+        nature=acc.nature,
+
+        parent_code=acc.parent_code,
+
+        opening_balance=float(
+            acc.opening_balance or 0
+        ),
+
+        balance=float(
+            acc.opening_balance or 0
+        ),
+
+        is_system=bool(
+            acc.is_system
+        ),
+    )
 @router.put("/{code}", response_model=AccountOut)
 def update_account(code: str, payload: AccountUpdate, db: Session = Depends(get_db)):
     acc = db.query(Account).filter(Account.code == code).first()
