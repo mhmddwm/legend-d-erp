@@ -2153,7 +2153,7 @@ function exportAccountsCsv(){
   if(!rows.length){ alert('لا توجد حسابات لتصديرها'); return; }
   let csv='الكود,اسم الحساب,النوع,الحساب الأب,الرصيد الافتتاحي,الرصيد الحالي\n';
   csv+=rows.map(({acc,level})=>{
-    const indentedName=(level>0?'  '.repeat(level)+'└ ':'')+(acc.name_ar||'');
+    const indentedName=(level>0?'  '.repeat(level):'')+(acc.name_ar||'');
     return [
       acc.code,
       indentedName,
@@ -2178,7 +2178,7 @@ function exportAccountsPdf(){
   const bodyRows=rows.map(({acc,level})=>`
     <tr>
       <td style="direction:ltr;text-align:left">${whEscCoa(acc.code||'')}</td>
-      <td style="padding-inline-start:${level*18}px">${level>0?'└ ':''}<b>${whEscCoa(acc.name_ar||'')}</b>${acc.name_en?`<br><small style="color:#889">${whEscCoa(acc.name_en)}</small>`:''}${acc.is_system?' <small style="color:#a58a2a">(نظامي)</small>':''}</td>
+      <td style="padding-inline-start:${level*18}px"><b>${whEscCoa(acc.name_ar||'')}</b>${acc.name_en?`<br><small style="color:#889">${whEscCoa(acc.name_en)}</small>`:''}${acc.is_system?' <small style="color:#a58a2a">(نظامي)</small>':''}</td>
       <td>${whEscCoa((typeof TYPE_LABELS!=='undefined' ? (TYPE_LABELS[acc.account_type]||acc.account_type) : acc.account_type) || '')}</td>
       <td style="direction:ltr;text-align:center">${whEscCoa(acc.parent_code||'-')}</td>
       <td style="text-align:left;direction:ltr">${fmt(acc.opening_balance)}</td>

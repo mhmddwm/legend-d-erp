@@ -4768,14 +4768,14 @@ table.uz-matrix input[type=checkbox]{width:16px;height:16px;cursor:pointer;accen
       opening_balance:parseFloat(get(map,['الرصيد الافتتاحي','Opening Balance'])||0)||0
     };
   }
-  function validate(p,rowNo,batchCodes){
+  function validate(p,rowNo,batchCodes,codeCounts){
     const reasons=[];
     if(!p.code) reasons.push('كود الحساب فارغ');
     if(!p.name_ar) reasons.push('اسم الحساب (عربي) فارغ');
     if(!p.account_type) reasons.push(`نوع الحساب غير معروف (${p.account_type_raw||'فارغ'}) — استخدم: الأصول/الخصوم/حقوق الملكية/الإيرادات/المصروفات`);
     if(p.nature_raw && !p.nature) reasons.push('طبيعة الحساب يجب أن تكون مدين أو دائن');
     if(p.code && (accounts||[]).some(a=>String(a.code)===String(p.code))) reasons.push('كود الحساب مستخدم من قبل بدليل الحسابات');
-    if(p.code && batchCodes.has(String(p.code))) reasons.push('كود الحساب مكرر داخل نفس ملف الاستيراد');
+    if(p.code && (codeCounts.get(String(p.code))||0)>1) reasons.push('كود الحساب مكرر داخل نفس ملف الاستيراد');
     if(p.parent_code && !(accounts||[]).some(a=>String(a.code)===String(p.parent_code)) && !batchCodes.has(String(p.parent_code))) reasons.push(`الحساب الأب (${p.parent_code}) غير موجود بدليل الحسابات ولا بنفس الملف`);
     return {rowNo,reasons};
   }
@@ -4818,18 +4818,20 @@ table.uz-matrix input[type=checkbox]{width:16px;height:16px;cursor:pointer;accen
       const buffer=await file.arrayBuffer();
       const rows=await parseFile(file,buffer);
       if(!rows || rows.length<2){ msg('الملف لا يحتوي على بيانات حسابات. تأكد من وجود صف عناوين وصف بيانات واحد على الأقل.', false); return; }
-      const head=rows[0]; const valid=[], errors=[]; const batchCodes=new Set();
+      const head=rows[0]; const valid=[], errors=[]; const batchCodes=new Set(); const codeCounts=new Map();
       // تمريرة أولى لتجميع أكواد الملف كاملة، حتى يصح التحقق من الحساب الأب
-      // حتى لو جاء الحساب الأب بصف لاحق في نفس الملف
+      // حتى لو جاء الحساب الأب بصف لاحق في نفس الملف، وحتى يمكن حساب عدد
+      // مرات تكرار كل كود بدقة (بدلاً من الاكتفاء بوجوده، وإلا فسيُعتبر كل
+      // صف "مكرراً" مقارنة بنفسه حتى لو كان الملف يحتوي على صف واحد فقط)
       const parsedRows=[];
       for(let i=1;i<rows.length;i++){
         const row=rows[i]||[]; if(!row.some(v=>String(v||'').trim())) continue;
         const map={}; head.forEach((h,idx)=>map[normalizeHeader(h)]=row[idx]??'');
         const p=payloadFromMap(map); parsedRows.push({rowNo:i+1,p});
-        if(p.code) batchCodes.add(String(p.code));
+        if(p.code){ batchCodes.add(String(p.code)); codeCounts.set(String(p.code),(codeCounts.get(String(p.code))||0)+1); }
       }
       for(const {rowNo,p} of parsedRows){
-        const chk=validate(p,rowNo,batchCodes);
+        const chk=validate(p,rowNo,batchCodes,codeCounts);
         if(chk.reasons.length) errors.push(chk); else valid.push({rowNo,payload:p});
       }
       acctAnalysis={valid,errors,total:valid.length+errors.length};
