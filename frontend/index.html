@@ -2005,8 +2005,38 @@ html[dir="ltr"] .brand-center{direction:ltr;}
       <h3>المنتجات</h3>
       <div>
         <button type="button" class="btn" onclick="openNewItem()">＋ إضافة منتج</button>
+        <button class="btn secondary" onclick="openItemImport()">⭱ استيراد Excel</button>
         <button class="btn secondary" onclick="activateTab('productsettings')">التصنيفات</button>
       </div>
+    </div>
+
+    <!-- بطاقة استيراد المنتجات من Excel -->
+    <div class="formcard supplier-import-card pro-import-card" id="itemImportCard" style="display:none;margin:14px 0">
+      <div class="pro-import-header">
+        <div>
+          <h3>استيراد المنتجات</h3>
+          <div class="pro-import-subtitle">تحميل نموذج Excel، رفع الملف، تحليل ومعاينة، ثم استيراد المنتجات الصحيحة فقط.</div>
+        </div>
+        <button class="btn secondary" onclick="closeItemImport()">إغلاق</button>
+      </div>
+      <div class="pro-import-steps">
+        <div class="pro-step active"><span>1</span>تحميل النموذج</div>
+        <div class="pro-step"><span>2</span>اختيار الملف</div>
+        <div class="pro-step"><span>3</span>تحليل ومعاينة</div>
+        <div class="pro-step"><span>4</span>استيراد وحفظ</div>
+      </div>
+      <div class="pro-import-actions">
+        <button class="btn" onclick="downloadItemImportTemplate()">تحميل نموذج Excel</button>
+        <label class="btn secondary pro-file-btn native-file-picker" for="itemImportFile">رفع الملف / اختيار ملف
+          <input id="itemImportFile" type="file" accept=".xlsx,.xls,.csv,.txt,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv">
+        </label>
+        <button class="btn secondary" onclick="analyzeItemImportFile()">تحليل الملف</button>
+        <button id="itemImportCommitBtn" class="btn" onclick="commitItemImport()" disabled>استيراد المنتجات</button>
+        <input id="itemImportFileName" class="field" readonly value="لم يتم اختيار ملف" style="max-width:360px;background:#f8fbff;font-weight:800;color:#32445f;text-align:right">
+      </div>
+      <div id="itemImportMsg" style="display:none"></div>
+      <div id="itemImportSummary" style="display:none"></div>
+      <div id="itemImportPreview" style="display:none"></div>
     </div>
 
     <div style="margin:15px 0">
@@ -4865,6 +4895,169 @@ table.uz-matrix input[type=checkbox]{width:16px;height:16px;cursor:pointer;accen
     }
   };
   document.addEventListener('change',function(e){ if(e.target && e.target.id==='accountImportFile') window.selectAccountImportFile(e.target.files&&e.target.files[0]); });
+})();
+</script>
+
+<script>
+/* ===== استيراد المنتجات من Excel ===== */
+(function(){
+  let itemFile=null;
+  let itemAnalysis={valid:[],errors:[],total:0};
+  const headers=['كود المنتج','اسم المنتج','الوحدة','سعر التكلفة الافتراضي','سعر البيع','الرصيد الافتتاحي (الكمية)','حد إعادة الطلب'];
+  const sampleRow=['SKU-1001','قهوة عربية 250 جرام','حبة','18','25','50','10'];
+  function byId(id){return document.getElementById(id)}
+  function esc(v){return String(v??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
+  function msg(t,ok){
+    const el=byId('itemImportMsg'); if(!el){alert(t); return;}
+    el.style.display='block'; el.style.color=ok?'#166534':'#b42318'; el.style.background=ok?'#f0fdf4':'#fff1f2';
+    el.style.border=ok?'1px solid #bbf7d0':'1px solid #fecdd3'; el.style.borderRadius='12px'; el.style.padding='10px 12px';
+    el.textContent=t;
+  }
+  function clear(){
+    itemAnalysis={valid:[],errors:[],total:0};
+    const sum=byId('itemImportSummary'); if(sum){sum.style.display='none'; sum.innerHTML='';}
+    const prev=byId('itemImportPreview'); if(prev){prev.style.display='none'; prev.innerHTML='';}
+    const btn=byId('itemImportCommitBtn'); if(btn) btn.disabled=true;
+  }
+  function normalizeHeader(h){return String(h||'').replace(/\s+/g,' ').replace(/[إأآا]/g,'ا').replace(/ى/g,'ي').replace(/ة/g,'ه').trim()}
+  function get(map,names){for(const n of names){const v=map[normalizeHeader(n)]; if(v!==undefined && String(v).trim()!=='') return String(v).trim()} return ''}
+  function ensureXlsx(){
+    return new Promise((resolve,reject)=>{
+      if(window.XLSX) return resolve(window.XLSX);
+      const sc=document.createElement('script'); sc.src='https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js';
+      sc.onload=()=>window.XLSX?resolve(window.XLSX):reject(new Error('تعذر تحميل مكتبة Excel'));
+      sc.onerror=()=>reject(new Error('تعذر تحميل مكتبة Excel. تأكد من الاتصال بالإنترنت أو احفظ الملف CSV UTF-8.'));
+      document.head.appendChild(sc);
+      setTimeout(()=>{ if(!window.XLSX) reject(new Error('انتهت مهلة تحميل مكتبة Excel.')); },10000);
+    });
+  }
+  function decode(buffer){
+    const bytes=new Uint8Array(buffer||[]);
+    if(bytes[0]===0xEF&&bytes[1]===0xBB&&bytes[2]===0xBF) return new TextDecoder('utf-8').decode(bytes);
+    try{return new TextDecoder('utf-8',{fatal:true}).decode(bytes)}catch(e){try{return new TextDecoder('windows-1256').decode(bytes)}catch(_){return new TextDecoder('utf-8').decode(bytes)}}
+  }
+  function detectDelimiter(text){
+    const first=String(text||'').split(/\r?\n/).find(l=>l.trim())||''; const opts=[';',',','\t']; let best=';', max=-1;
+    opts.forEach(d=>{let c=(first.split(d).length-1); if(c>max){max=c; best=d}}); return best;
+  }
+  function parseDelimited(text){
+    const d=detectDelimiter(text); const rows=[]; let row=[],cell='',q=false; text=String(text||'').replace(/^\ufeff/,'');
+    for(let i=0;i<text.length;i++){
+      const ch=text[i], nx=text[i+1];
+      if(ch==='"'){ if(q && nx==='"'){cell+='"'; i++;} else q=!q; }
+      else if(ch===d && !q){row.push(cell.trim()); cell=''}
+      else if((ch==='\n'||ch==='\r') && !q){ if(ch==='\r'&&nx==='\n') i++; row.push(cell.trim()); cell=''; if(row.some(x=>String(x).trim())) rows.push(row); row=[]; }
+      else cell+=ch;
+    }
+    row.push(cell.trim()); if(row.some(x=>String(x).trim())) rows.push(row); return rows;
+  }
+  async function parseFile(file,buffer){
+    if(/\.xlsx$/i.test(file.name) || /\.xls$/i.test(file.name)){
+      await ensureXlsx();
+      const wb=XLSX.read(buffer,{type:'array'}); const sheet=wb.SheetNames[0];
+      if(!sheet) throw new Error('ملف Excel لا يحتوي على أي ورقة عمل.');
+      return XLSX.utils.sheet_to_json(wb.Sheets[sheet],{header:1,defval:'',raw:false}).filter(r=>Array.isArray(r)&&r.some(v=>String(v||'').trim()));
+    }
+    return parseDelimited(decode(buffer));
+  }
+  function payloadFromMap(map){
+    return {
+      code:get(map,['كود المنتج','Item Code','SKU']),
+      name:get(map,['اسم المنتج','Item Name']),
+      unit:get(map,['الوحدة','Unit'])||'حبة',
+      default_cost:parseFloat(get(map,['سعر التكلفة الافتراضي','التكلفة','Default Cost'])||0)||0,
+      price:parseFloat(get(map,['سعر البيع','Price'])||0)||0,
+      opening_qty:parseFloat(get(map,['الرصيد الافتتاحي (الكمية)','الرصيد الافتتاحي','Opening Qty'])||0)||0,
+      reorder_level:parseFloat(get(map,['حد إعادة الطلب','Reorder Level'])||0)||0
+    };
+  }
+  function validate(p,rowNo,codeCounts){
+    const reasons=[];
+    if(!p.code) reasons.push('كود المنتج فارغ');
+    if(!p.name) reasons.push('اسم المنتج فارغ');
+    if(!p.unit) reasons.push('الوحدة فارغة');
+    if(p.code && (items||[]).some(x=>String(x.code)===String(p.code))) reasons.push('كود المنتج مستخدم من قبل بقائمة المنتجات');
+    if(p.code && (codeCounts.get(String(p.code))||0)>1) reasons.push('كود المنتج مكرر داخل نفس ملف الاستيراد');
+    return {rowNo,reasons};
+  }
+  function render(){
+    const sum=byId('itemImportSummary'), prev=byId('itemImportPreview'), btn=byId('itemImportCommitBtn');
+    if(btn) btn.disabled=!itemAnalysis.valid.length;
+    if(sum){sum.style.display='grid'; sum.innerHTML=`<div class="import-stat"><b>${itemAnalysis.total}</b><span>عدد الصفوف</span></div><div class="import-stat ok"><b>${itemAnalysis.valid.length}</b><span>صفوف صحيحة</span></div><div class="import-stat bad"><b>${itemAnalysis.errors.length}</b><span>صفوف بها أخطاء</span></div>`}
+    if(prev){
+      const vr=itemAnalysis.valid.slice(0,30).map(x=>`<tr><td>${x.rowNo}</td><td>✅ صحيح</td><td>${esc(x.payload.name)}</td><td>${esc(x.payload.code)}</td></tr>`).join('');
+      const er=itemAnalysis.errors.map(x=>`<tr><td>${x.rowNo}</td><td>❌ خطأ</td><td colspan="2">${esc(x.reasons.join(' - '))}</td></tr>`).join('');
+      prev.style.display='block'; prev.innerHTML=`<div class="scrollx"><table class="grid"><thead><tr><th>الصف</th><th>الحالة</th><th>اسم المنتج / سبب الخطأ</th><th>الكود</th></tr></thead><tbody>${vr}${er}</tbody></table></div>`;
+    }
+  }
+  window.openItemImport=function(){ const card=byId('itemImportCard'); if(card){card.style.display='block'; card.scrollIntoView({behavior:'smooth',block:'start'});} };
+  window.closeItemImport=function(){ const card=byId('itemImportCard'); if(card) card.style.display='none'; const m=byId('itemImportMsg'); if(m) m.style.display='none'; itemFile=null; const inp=byId('itemImportFile'); if(inp) inp.value=''; const fn=byId('itemImportFileName'); if(fn) fn.value='لم يتم اختيار ملف'; clear(); };
+  window.downloadItemImportTemplate=function(){
+    const rows=[headers,sampleRow];
+    if(window.XLSX){
+      const wb=XLSX.utils.book_new(); const ws=XLSX.utils.aoa_to_sheet(rows);
+      ws['!cols']=headers.map(h=>({wch:Math.max(16,String(h).length+4)}));
+      XLSX.utils.book_append_sheet(wb,ws,'Items'); XLSX.writeFile(wb,'items_import_template.xlsx');
+      msg('تم تنزيل نموذج Excel. بعد التعديل احفظه بنفس الصيغة وارفعه من زر رفع الملف / اختيار ملف.', true);
+      return;
+    }
+    const csv=rows.map(r=>r.map(v=>{const t=String(v??''); return /[",;\n]/.test(t)?'"'+t.replace(/"/g,'""')+'"':t;}).join(';')).join('\r\n');
+    const blob=new Blob(['\ufeff'+csv],{type:'text/csv;charset=utf-8;'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='items_import_template.csv'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(a.href),500);
+    msg('تم تنزيل نموذج CSV لأن مكتبة Excel لم تحمل.', true);
+  };
+  window.selectItemImportFile=function(file){
+    itemFile=file||null; clear();
+    const fn=byId('itemImportFileName'); if(fn) fn.value=file?file.name:'لم يتم اختيار ملف';
+    if(file) msg('تم اختيار الملف: '+file.name+' — اضغط زر تحليل الملف الآن.', true);
+  };
+  window.analyzeItemImportFile=async function(){
+    const input=byId('itemImportFile');
+    const file=itemFile || (input && input.files && input.files[0]);
+    if(!file){ msg('اختر ملفًا أولًا من زر رفع الملف / اختيار ملف، ثم اضغط تحليل الملف.', false); return; }
+    itemFile=file; msg('جاري تحليل الملف، انتظر لحظة...', true);
+    try{
+      const buffer=await file.arrayBuffer();
+      const rows=await parseFile(file,buffer);
+      if(!rows || rows.length<2){ msg('الملف لا يحتوي على بيانات منتجات. تأكد من وجود صف عناوين وصف بيانات واحد على الأقل.', false); return; }
+      const head=rows[0]; const valid=[], errors=[]; const codeCounts=new Map();
+      const parsedRows=[];
+      for(let i=1;i<rows.length;i++){
+        const row=rows[i]||[]; if(!row.some(v=>String(v||'').trim())) continue;
+        const map={}; head.forEach((h,idx)=>map[normalizeHeader(h)]=row[idx]??'');
+        const p=payloadFromMap(map); parsedRows.push({rowNo:i+1,p});
+        if(p.code) codeCounts.set(String(p.code),(codeCounts.get(String(p.code))||0)+1);
+      }
+      for(const {rowNo,p} of parsedRows){
+        const chk=validate(p,rowNo,codeCounts);
+        if(chk.reasons.length) errors.push(chk); else valid.push({rowNo,payload:p});
+      }
+      itemAnalysis={valid,errors,total:valid.length+errors.length};
+      render();
+      msg(`تم تحليل الملف بنجاح: ${valid.length} صف صحيح، ${errors.length} صف به أخطاء.`, errors.length===0);
+    }catch(e){ msg('تعذر تحليل الملف: '+(e.message||e), false); }
+  };
+  window.commitItemImport=async function(){
+    if(!itemAnalysis.valid.length){ msg('لا توجد صفوف صحيحة للاستيراد. حل الأخطاء ثم أعد التحليل.', false); return; }
+    let ok=0; const failed=[];
+    for(const item of itemAnalysis.valid){
+      const p=item.payload;
+      try{
+        await api('POST','/api/items',p);
+        ok++;
+      }catch(e){
+        failed.push({rowNo:item.rowNo, name:p.name, reason:e.message||'خطأ غير معروف من الخادم'});
+      }
+    }
+    try{ await loadAll(); }catch(e){ try{ if(typeof renderItems==='function') renderItems(); }catch(_){} }
+    if(failed.length){
+      const prev=byId('itemImportPreview');
+      if(prev){ prev.style.display='block'; prev.innerHTML+=`<div class="scrollx"><table class="grid"><thead><tr><th>الصف</th><th>الحالة</th><th colspan="2">سبب فشل الحفظ بالخادم</th></tr></thead><tbody>${failed.map(f=>`<tr><td>${f.rowNo}</td><td>❌ فشل الحفظ</td><td colspan="2">${esc(f.name)} — ${esc(f.reason)}</td></tr>`).join('')}</tbody></table></div>`; }
+      msg(`تم حفظ ${ok} منتج بنجاح، وفشل حفظ ${failed.length} صف فعلياً بالخادم (انظر التفاصيل أسفله).`, ok>0);
+    } else {
+      msg(`تم استيراد وحفظ ${ok} منتج بنجاح فعلياً بقائمة المنتجات.`, true); clear();
+    }
+  };
+  document.addEventListener('change',function(e){ if(e.target && e.target.id==='itemImportFile') window.selectItemImportFile(e.target.files&&e.target.files[0]); });
 })();
 </script>
 
