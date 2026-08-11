@@ -1589,10 +1589,40 @@ html[dir="ltr"] .brand-center{direction:ltr;}
     <div class="acc-add-bar">
       <h2>دليل الحسابات</h2>
       <div class="acc-add-bar-actions">
+        <button class="btn secondary" onclick="openAccountImport()">⭱ استيراد Excel</button>
         <button class="btn secondary" onclick="exportAccountsCsv()">⭳ تصدير Excel</button>
         <button class="btn secondary" onclick="exportAccountsPdf()">⭳ تصدير PDF</button>
         <button class="btn small" onclick="toggleAccForm()">＋ إضافة حساب</button>
       </div>
+    </div>
+
+    <!-- بطاقة استيراد الحسابات من Excel -->
+    <div class="formcard supplier-import-card pro-import-card" id="accountImportCard" style="display:none;margin-bottom:12px">
+      <div class="pro-import-header">
+        <div>
+          <h3>استيراد الحسابات</h3>
+          <div class="pro-import-subtitle">تحميل نموذج Excel، رفع الملف، تحليل ومعاينة، ثم استيراد الحسابات الصحيحة فقط إلى دليل الحسابات.</div>
+        </div>
+        <button class="btn secondary" onclick="closeAccountImport()">إغلاق</button>
+      </div>
+      <div class="pro-import-steps">
+        <div class="pro-step active"><span>1</span>تحميل النموذج</div>
+        <div class="pro-step"><span>2</span>اختيار الملف</div>
+        <div class="pro-step"><span>3</span>تحليل ومعاينة</div>
+        <div class="pro-step"><span>4</span>استيراد وحفظ</div>
+      </div>
+      <div class="pro-import-actions">
+        <button class="btn" onclick="downloadAccountImportTemplate()">تحميل نموذج Excel</button>
+        <label class="btn secondary pro-file-btn native-file-picker" for="accountImportFile">رفع الملف / اختيار ملف
+          <input id="accountImportFile" type="file" accept=".xlsx,.xls,.csv,.txt,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv">
+        </label>
+        <button class="btn secondary" onclick="analyzeAccountImportFile()">تحليل الملف</button>
+        <button id="accountImportCommitBtn" class="btn" onclick="commitAccountImport()" disabled>استيراد الحسابات</button>
+        <input id="accountImportFileName" class="field" readonly value="لم يتم اختيار ملف" style="max-width:360px;background:#f8fbff;font-weight:800;color:#32445f;text-align:right">
+      </div>
+      <div id="accountImportMsg" style="display:none"></div>
+      <div id="accountImportSummary" style="display:none"></div>
+      <div id="accountImportPreview" style="display:none"></div>
     </div>
 
     <!-- نموذج الإضافة / التعديل — مخفي افتراضياً -->
@@ -1958,6 +1988,13 @@ html[dir="ltr"] .brand-center{direction:ltr;}
       .coa-layout{flex-direction:column}
       .coa-sidebar{width:100%;flex:1 1 auto;position:static;max-height:340px}
     }
+    /* تكبير الخط بشاشة عرض دليل الحسابات (الشجرة الجانبية + الجدول الرئيسي) */
+    #panel-tree .coa-main table.grid{font-size:15px}
+    #panel-tree .coa-main table.grid th{font-size:14px}
+    #panel-tree .coa-main table.grid td{padding:12px 14px}
+    #panel-tree .coa-sidebar-tree{font-size:14.5px}
+    #panel-tree .coa-node-label{font-size:inherit}
+    #panel-tree h2{font-size:20px}
   </style>
   <!-- ========== (تم نقل قائمة القيود أعلاه) ========== -->
 
@@ -3376,9 +3413,7 @@ table.uz-matrix input[type=checkbox]{width:16px;height:16px;cursor:pointer;accen
   });
 
   function esc(v){ return String(v??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
-  function csvCell(v){ const t=String(v??''); return /[",;
-
-]/.test(t) ? '"'+t.replace(/"/g,'""')+'"' : t; }
+  function csvCell(v){ const t=String(v??''); return /[",;\n]/.test(t) ? '"'+t.replace(/"/g,'""')+'"' : t; }
   window.downloadSupplierImportTemplate=function(){
     const rows=[supplierTemplateHeaders, sampleRow];
     if(window.XLSX){
@@ -4461,7 +4496,15 @@ table.uz-matrix input[type=checkbox]{width:16px;height:16px;cursor:pointer;accen
     const payload=supplierPayloadFromForm(); const err=document.getElementById('supErr');
     if(!payload.code){err.textContent='رقم المورد حقل إجباري'; return;} if(!payload.trade_name){err.textContent='الاسم التجاري حقل إجباري'; return;} if(payload.supplier_type==='commercial'&&!payload.vat_no){err.textContent='الرقم الضريبي إجباري في حالة المورد التجاري'; return;}
     err.textContent=''; updateSupplierWarnings();
-    try{ if(editCode){const {code,...body}=payload; await api('PUT',`/api/suppliers/${editCode}`,body);} else {await api('POST','/api/suppliers',payload);} }catch(e){}
+    try{
+      if(editCode){const {code,...body}=payload; await api('PUT',`/api/suppliers/${editCode}`,body);}
+      else {await api('POST','/api/suppliers',payload);}
+    }catch(e){
+      // لا يُكتفى بابتلاع الخطأ هنا — إن فشل الحفظ فعلياً بالخادم يجب
+      // إظهار السبب بدلاً من المتابعة وكأن المورد تم حفظه بنجاح.
+      err.textContent='تعذر حفظ المورد بالخادم: '+(e.message||'خطأ غير معروف');
+      return;
+    }
     const key=editCode||payload.code; const i=(suppliers||[]).findIndex(x=>String(x.code)===String(key));
     if(i>=0) suppliers[i]={...(suppliers[i]||{}),...payload,code:key}; else suppliers.push(payload);
     saveSuppliersCache(); if(isNewSupplier) consumeSequenceNumber('الموردين', payload.code); cancelSupEdit(); renderAll();
@@ -4615,22 +4658,213 @@ table.uz-matrix input[type=checkbox]{width:16px;height:16px;cursor:pointer;accen
   };
   window.commitSupplierImport=async function(){
     if(!v28Analysis.valid.length){ msg('لا توجد صفوف صحيحة للاستيراد. حل الأخطاء ثم أعد التحليل.', false); return; }
-    let ok=0;
+    let ok=0; const failed=[];
     for(const item of v28Analysis.valid){
       const p=item.payload; p.code=p.code || (typeof generateUniqueSequenceNumber==='function'?generateUniqueSequenceNumber('الموردين'):('SUP-'+Date.now()+'-'+ok));
-      try{ if(typeof api==='function') await api('POST','/api/suppliers',p); }catch(e){}
+      // يجب التأكد فعلياً من نجاح الحفظ بالخادم قبل اعتبار الصف "مستورد" —
+      // كان الخطأ يُبتلع بصمت هنا فتظهر رسالة نجاح رغم فشل الحفظ الفعلي
+      // بقاعدة البيانات (وهو سبب عدم ظهور الموردين المستوردين لاحقاً).
+      try{
+        await api('POST','/api/suppliers',p);
+      }catch(e){
+        failed.push({rowNo:item.rowNo, name:p.trade_name||p.name||p.code, reason:e.message||'خطأ غير معروف من الخادم'});
+        continue;
+      }
       try{ const arr=(window.suppliers||suppliers); const idx=arr.findIndex(x=>String(x.code)===String(p.code)); if(idx>=0) arr[idx]={...arr[idx],...p}; else arr.push(p); }catch(e){}
       try{ if(typeof consumeSequenceNumber==='function') consumeSequenceNumber('الموردين',p.code); }catch(e){}
       ok++;
     }
     try{ if(typeof saveSuppliersCache==='function') saveSuppliersCache(); }catch(e){}
     try{ if(typeof renderAll==='function') renderAll(); else if(typeof renderSuppliers==='function') renderSuppliers(); }catch(e){}
-    msg(`تم استيراد وحفظ ${ok} مورد بنجاح.`, true); clear();
+    if(failed.length){
+      const prev=byId('supplierImportPreview');
+      if(prev){ prev.style.display='block'; prev.innerHTML+=`<div class="scrollx"><table class="grid"><thead><tr><th>الصف</th><th>الحالة</th><th colspan="2">سبب فشل الحفظ بالخادم</th></tr></thead><tbody>${failed.map(f=>`<tr><td>${f.rowNo}</td><td>❌ فشل الحفظ</td><td colspan="2">${esc(f.name)} — ${esc(f.reason)}</td></tr>`).join('')}</tbody></table></div>`; }
+      msg(`تم حفظ ${ok} مورد بنجاح، وفشل حفظ ${failed.length} صف فعلياً بالخادم (انظر التفاصيل أسفله). لم يُحذف هؤلاء من قائمة التحليل حتى تعالج السبب وتعيد الاستيراد.`, ok>0);
+      v28Analysis.valid = v28Analysis.valid.filter(item=>failed.some(f=>f.rowNo===item.rowNo));
+      if(byId('supplierImportCommitBtn')) byId('supplierImportCommitBtn').disabled=!v28Analysis.valid.length;
+    } else {
+      msg(`تم استيراد وحفظ ${ok} مورد بنجاح فعلياً بقاعدة البيانات.`, true); clear();
+    }
   };
   document.addEventListener('change',function(e){ if(e.target && e.target.id==='supplierImportFile') window.selectSupplierImportFile(e.target.files&&e.target.files[0]); });
 })();
 </script>
 
+<script>
+/* ===== استيراد الحسابات من Excel — دليل الحسابات ===== */
+(function(){
+  let acctFile=null;
+  let acctAnalysis={valid:[],errors:[],total:0};
+  const headers=['كود الحساب','اسم الحساب (عربي)','اسم الحساب (إنجليزي)','نوع الحساب','طبيعة الحساب','الحساب الأب','الرصيد الافتتاحي'];
+  const sampleRow=['1121','النقدية بالبنك الأهلي','Cash - Al Ahli Bank','الأصول','مدين','112','0'];
+  const TYPE_MAP={'الأصول':'assets','اصول':'assets','assets':'assets','الخصوم':'liabilities','خصوم':'liabilities','liabilities':'liabilities','حقوق الملكية':'equity','equity':'equity','الإيرادات':'revenue','ايرادات':'revenue','revenue':'revenue','المصروفات':'expenses','مصروفات':'expenses','expenses':'expenses'};
+  function byId(id){return document.getElementById(id)}
+  function esc(v){return String(v??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
+  function msg(t,ok){
+    const el=byId('accountImportMsg'); if(!el){alert(t); return;}
+    el.style.display='block'; el.style.color=ok?'#166534':'#b42318'; el.style.background=ok?'#f0fdf4':'#fff1f2';
+    el.style.border=ok?'1px solid #bbf7d0':'1px solid #fecdd3'; el.style.borderRadius='12px'; el.style.padding='10px 12px';
+    el.textContent=t;
+  }
+  function clear(){
+    acctAnalysis={valid:[],errors:[],total:0};
+    const sum=byId('accountImportSummary'); if(sum){sum.style.display='none'; sum.innerHTML='';}
+    const prev=byId('accountImportPreview'); if(prev){prev.style.display='none'; prev.innerHTML='';}
+    const btn=byId('accountImportCommitBtn'); if(btn) btn.disabled=true;
+  }
+  function normalizeHeader(h){return String(h||'').replace(/\s+/g,' ').replace(/[إأآا]/g,'ا').replace(/ى/g,'ي').replace(/ة/g,'ه').trim()}
+  function get(map,names){for(const n of names){const v=map[normalizeHeader(n)]; if(v!==undefined && String(v).trim()!=='') return String(v).trim()} return ''}
+  function ensureXlsx(){
+    return new Promise((resolve,reject)=>{
+      if(window.XLSX) return resolve(window.XLSX);
+      const sc=document.createElement('script'); sc.src='https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js';
+      sc.onload=()=>window.XLSX?resolve(window.XLSX):reject(new Error('تعذر تحميل مكتبة Excel'));
+      sc.onerror=()=>reject(new Error('تعذر تحميل مكتبة Excel. تأكد من الاتصال بالإنترنت أو احفظ الملف CSV UTF-8.'));
+      document.head.appendChild(sc);
+      setTimeout(()=>{ if(!window.XLSX) reject(new Error('انتهت مهلة تحميل مكتبة Excel.')); },10000);
+    });
+  }
+  function decode(buffer){
+    const bytes=new Uint8Array(buffer||[]);
+    if(bytes[0]===0xEF&&bytes[1]===0xBB&&bytes[2]===0xBF) return new TextDecoder('utf-8').decode(bytes);
+    try{return new TextDecoder('utf-8',{fatal:true}).decode(bytes)}catch(e){try{return new TextDecoder('windows-1256').decode(bytes)}catch(_){return new TextDecoder('utf-8').decode(bytes)}}
+  }
+  function detectDelimiter(text){
+    const first=String(text||'').split(/\r?\n/).find(l=>l.trim())||''; const opts=[';',',','\t']; let best=';', max=-1;
+    opts.forEach(d=>{let c=(first.split(d).length-1); if(c>max){max=c; best=d}}); return best;
+  }
+  function parseDelimited(text){
+    const d=detectDelimiter(text); const rows=[]; let row=[],cell='',q=false; text=String(text||'').replace(/^\ufeff/,'');
+    for(let i=0;i<text.length;i++){
+      const ch=text[i], nx=text[i+1];
+      if(ch==='"'){ if(q && nx==='"'){cell+='"'; i++;} else q=!q; }
+      else if(ch===d && !q){row.push(cell.trim()); cell=''}
+      else if((ch==='\n'||ch==='\r') && !q){ if(ch==='\r'&&nx==='\n') i++; row.push(cell.trim()); cell=''; if(row.some(x=>String(x).trim())) rows.push(row); row=[]; }
+      else cell+=ch;
+    }
+    row.push(cell.trim()); if(row.some(x=>String(x).trim())) rows.push(row); return rows;
+  }
+  async function parseFile(file,buffer){
+    if(/\.xlsx$/i.test(file.name) || /\.xls$/i.test(file.name)){
+      await ensureXlsx();
+      const wb=XLSX.read(buffer,{type:'array'}); const sheet=wb.SheetNames[0];
+      if(!sheet) throw new Error('ملف Excel لا يحتوي على أي ورقة عمل.');
+      return XLSX.utils.sheet_to_json(wb.Sheets[sheet],{header:1,defval:'',raw:false}).filter(r=>Array.isArray(r)&&r.some(v=>String(v||'').trim()));
+    }
+    return parseDelimited(decode(buffer));
+  }
+  function payloadFromMap(map){
+    const typeRaw=get(map,['نوع الحساب','Account Type'])||'';
+    const account_type=TYPE_MAP[normalizeHeader(typeRaw).toLowerCase()]||TYPE_MAP[typeRaw]||'';
+    const natureRaw=get(map,['طبيعة الحساب','Nature'])||'';
+    const nature=/دائن|credit/i.test(natureRaw)?'دائن':(/مدين|debit/i.test(natureRaw)?'مدين':'');
+    return {
+      code:get(map,['كود الحساب','Account Code']),
+      name_ar:get(map,['اسم الحساب (عربي)','اسم الحساب','Account Name (Arabic)']),
+      name_en:get(map,['اسم الحساب (إنجليزي)','Account Name (English)'])||null,
+      account_type, account_type_raw:typeRaw,
+      nature, nature_raw:natureRaw,
+      parent_code:get(map,['الحساب الأب','Parent Code'])||null,
+      opening_balance:parseFloat(get(map,['الرصيد الافتتاحي','Opening Balance'])||0)||0
+    };
+  }
+  function validate(p,rowNo,batchCodes){
+    const reasons=[];
+    if(!p.code) reasons.push('كود الحساب فارغ');
+    if(!p.name_ar) reasons.push('اسم الحساب (عربي) فارغ');
+    if(!p.account_type) reasons.push(`نوع الحساب غير معروف (${p.account_type_raw||'فارغ'}) — استخدم: الأصول/الخصوم/حقوق الملكية/الإيرادات/المصروفات`);
+    if(p.nature_raw && !p.nature) reasons.push('طبيعة الحساب يجب أن تكون مدين أو دائن');
+    if(p.code && (accounts||[]).some(a=>String(a.code)===String(p.code))) reasons.push('كود الحساب مستخدم من قبل بدليل الحسابات');
+    if(p.code && batchCodes.has(String(p.code))) reasons.push('كود الحساب مكرر داخل نفس ملف الاستيراد');
+    if(p.parent_code && !(accounts||[]).some(a=>String(a.code)===String(p.parent_code)) && !batchCodes.has(String(p.parent_code))) reasons.push(`الحساب الأب (${p.parent_code}) غير موجود بدليل الحسابات ولا بنفس الملف`);
+    return {rowNo,reasons};
+  }
+  function render(){
+    const sum=byId('accountImportSummary'), prev=byId('accountImportPreview'), btn=byId('accountImportCommitBtn');
+    if(btn) btn.disabled=!acctAnalysis.valid.length;
+    if(sum){sum.style.display='grid'; sum.innerHTML=`<div class="import-stat"><b>${acctAnalysis.total}</b><span>عدد الصفوف</span></div><div class="import-stat ok"><b>${acctAnalysis.valid.length}</b><span>صفوف صحيحة</span></div><div class="import-stat bad"><b>${acctAnalysis.errors.length}</b><span>صفوف بها أخطاء</span></div>`}
+    if(prev){
+      const vr=acctAnalysis.valid.slice(0,30).map(x=>`<tr><td>${x.rowNo}</td><td>✅ صحيح</td><td>${esc(x.payload.name_ar)}</td><td>${esc(x.payload.code)}</td></tr>`).join('');
+      const er=acctAnalysis.errors.map(x=>`<tr><td>${x.rowNo}</td><td>❌ خطأ</td><td colspan="2">${esc(x.reasons.join(' - '))}</td></tr>`).join('');
+      prev.style.display='block'; prev.innerHTML=`<div class="scrollx"><table class="grid"><thead><tr><th>الصف</th><th>الحالة</th><th>اسم الحساب / سبب الخطأ</th><th>الكود</th></tr></thead><tbody>${vr}${er}</tbody></table></div>`;
+    }
+  }
+  window.openAccountImport=function(){ const card=byId('accountImportCard'); if(card){card.style.display='block'; card.scrollIntoView({behavior:'smooth',block:'start'});} };
+  window.closeAccountImport=function(){ const card=byId('accountImportCard'); if(card) card.style.display='none'; const m=byId('accountImportMsg'); if(m) m.style.display='none'; acctFile=null; const inp=byId('accountImportFile'); if(inp) inp.value=''; const fn=byId('accountImportFileName'); if(fn) fn.value='لم يتم اختيار ملف'; clear(); };
+  window.downloadAccountImportTemplate=function(){
+    const rows=[headers,sampleRow];
+    if(window.XLSX){
+      const wb=XLSX.utils.book_new(); const ws=XLSX.utils.aoa_to_sheet(rows);
+      ws['!cols']=headers.map(h=>({wch:Math.max(16,String(h).length+4)}));
+      XLSX.utils.book_append_sheet(wb,ws,'Accounts'); XLSX.writeFile(wb,'accounts_import_template.xlsx');
+      msg('تم تنزيل نموذج Excel. بعد التعديل احفظه بنفس الصيغة وارفعه من زر رفع الملف / اختيار ملف.', true);
+      return;
+    }
+    const csv=rows.map(r=>r.map(v=>{const t=String(v??''); return /[",;\n]/.test(t)?'"'+t.replace(/"/g,'""')+'"':t;}).join(';')).join('\r\n');
+    const blob=new Blob(['\ufeff'+csv],{type:'text/csv;charset=utf-8;'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='accounts_import_template.csv'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(a.href),500);
+    msg('تم تنزيل نموذج CSV لأن مكتبة Excel لم تحمل.', true);
+  };
+  window.selectAccountImportFile=function(file){
+    acctFile=file||null; clear();
+    const fn=byId('accountImportFileName'); if(fn) fn.value=file?file.name:'لم يتم اختيار ملف';
+    if(file) msg('تم اختيار الملف: '+file.name+' — اضغط زر تحليل الملف الآن.', true);
+  };
+  window.analyzeAccountImportFile=async function(){
+    const input=byId('accountImportFile');
+    const file=acctFile || (input && input.files && input.files[0]);
+    if(!file){ msg('اختر ملفًا أولًا من زر رفع الملف / اختيار ملف، ثم اضغط تحليل الملف.', false); return; }
+    acctFile=file; msg('جاري تحليل الملف، انتظر لحظة...', true);
+    try{
+      const buffer=await file.arrayBuffer();
+      const rows=await parseFile(file,buffer);
+      if(!rows || rows.length<2){ msg('الملف لا يحتوي على بيانات حسابات. تأكد من وجود صف عناوين وصف بيانات واحد على الأقل.', false); return; }
+      const head=rows[0]; const valid=[], errors=[]; const batchCodes=new Set();
+      // تمريرة أولى لتجميع أكواد الملف كاملة، حتى يصح التحقق من الحساب الأب
+      // حتى لو جاء الحساب الأب بصف لاحق في نفس الملف
+      const parsedRows=[];
+      for(let i=1;i<rows.length;i++){
+        const row=rows[i]||[]; if(!row.some(v=>String(v||'').trim())) continue;
+        const map={}; head.forEach((h,idx)=>map[normalizeHeader(h)]=row[idx]??'');
+        const p=payloadFromMap(map); parsedRows.push({rowNo:i+1,p});
+        if(p.code) batchCodes.add(String(p.code));
+      }
+      for(const {rowNo,p} of parsedRows){
+        const chk=validate(p,rowNo,batchCodes);
+        if(chk.reasons.length) errors.push(chk); else valid.push({rowNo,payload:p});
+      }
+      acctAnalysis={valid,errors,total:valid.length+errors.length};
+      render();
+      msg(`تم تحليل الملف بنجاح: ${valid.length} صف صحيح، ${errors.length} صف به أخطاء.`, errors.length===0);
+    }catch(e){ msg('تعذر تحليل الملف: '+(e.message||e), false); }
+  };
+  window.commitAccountImport=async function(){
+    if(!acctAnalysis.valid.length){ msg('لا توجد صفوف صحيحة للاستيراد. حل الأخطاء ثم أعد التحليل.', false); return; }
+    // ترتيب الحسابات بحيث يُستورد الحساب الأب قبل ابنه (حسب طول الكود)،
+    // حتى لو أُدرجا بنفس ملف الاستيراد
+    const ordered=[...acctAnalysis.valid].sort((a,b)=>String(a.payload.code).length-String(b.payload.code).length);
+    let ok=0; const failed=[];
+    for(const item of ordered){
+      const p=item.payload;
+      const body={code:p.code, name_ar:p.name_ar, name_en:p.name_en||null, account_type:p.account_type, nature:p.nature||'مدين', parent_code:p.parent_code||null, opening_balance:p.opening_balance||0};
+      try{
+        await api('POST','/api/accounts',body);
+        ok++;
+      }catch(e){
+        failed.push({rowNo:item.rowNo, name:p.name_ar, reason:e.message||'خطأ غير معروف من الخادم'});
+      }
+    }
+    try{ await loadAll(); }catch(e){}
+    if(failed.length){
+      const prev=byId('accountImportPreview');
+      if(prev){ prev.style.display='block'; prev.innerHTML+=`<div class="scrollx"><table class="grid"><thead><tr><th>الصف</th><th>الحالة</th><th colspan="2">سبب فشل الحفظ بالخادم</th></tr></thead><tbody>${failed.map(f=>`<tr><td>${f.rowNo}</td><td>❌ فشل الحفظ</td><td colspan="2">${esc(f.name)} — ${esc(f.reason)}</td></tr>`).join('')}</tbody></table></div>`; }
+      msg(`تم حفظ ${ok} حساب بنجاح، وفشل حفظ ${failed.length} صف فعلياً بالخادم (انظر التفاصيل أسفله).`, ok>0);
+    } else {
+      msg(`تم استيراد وحفظ ${ok} حساب بنجاح فعلياً بدليل الحسابات.`, true); clear();
+    }
+  };
+  document.addEventListener('change',function(e){ if(e.target && e.target.id==='accountImportFile') window.selectAccountImportFile(e.target.files&&e.target.files[0]); });
+})();
+</script>
 
 <script>
 /* ===== v30: تحسين بيانات الشراء، البحث المتعدد عن المنتج، وربط الموردين بالمنتجات ===== */

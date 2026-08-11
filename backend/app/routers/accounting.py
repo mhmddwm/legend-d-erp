@@ -502,12 +502,30 @@ def list_journal_entries(
     return query.order_by(JournalEntry.entry_date.desc(), JournalEntry.id.desc()).all()
 
 
-def _validate_and_total_lines(payload: JournalEntryIn, db: Session) -> float:
+def _validate_and_total_lines(payload: JournalEntryIn, db: Session, exclude_entry_id: int = None) -> float:
     if len(payload.lines) < 2:
         raise HTTPException(400, "يجب أن يحتوي القيد على سطرين على الأقل")
 
     if payload.supplier_code and not db.query(Supplier).filter(Supplier.code == payload.supplier_code).first():
         raise HTTPException(404, "المورد المحدد غير موجود")
+
+    # منع تكرار رقم فاتورة المورد: نفس المورد لا يجوز أن يتكرر له نفس رقم
+    # الفاتورة في أكثر من قيد (القيود الملغاة مستثناة، حتى يمكن إعادة
+    # استخدام الرقم بعد إلغاء قيد خاطئ). لا يوجد تحقق إن لم يُحدَّد مورد،
+    # لأن رقم الفاتورة وحده بدون مورد ليس له معنى فريد بذاته.
+    if payload.supplier_code and payload.invoice_number:
+        dup_query = db.query(JournalEntry).filter(
+            JournalEntry.supplier_code == payload.supplier_code,
+            JournalEntry.invoice_number == payload.invoice_number,
+            JournalEntry.status != "cancelled",
+        )
+        if exclude_entry_id is not None:
+            dup_query = dup_query.filter(JournalEntry.id != exclude_entry_id)
+        if dup_query.first():
+            raise HTTPException(
+                400,
+                f"رقم الفاتورة ({payload.invoice_number}) مسجّل مسبقاً لهذا المورد بقيد آخر — لا يمكن تكراره"
+            )
 
     total_debit = 0.0
     total_credit = 0.0
@@ -660,7 +678,7 @@ def update_journal_entry(entry_id: int, payload: JournalEntryIn, db: Session = D
     if entry.status == "cancelled":
         raise HTTPException(400, "لا يمكن تعديل قيد ملغى — أنشئ قيداً جديداً بدلاً من ذلك")
 
-    total = _validate_and_total_lines(payload, db)
+    total = _validate_and_total_lines(payload, db, exclude_entry_id=entry_id)
 
     entry.entry_date = payload.entry_date
     entry.description = payload.description
