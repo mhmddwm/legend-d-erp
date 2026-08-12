@@ -39,11 +39,12 @@ def create_item(payload: ItemIn, db: Session = Depends(get_db)):
         reorder_level=float(payload.reorder_level or 0),
     )
     db.add(item)
+    db.flush()  # نحتاج item.id فوراً لإنشاء حركة المخزون الافتتاحية قبل الـ commit النهائي
 
     if opening_qty > 0:
         move = StockMove(
             move_date=date_type.today(),
-            item_code=payload.code,
+            item_id=item.id,
             move_type="افتتاحي",
             reference="رصيد افتتاحي",
             qty=opening_qty,
@@ -72,7 +73,8 @@ def update_item(code: str, payload: ItemUpdate, db: Session = Depends(get_db)):
     if new_code and new_code != code:
         if db.query(Item).filter(Item.code == new_code).first():
             raise HTTPException(400, "كود الصنف الجديد مستخدم من قبل")
-        db.query(StockMove).filter(StockMove.item_code == code).update({"item_code": new_code})
+        # حركات المخزون (StockMove) مرتبطة بالصنف عبر item_id الثابت وليس
+        # بالكود، فتغيير الكود هنا يكفي ولا حاجة لتحديث أي حركات مخزون
         item.code = new_code
 
     db.commit()
@@ -85,7 +87,7 @@ def delete_item(code: str, db: Session = Depends(get_db)):
     item = db.query(Item).filter(Item.code == code).first()
     if not item:
         raise HTTPException(404, "الصنف غير موجود")
-    if db.query(StockMove).filter(StockMove.item_code == code).first():
+    if db.query(StockMove).filter(StockMove.item_id == item.id).first():
         raise HTTPException(400, "لا يمكن حذف صنف له حركات مخزون")
     db.delete(item)
     db.commit()
@@ -100,7 +102,10 @@ def delete_item(code: str, db: Session = Depends(get_db)):
 def list_stock_moves(item_code: str = None, db: Session = Depends(get_db)):
     q = db.query(StockMove).order_by(StockMove.move_date.desc(), StockMove.id.desc())
     if item_code:
-        q = q.filter(StockMove.item_code == item_code)
+        item = db.query(Item).filter(Item.code == item_code).first()
+        if not item:
+            return []
+        q = q.filter(StockMove.item_id == item.id)
     return q.all()
 
 

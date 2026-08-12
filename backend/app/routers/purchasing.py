@@ -97,8 +97,9 @@ def _validate_lines(lines, document_name: str) -> None:
 
 
 def _item_has_transactions(db: Session, item_code: str) -> bool:
+    item = db.query(Item).filter(Item.code == item_code).first()
     checks = (
-        db.query(StockMove.id).filter(StockMove.item_code == item_code).first(),
+        db.query(StockMove.id).filter(StockMove.item_id == item.id).first() if item else None,
         db.query(PurchaseOrderLine)
         .filter(PurchaseOrderLine.item_code == item_code)
         .first(),
@@ -199,12 +200,13 @@ def create_item(payload: ItemIn, db: Session = Depends(get_db)):
             reorder_level=reorder_level,
         )
         db.add(item)
+        db.flush()  # نحتاج item.id فوراً لإنشاء حركة المخزون الافتتاحية
 
         if opening_qty > 0:
             db.add(
                 StockMove(
                     move_date=date.today(),
-                    item_code=code,
+                    item_id=item.id,
                     move_type="افتتاحي",
                     reference="رصيد افتتاحي",
                     qty=opening_qty,
@@ -322,7 +324,8 @@ def list_stock_moves(
     )
 
     if item_code:
-        query = query.filter(StockMove.item_code == item_code)
+        item = db.query(Item).filter(Item.code == item_code).first()
+        query = query.filter(StockMove.item_id == item.id) if item else query.filter(False)
 
     return query.all()
 
@@ -688,7 +691,7 @@ def create_grn(
             db.add(
                 StockMove(
                     move_date=payload.grn_date,
-                    item_code=item.code,
+                    item_id=item.id,
                     move_type="استلام مشتريات",
                     reference=f"GRN-{grn.grn_number}",
                     qty=qty,
@@ -940,7 +943,7 @@ def create_purchase_return(
             db.add(
                 StockMove(
                     move_date=payload.rt_date,
-                    item_code=item.code,
+                    item_id=item.id,
                     move_type="مرتجع مشتريات",
                     reference=f"PRT-{purchase_return.rt_number}",
                     qty=-qty,
