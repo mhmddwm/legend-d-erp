@@ -82,6 +82,18 @@ class PurchaseInvoiceIn(BaseModel):
     supplier_inv_number: Optional[str] = None
 
 
+class DirectPurchaseInvoiceIn(BaseModel):
+    """فاتورة مشتريات مباشرة تُنشأ دون المرور يدوياً بدورة الشراء الكاملة
+    (طلب شراء ← عرض سعر ← أمر شراء ← استلام). يقوم الخادم بإنشاء إذن
+    استلام مرتبط تلقائياً في الخلفية للحفاظ على تتبع المستندات وتحديث
+    المخزون والتكلفة المتوسطة بشكل صحيح، ثم يرحّل الفاتورة عليه مباشرة."""
+    inv_date: date
+    supplier_code: str
+    supplier_inv_number: Optional[str] = None
+    reference: Optional[str] = None
+    lines: List[GRNLineIn]
+
+
 
 class PInvLineOut(BaseModel):
     item_id: int

@@ -2027,8 +2027,10 @@ function refreshSelects(){
     (suppliers||[]).map(s=>`<option value="${s.code}">${s.code} — ${s.name}</option>`).join('');
   const poSup=document.getElementById('poSupplier');
   const grnSup=document.getElementById('grnSupplier');
+  const dinvSup=document.getElementById('dinvSupplier');
   if(poSup){ const cur=poSup.value; poSup.innerHTML=options; poSup.value=cur; }
   if(grnSup){ const cur=grnSup.value; grnSup.innerHTML=options; grnSup.value=cur; }
+  if(dinvSup){ const cur=dinvSup.value; dinvSup.innerHTML=options; dinvSup.value=cur; }
 }
 
 // ============================================================
@@ -3274,6 +3276,101 @@ window.renderInvoices = renderInvoices;
 
 function printPurchaseInvoice(){ window.print(); }
 window.printPurchaseInvoice = printPurchaseInvoice;
+
+// ============================================================
+// فاتورة مشتريات مباشرة (بدون المرور بدورة الشراء الكاملة)
+// ============================================================
+let dinvLines=[];
+
+function toggleDirectInvoiceForm(forceOpen){
+  const box=document.getElementById('dinvFormBox');
+  if(!box) return;
+  const isHidden = box.style.display==='none' || !box.style.display;
+  const open = forceOpen===true ? true : (forceOpen===false ? false : isHidden);
+  box.style.display = open ? 'block' : 'none';
+  if(open){
+    if(!dinvLines.length) addDinvLine();
+    box.scrollIntoView({behavior:'smooth', block:'nearest'});
+  }
+}
+window.toggleDirectInvoiceForm = toggleDirectInvoiceForm;
+
+function addDinvLine(){
+  lineCounter++;
+  dinvLines.push({id:lineCounter, itemCode:'', qty:1, cost:0});
+  renderDinvLines();
+}
+window.addDinvLine = addDinvLine;
+
+function removeDinvLine(id){
+  dinvLines = dinvLines.filter(l=>l.id!==id);
+  renderDinvLines();
+}
+window.removeDinvLine = removeDinvLine;
+
+function onDinvLineChange(id, field, value){
+  const line=dinvLines.find(l=>l.id===id);
+  if(!line) return;
+  if(field==='qty'||field==='cost') line[field]=parseFloat(value)||0;
+  else line[field]=value;
+  if(field==='itemCode'){
+    const it=items.find(i=>i.code===value);
+    if(it) line.cost = it.default_cost || 0;
+  }
+  renderDinvLines();
+}
+window.onDinvLineChange = onDinvLineChange;
+
+function renderDinvLines(){
+  const body=document.getElementById('dinvLinesBody');
+  if(!body) return;
+  const itemOpts='<option value="">— اختر صنف —</option>'+(items||[]).map(i=>`<option value="${i.code}">${i.code} — ${i.name}</option>`).join('');
+  body.innerHTML=dinvLines.map(l=>`<tr>
+    <td><select onchange="onDinvLineChange(${l.id},'itemCode',this.value)">${itemOpts.replace(`value="${l.itemCode}"`,`value="${l.itemCode}" selected`)}</select></td>
+    <td><input type="number" step="0.01" min="0" value="${l.qty}" onchange="onDinvLineChange(${l.id},'qty',this.value)"></td>
+    <td><input type="number" step="0.01" min="0" value="${l.cost}" onchange="onDinvLineChange(${l.id},'cost',this.value)"></td>
+    <td class="linetotal">${fmt(l.qty*l.cost)}</td>
+    <td><button class="rm-line" onclick="removeDinvLine(${l.id})">✕</button></td>
+  </tr>`).join('');
+  const total=dinvLines.reduce((s,l)=>s+l.qty*l.cost,0);
+  const el=document.getElementById('dinvTotal');
+  if(el) el.textContent=fmt(total);
+}
+window.renderDinvLines = renderDinvLines;
+
+function resetDirectInvoiceForm(){
+  dinvLines=[];
+  addDinvLine();
+  const sup=document.getElementById('dinvSupplier'); if(sup) sup.value='';
+  const dt=document.getElementById('dinvDate'); if(dt) dt.value='';
+  const sn=document.getElementById('dinvSupNum'); if(sn) sn.value='';
+  const rf=document.getElementById('dinvRef'); if(rf) rf.value='';
+  const err=document.getElementById('dinvErr'); if(err) err.textContent='';
+}
+window.resetDirectInvoiceForm = resetDirectInvoiceForm;
+
+async function submitDirectPinv(){
+  const supplier_code=document.getElementById('dinvSupplier').value;
+  const inv_date=document.getElementById('dinvDate').value;
+  const supplier_inv_number=document.getElementById('dinvSupNum').value.trim()||null;
+  const reference=document.getElementById('dinvRef').value.trim()||null;
+  const err=document.getElementById('dinvErr');
+  const valid=dinvLines.filter(l=>l.itemCode && l.qty>0);
+  if(!supplier_code){err.textContent='يرجى اختيار المورد'; return;}
+  if(!inv_date){err.textContent='يرجى إدخال تاريخ الفاتورة'; return;}
+  if(!valid.length){err.textContent='يرجى إضافة صنف واحد على الأقل'; return;}
+  err.textContent='';
+  try{
+    await api('POST','/api/purchase-invoices/direct',{
+      supplier_code, inv_date, supplier_inv_number, reference,
+      lines: valid.map(l=>({item_code:l.itemCode, qty:l.qty, unit_cost:l.cost}))
+    });
+    resetDirectInvoiceForm();
+    toggleDirectInvoiceForm(false);
+    await loadAll();
+  }catch(e){ err.textContent = e.message; }
+}
+window.submitDirectPinv = submitDirectPinv;
 
 // ============================================================
 // مرتجع المشتريات

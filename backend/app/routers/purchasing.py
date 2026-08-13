@@ -28,6 +28,7 @@ from app.schemas.inventory import (
     SupplierUpdate,
 )
 from app.schemas.purchasing import (
+    DirectPurchaseInvoiceIn,
     GoodsReceiptIn,
     GoodsReceiptOut,
     PurchaseInvoiceIn,
@@ -807,6 +808,40 @@ def create_purchase_invoice(
     except Exception:
         db.rollback()
         raise
+
+
+@pinv_router.post(
+    "/direct",
+    response_model=PurchaseInvoiceOut,
+    status_code=201,
+)
+def create_direct_purchase_invoice(
+    payload: DirectPurchaseInvoiceIn,
+    db: Session = Depends(get_db),
+):
+    """
+    إنشاء فاتورة مشتريات مباشرة دون المرور يدوياً بدورة الشراء الكاملة
+    (طلب شراء ← عرض سعر ← أمر شراء ← استلام). يُنشئ الخادم إذن استلام
+    مرتبط تلقائياً في الخلفية بنفس بيانات الفاتورة، حتى يبقى المخزون
+    والتكلفة المتوسطة للأصناف والقيود المحاسبية اللاحقة صحيحة ومتتبَّعة
+    تماماً كما لو تم إدخالها يدوياً، ثم يُرحّل الفاتورة على هذا الإذن
+    فوراً في نفس العملية.
+    """
+    grn_payload = GoodsReceiptIn(
+        grn_date=payload.inv_date,
+        supplier_code=payload.supplier_code,
+        po_number=None,
+        reference=payload.reference or "فاتورة مباشرة (بدون دورة شراء)",
+        lines=payload.lines,
+    )
+    grn = create_grn(payload=grn_payload, db=db)
+
+    inv_payload = PurchaseInvoiceIn(
+        inv_date=payload.inv_date,
+        grn_number=grn.grn_number,
+        supplier_inv_number=payload.supplier_inv_number,
+    )
+    return create_purchase_invoice(payload=inv_payload, db=db)
 
 
 # =========================================================

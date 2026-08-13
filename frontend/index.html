@@ -2511,10 +2511,35 @@ html[dir="ltr"] .brand-center{direction:ltr;}
       <div class="po-actions">
         <button class="btn secondary" onclick="renderInvoices()">تحديث</button>
         <button class="btn secondary" onclick="printPurchaseInvoice()">طباعة</button>
+        <button class="btn secondary" onclick="window.toggleDirectInvoiceForm()">+ إنشاء فاتورة مباشرة</button>
         <button class="btn" onclick="submitPinv()">ترحيل الفاتورة</button>
       </div>
     </div>
     <div class="po-trace formcard rfq-timeline" id="pinvTraceBar"><span onclick="window.goPoWorkflowStage('purchase_request')">طلب شراء</span><b>←</b><span onclick="window.goPoWorkflowStage('quotation_request')">طلب عرض سعر</span><b>←</b><span onclick="window.goPoWorkflowStage('compare')">مقارنة العروض</span><b>←</b><span onclick="window.goPoWorkflowStage('purchase_orders')">أمر شراء</span><b>←</b><span onclick="window.goPoWorkflowStage('goods_receipt')">استلام</span><b>←</b><span class="active" onclick="window.goPoWorkflowStage('purchase_invoices')">فاتورة</span><b>←</b><span onclick="window.goPoWorkflowStage('supplier_payments')">الدفع</span></div>
+
+    <div id="dinvFormBox" class="formcard" style="display:none;margin-top:14px;border:1.5px dashed #93c5fd">
+      <h3>فاتورة مشتريات مباشرة (بدون دورة شراء)</h3>
+      <div class="hint">لإدخال فاتورة سريعة دون المرور بطلب شراء/عرض سعر/أمر شراء/استلام يدوياً. سيقوم النظام تلقائياً بإنشاء إذن استلام مرتبط في الخلفية حتى يبقى المخزون والتتبع المحاسبي صحيحاً، ثم يرحّل الفاتورة عليه مباشرة.</div>
+      <div class="frow two">
+        <div class="field"><label>المورد</label><select id="dinvSupplier"></select></div>
+        <div class="field"><label>تاريخ الفاتورة</label><input id="dinvDate" type="date"></div>
+      </div>
+      <div class="frow two">
+        <div class="field"><label>رقم فاتورة المورد (اختياري)</label><input id="dinvSupNum" placeholder="رقم الفاتورة الواردة"></div>
+        <div class="field"><label>مرجع (اختياري)</label><input id="dinvRef" placeholder="ملاحظة أو مرجع داخلي"></div>
+      </div>
+      <table class="line-items">
+        <thead><tr><th style="width:35%">الصنف</th><th style="width:15%">الكمية</th><th style="width:20%">تكلفة الوحدة</th><th style="width:18%">الإجمالي</th><th></th></tr></thead>
+        <tbody id="dinvLinesBody"></tbody>
+      </table>
+      <button class="add-line-btn" onclick="addDinvLine()">+ إضافة سطر</button>
+      <div class="totals-box"><div class="row grand"><span>إجمالي الفاتورة</span><span id="dinvTotal">0.00</span></div></div>
+      <div style="margin-top:14px;display:flex;gap:8px">
+        <button class="btn" onclick="submitDirectPinv()">ترحيل الفاتورة المباشرة</button>
+        <button class="btn secondary" onclick="toggleDirectInvoiceForm(false)">إلغاء</button>
+      </div>
+      <div class="err" id="dinvErr"></div>
+    </div>
 
     <div class="formcard" style="margin-top:14px">
       <h3>فاتورة مشتريات جديدة</h3>
