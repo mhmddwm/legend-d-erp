@@ -3193,6 +3193,88 @@ async function submitPinv(){
   }catch(e){err.textContent=e.message;}
 }
 
+function pinvEsc(s){ return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+// شارة حالة فاتورة المشتريات
+function getPinvBadge(inv){
+  const labels = {
+    posted:    {text:'مرحّلة', color:'#2e7d32'},
+    cancelled: {text:'ملغاة',  color:'#c62828'},
+  };
+  const st = inv && inv.status;
+  const info = labels[st] || {text: st || 'مرحّلة', color:'#2e7d32'};
+  return `<span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:12px;background:${info.color}22;color:${info.color};border:1px solid ${info.color}55;">${info.text}</span>`;
+}
+
+// تعبئة قائمة أذون الاستلام القابلة للفوترة (التي لم تُفوتر بعد) في نموذج فاتورة المشتريات
+function refreshPinvGrnOptions(){
+  const sel=document.getElementById('pinvGrn');
+  if(!sel) return;
+  const current=sel.value;
+  const invoicedGrnNumbers=new Set((invoices||[]).map(i=>i.grn_number));
+  const available=(grns||[]).filter(g=> g.invoice_status!=='invoiced' && !invoicedGrnNumbers.has(g.grn_number));
+  sel.innerHTML='<option value="">— اختر استلامًا —</option>' +
+    available.map(g=>{
+      const sup=(suppliers||[]).find(s=>s.code===g.supplier_code);
+      return `<option value="${pinvEsc(g.grn_number)}">${pinvEsc(g.grn_number)} — ${pinvEsc(sup?sup.name:g.supplier_code)} (${pinvEsc(g.grn_date||'')})</option>`;
+    }).join('');
+  if(current && available.some(g=>g.grn_number===current)){
+    sel.value=current;
+  } else if(current){
+    // كانت هناك عملية استلام مختارة وتمت فوترتها الآن أو لم تعد متاحة
+    document.getElementById('pinvLinesWrap').innerHTML='';
+    document.getElementById('pinvTotal').textContent='0.00';
+    document.getElementById('pinvSupplier').value='';
+  }
+}
+
+// عرض قائمة فواتير المشتريات المسجّلة مع البحث
+function renderInvoices(){
+  const body=document.getElementById('pinvBody');
+  if(!body) return;
+
+  refreshPinvGrnOptions();
+
+  const searchEl=document.getElementById('pinvSearch');
+  const q=(searchEl?.value||'').trim().toLowerCase();
+  let data=Array.isArray(invoices)?[...invoices]:[];
+
+  if(q){
+    data=data.filter(inv=>{
+      const sup=(suppliers||[]).find(s=>s.code===inv.supplier_code);
+      return (inv.inv_number||'').toLowerCase().includes(q) ||
+        (inv.supplier_inv_number||'').toLowerCase().includes(q) ||
+        (inv.grn_number||'').toLowerCase().includes(q) ||
+        (sup?.name||'').toLowerCase().includes(q);
+    });
+  }
+
+  data.sort((a,b)=> new Date(b.inv_date||0)-new Date(a.inv_date||0) || String(b.inv_number||'').localeCompare(String(a.inv_number||'')));
+
+  body.innerHTML=data.map(inv=>{
+    const sup=(suppliers||[]).find(s=>s.code===inv.supplier_code);
+    return `<tr>
+      <td>${pinvEsc(inv.inv_number)}</td>
+      <td>${pinvEsc(inv.inv_date)}</td>
+      <td>${pinvEsc(sup?sup.name:inv.supplier_code)}</td>
+      <td>${pinvEsc(inv.grn_number)}</td>
+      <td>${pinvEsc(inv.supplier_inv_number||'-')}</td>
+      <td>${fmt(inv.total)}</td>
+      <td>${getPinvBadge(inv)}</td>
+    </tr>`;
+  }).join('');
+
+  const empty=document.getElementById('pinvEmpty');
+  if(empty) empty.style.display = data.length ? 'none' : 'block';
+
+  const countEl=document.getElementById('pinvSavedCount');
+  if(countEl) countEl.textContent = (invoices||[]).length + ' فاتورة';
+}
+window.renderInvoices = renderInvoices;
+
+function printPurchaseInvoice(){ window.print(); }
+window.printPurchaseInvoice = printPurchaseInvoice;
+
 // ============================================================
 // مرتجع المشتريات
 // ============================================================

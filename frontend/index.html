@@ -2305,34 +2305,6 @@ html[dir="ltr"] .brand-center{direction:ltr;}
     </div></div>
   </div>
 
-  <!-- ========== PURCHASE INVOICE ========== -->
-  <div class="panel" id="panel-pinvoice">
-    <div class="formcard">
-      <h3>فاتورة مشتريات</h3>
-      <div class="frow two">
-        <div class="field"><label>الاستلام المرتبط</label>
-          <select id="pinvGrn" onchange="onPinvGrnChange()"><option value="">— اختر استلامًا —</option></select></div>
-        <div class="field"><label>المورد</label><input id="pinvSupplier" disabled placeholder="يُحدَّد تلقائيًا"></div>
-      </div>
-      <div class="frow two">
-        <div class="field"><label>تاريخ الفاتورة</label><input id="pinvDate" type="date"></div>
-        <div class="field"><label>رقم فاتورة المورد (اختياري)</label><input id="pinvSupNum" placeholder="رقم الفاتورة الواردة"></div>
-      </div>
-      <div id="pinvLinesWrap"></div>
-      <div class="totals-box"><div class="row grand"><span>إجمالي الفاتورة</span><span id="pinvTotal">0.00</span></div></div>
-      <div style="margin-top:14px"><button class="btn" onclick="submitPinv()">ترحيل الفاتورة</button></div>
-      <div class="err" id="pinvErr"></div>
-      <div class="hint">الترحيل ينشئ قيداً تلقائياً: مدين 123 المخزون / دائن 211 الموردون.</div>
-    </div>
-    <div class="gridcard"><div class="scrollx">
-      <table class="grid">
-        <thead><tr><th>الرقم</th><th>التاريخ</th><th>المورد</th><th>فاتورة المورد</th><th>الإجمالي</th><th>الحالة</th></tr></thead>
-        <tbody id="pinvBody"></tbody>
-      </table>
-      <div class="empty-msg" id="pinvEmpty" style="display:none">لا توجد فواتير مشتريات</div>
-    </div></div>
-  </div>
-
   <!-- ========== PURCHASE RETURNS ========== -->
   <div class="panel" id="panel-preturn">
     <div class="formcard">
@@ -2527,7 +2499,48 @@ html[dir="ltr"] .brand-center{direction:ltr;}
   </div>
 </div>
   <div class="panel" id="panel-goods_receipt"><div class="formcard"><h3>استلام البضاعة</h3><div class="empty-msg">جاهزة للتطوير</div></div></div>
-  <div class="panel" id="panel-purchase_invoices"><div class="formcard"><h3>فواتير الشراء</h3><div class="empty-msg">جاهزة للتطوير</div></div></div>
+  <div class="panel" id="panel-purchase_invoices">
+  <div class="po-page erp-watermark-page">
+    <div class="po-watermark">LEGEND D ERP SYS<br><span>Purchase Invoice</span></div>
+    <div class="po-hero">
+      <div>
+        <span class="mini-label">المشتريات</span>
+        <h2>فاتورة المشتريات Purchase Invoice</h2>
+        <p>ترحيل فواتير الموردين استناداً إلى أذون استلام مؤكدة، مع إنشاء القيد المحاسبي تلقائياً (مدين المخزون / دائن الموردون).</p>
+      </div>
+      <div class="po-actions">
+        <button class="btn secondary" onclick="renderInvoices()">تحديث</button>
+        <button class="btn secondary" onclick="printPurchaseInvoice()">طباعة</button>
+        <button class="btn" onclick="submitPinv()">ترحيل الفاتورة</button>
+      </div>
+    </div>
+    <div class="po-trace formcard rfq-timeline" id="pinvTraceBar"><span onclick="window.goPoWorkflowStage('purchase_request')">طلب شراء</span><b>←</b><span onclick="window.goPoWorkflowStage('quotation_request')">طلب عرض سعر</span><b>←</b><span onclick="window.goPoWorkflowStage('compare')">مقارنة العروض</span><b>←</b><span onclick="window.goPoWorkflowStage('purchase_orders')">أمر شراء</span><b>←</b><span onclick="window.goPoWorkflowStage('goods_receipt')">استلام</span><b>←</b><span class="active" onclick="window.goPoWorkflowStage('purchase_invoices')">فاتورة</span><b>←</b><span onclick="window.goPoWorkflowStage('supplier_payments')">الدفع</span></div>
+
+    <div class="formcard" style="margin-top:14px">
+      <h3>فاتورة مشتريات جديدة</h3>
+      <div class="frow two">
+        <div class="field"><label>الاستلام المرتبط</label>
+          <select id="pinvGrn" onchange="onPinvGrnChange()"><option value="">— اختر استلامًا —</option></select></div>
+        <div class="field"><label>المورد</label><input id="pinvSupplier" disabled placeholder="يُحدَّد تلقائيًا"></div>
+      </div>
+      <div class="frow two">
+        <div class="field"><label>تاريخ الفاتورة</label><input id="pinvDate" type="date"></div>
+        <div class="field"><label>رقم فاتورة المورد (اختياري)</label><input id="pinvSupNum" placeholder="رقم الفاتورة الواردة"></div>
+      </div>
+      <div id="pinvLinesWrap"></div>
+      <div class="totals-box"><div class="row grand"><span>إجمالي الفاتورة</span><span id="pinvTotal">0.00</span></div></div>
+      <div style="margin-top:14px"><button class="btn" onclick="submitPinv()">ترحيل الفاتورة</button></div>
+      <div class="err" id="pinvErr"></div>
+      <div class="hint">لا يمكن ترحيل أكثر من فاتورة واحدة لنفس إذن الاستلام. تظهر في القائمة أعلاه أذون الاستلام التي لم تُفوتر بعد فقط.</div>
+    </div>
+
+    <div class="formcard rfq-card" style="margin-top:14px">
+      <div class="rfq-saved-toolbar"><div><h3 style="margin:0">فواتير المشتريات المسجّلة</h3><small id="pinvSavedCount">0 فاتورة</small></div><input id="pinvSearch" placeholder="بحث برقم الفاتورة أو المورد أو رقم فاتورة المورد" oninput="renderInvoices()"></div>
+      <div class="scrollx"><table class="grid po-list-table"><thead><tr><th>رقم الفاتورة</th><th>التاريخ</th><th>المورد</th><th>الاستلام</th><th>فاتورة المورد</th><th>الإجمالي</th><th>الحالة</th></tr></thead><tbody id="pinvBody"></tbody></table></div>
+      <div id="pinvEmpty" class="pr-list-empty" style="display:none">لا توجد فواتير مشتريات مسجلة حتى الآن</div>
+    </div>
+  </div>
+</div>
   <div class="panel" id="panel-purchase_returns"><div class="formcard"><h3>مرتجعات المشتريات</h3><div class="empty-msg">جاهزة للتطوير</div></div></div>
   <div class="panel" id="panel-supplier_payments"><div class="formcard"><h3>مدفوعات الموردين</h3><div class="empty-msg">جاهزة للتطوير</div></div></div>
   <div class="panel" id="panel-purchase_settings"><div class="formcard"><h3>إعدادات المشتريات</h3><div class="empty-msg">جاهزة للتطوير</div></div></div>
