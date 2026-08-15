@@ -3092,7 +3092,7 @@ async function submitPO(){
 function addGrnLine(){
   lineCounter++;
   const id=lineCounter;
-  grnLines.push({id,itemCode:'',qty:1,cost:0});
+  grnLines.push({id,itemCode:'',qty:1,cost:0,unit:''});
   renderGrnLines();
 }
 
@@ -3104,11 +3104,28 @@ function removeGrnLine(id){
 function onGrnLineChange(id,field,value){
   const line=grnLines.find(l=>l.id===id);
   if(!line) return;
+  if(field==='unit'){
+    const it=items.find(i=>i.code===line.itemCode);
+    if(it){
+      const oldFactor=getItemUnitFactor(it, line.unit)||1;
+      const newFactor=getItemUnitFactor(it, value)||1;
+      if(oldFactor!==newFactor) line.cost=(line.cost/oldFactor)*newFactor;
+    }
+    line.unit=value;
+    renderGrnLines();
+    return;
+  }
   if(field==='qty'||field==='cost') line[field]=parseFloat(value)||0;
   else line[field]=value;
   if(field==='itemCode'){
     const it=items.find(i=>i.code===value);
-    if(it) line.cost=it.default_cost||0;
+    if(it){
+      const units=getTemplateUnitsForItem(it);
+      line.unit = units[0] ? units[0].value : (it.unit||'');
+      line.cost=it.default_cost||0;
+    } else {
+      line.unit='';
+    }
   }
   renderGrnLines();
 }
@@ -3119,10 +3136,13 @@ function renderGrnLines(){
   const itemOpts='<option value="">— اختر صنف —</option>'+items.map(i=>`<option value="${i.code}">${i.code} — ${i.name}</option>`).join('');
   body.innerHTML=grnLines.map(l=>{
     const it=items.find(i=>i.code===l.itemCode);
+    const unitOpts = it
+      ? getTemplateUnitsForItem(it).map(u=>`<option value="${String(u.value).replace(/"/g,'&quot;')}" ${String(u.value)===String(l.unit)?'selected':''}>${u.label}</option>`).join('')
+      : '<option value="">-</option>';
     return `<tr>
     <td><select onchange="onGrnLineChange(${l.id},'itemCode',this.value)">${itemOpts.replace(`value="${l.itemCode}"`,`value="${l.itemCode}" selected`)}</select></td>
     <td><input type="number" step="0.01" min="0" value="${l.qty}" onchange="onGrnLineChange(${l.id},'qty',this.value)"></td>
-    <td class="unitcell">${it?it.unit:'-'}</td>
+    <td><select class="unit-line-select" onchange="onGrnLineChange(${l.id},'unit',this.value)" ${it?'':'disabled'}>${unitOpts}</select></td>
     <td><input type="number" step="0.01" min="0" value="${l.cost}" onchange="onGrnLineChange(${l.id},'cost',this.value)"></td>
     <td class="linetotal">${fmt(l.qty*l.cost)}</td>
     <td><button class="rm-line" onclick="removeGrnLine(${l.id})">✕</button></td>
@@ -3140,8 +3160,9 @@ function onGrnPoChange(){
   grnLines=[];
   (po.lines||[]).forEach(l=>{
     const it=(items||[]).find(i=>i.id===l.item_id);
+    const units=it?getTemplateUnitsForItem(it):[];
     lineCounter++;
-    grnLines.push({id:lineCounter,itemCode:it?it.code:'',qty:l.qty,cost:l.unit_price});
+    grnLines.push({id:lineCounter,itemCode:it?it.code:'',qty:l.qty,cost:l.unit_price,unit:units[0]?units[0].value:(it?it.unit:'')});
   });
   renderGrnLines();
 }
@@ -3160,7 +3181,11 @@ async function submitGRN(){
   try{
     await api('POST','/api/grn',{
       grn_date,supplier_code,po_number,reference,
-      lines:valid.map(l=>({item_code:l.itemCode,qty:l.qty,unit_cost:l.cost}))
+      lines:valid.map(l=>{
+        const it=(items||[]).find(i=>i.code===l.itemCode);
+        const factor = it ? (getItemUnitFactor(it, l.unit)||1) : 1;
+        return {item_code:l.itemCode, qty:l.qty*factor, unit_cost: factor ? l.cost/factor : l.cost};
+      })
     });
     grnLines=[];addGrnLine();
     document.getElementById('grnPO').value='';
@@ -3341,7 +3366,7 @@ function renderInvoices(){
 
   body.innerHTML=data.map(inv=>{
     const sup=(suppliers||[]).find(s=>s.code===inv.supplier_code);
-    return `<tr>
+    return `<tr class="po-link" onclick="openPurchaseInvoiceView('${inv.inv_number}')">
       <td>${pinvEsc(inv.inv_number)}</td>
       <td>${pinvEsc(inv.inv_date)}</td>
       <td>${pinvEsc(sup?sup.name:inv.supplier_code)}</td>
@@ -3360,6 +3385,42 @@ function renderInvoices(){
   if(countEl) countEl.textContent = (invoices||[]).length + ' فاتورة';
 }
 window.renderInvoices = renderInvoices;
+
+// عرض تفاصيل فاتورة مشتريات محفوظة في نافذة منبثقة (بيانات من invoices المحمّلة أصلاً، دون أي طلب إضافي)
+function openPurchaseInvoiceView(invNumber){
+  const inv=(invoices||[]).find(i=>i.inv_number===invNumber);
+  if(!inv) return;
+  const sup=(suppliers||[]).find(s=>s.code===inv.supplier_code);
+  const cc=(costCenters||[]).find(c=>c.code===inv.cost_center_code);
+  const rows=(inv.lines||[]).map(l=>{
+    const it=(items||[]).find(i=>i.id===l.item_id);
+    return `<tr>
+      <td>${pinvEsc(it?it.code+' — '+it.name:l.item_id)}</td>
+      <td class="num">${fmt(l.qty)}</td>
+      <td class="num">${pinvEsc(it?it.unit:'-')}</td>
+      <td class="num">${fmt(l.unit_cost)}</td>
+      <td class="num">${fmt(l.qty*l.unit_cost)}</td>
+    </tr>`;
+  }).join('');
+  const html=`<div class="po-decision-dialog" id="pinvViewDialog"><div class="box">
+    <div class="rfq-section-head">
+      <h3>فاتورة مشتريات ${pinvEsc(inv.inv_number)}</h3>
+      <button class="btn secondary" onclick="document.getElementById('pinvViewDialog').remove()">إغلاق</button>
+    </div>
+    <div class="po-info-grid" style="margin-bottom:14px">
+      <div class="field"><label>المورد</label><input disabled value="${pinvEsc(sup?sup.name:inv.supplier_code)}"></div>
+      <div class="field"><label>تاريخ الفاتورة</label><input disabled value="${pinvEsc(inv.inv_date)}"></div>
+      <div class="field"><label>تاريخ الاستحقاق</label><input disabled value="${pinvEsc(inv.due_date||'-')}"></div>
+      <div class="field"><label>الاستلام المرتبط</label><input disabled value="${pinvEsc(inv.grn_number)}"></div>
+      <div class="field"><label>رقم فاتورة المورد</label><input disabled value="${pinvEsc(inv.supplier_inv_number||'-')}"></div>
+      <div class="field"><label>مركز التكلفة</label><input disabled value="${pinvEsc(cc?cc.code+' — '+cc.name_ar:'— بدون —')}"></div>
+    </div>
+    <table class="grid po-list-table"><thead><tr><th>الصنف</th><th>الكمية</th><th>الوحدة</th><th>التكلفة</th><th>الإجمالي</th></tr></thead><tbody>${rows}</tbody></table>
+    <div class="totals-box" style="margin-top:12px"><div class="row grand"><span>إجمالي الفاتورة</span><span>${fmt(inv.total)}</span></div></div>
+  </div></div>`;
+  document.body.insertAdjacentHTML('beforeend', html);
+}
+window.openPurchaseInvoiceView = openPurchaseInvoiceView;
 
 function printPurchaseInvoice(){ window.print(); }
 window.printPurchaseInvoice = printPurchaseInvoice;
@@ -3384,7 +3445,7 @@ window.toggleDirectInvoiceForm = toggleDirectInvoiceForm;
 
 function addDinvLine(){
   lineCounter++;
-  dinvLines.push({id:lineCounter, itemCode:'', qty:1, cost:0});
+  dinvLines.push({id:lineCounter, itemCode:'', qty:1, cost:0, unit:''});
   renderDinvLines();
 }
 window.addDinvLine = addDinvLine;
@@ -3398,11 +3459,28 @@ window.removeDinvLine = removeDinvLine;
 function onDinvLineChange(id, field, value){
   const line=dinvLines.find(l=>l.id===id);
   if(!line) return;
+  if(field==='unit'){
+    const it=items.find(i=>i.code===line.itemCode);
+    if(it){
+      const oldFactor=getItemUnitFactor(it, line.unit)||1;
+      const newFactor=getItemUnitFactor(it, value)||1;
+      if(oldFactor!==newFactor) line.cost = (line.cost/oldFactor)*newFactor;
+    }
+    line.unit=value;
+    renderDinvLines();
+    return;
+  }
   if(field==='qty'||field==='cost') line[field]=parseFloat(value)||0;
   else line[field]=value;
   if(field==='itemCode'){
     const it=items.find(i=>i.code===value);
-    if(it) line.cost = it.default_cost || 0;
+    if(it){
+      const units=getTemplateUnitsForItem(it);
+      line.unit = units[0] ? units[0].value : (it.unit||'');
+      line.cost = it.default_cost || 0;
+    } else {
+      line.unit='';
+    }
   }
   renderDinvLines();
 }
@@ -3414,10 +3492,13 @@ function renderDinvLines(){
   const itemOpts='<option value="">— اختر صنف —</option>'+(items||[]).map(i=>`<option value="${i.code}">${i.code} — ${i.name}</option>`).join('');
   body.innerHTML=dinvLines.map(l=>{
     const it=(items||[]).find(i=>i.code===l.itemCode);
+    const unitOpts = it
+      ? getTemplateUnitsForItem(it).map(u=>`<option value="${String(u.value).replace(/"/g,'&quot;')}" ${String(u.value)===String(l.unit)?'selected':''}>${u.label}</option>`).join('')
+      : '<option value="">-</option>';
     return `<tr>
     <td><select onchange="onDinvLineChange(${l.id},'itemCode',this.value)">${itemOpts.replace(`value="${l.itemCode}"`,`value="${l.itemCode}" selected`)}</select></td>
     <td><input type="number" step="0.01" min="0" value="${l.qty}" onchange="onDinvLineChange(${l.id},'qty',this.value)"></td>
-    <td class="unitcell">${it?it.unit:'-'}</td>
+    <td><select class="unit-line-select" onchange="onDinvLineChange(${l.id},'unit',this.value)" ${it?'':'disabled'}>${unitOpts}</select></td>
     <td><input type="number" step="0.01" min="0" value="${l.cost}" onchange="onDinvLineChange(${l.id},'cost',this.value)"></td>
     <td class="linetotal">${fmt(l.qty*l.cost)}</td>
     <td><button class="rm-line" onclick="removeDinvLine(${l.id})">✕</button></td>
@@ -3465,7 +3546,11 @@ async function submitDirectPinv(){
   try{
     await api('POST','/api/purchase-invoices/direct',{
       supplier_code, inv_date, supplier_inv_number, reference, payment_terms_days, cost_center_code,
-      lines: valid.map(l=>({item_code:l.itemCode, qty:l.qty, unit_cost:l.cost}))
+      lines: valid.map(l=>{
+        const it=(items||[]).find(i=>i.code===l.itemCode);
+        const factor = it ? (getItemUnitFactor(it, l.unit)||1) : 1;
+        return {item_code:l.itemCode, qty: l.qty*factor, unit_cost: factor ? l.cost/factor : l.cost};
+      })
     });
     resetDirectInvoiceForm();
     toggleDirectInvoiceForm(false);
