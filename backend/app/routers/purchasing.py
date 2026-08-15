@@ -34,6 +34,7 @@ from app.schemas.purchasing import (
     GoodsReceiptOut,
     PurchaseInvoiceIn,
     PurchaseInvoiceOut,
+    PurchaseInvoiceUpdate,
     PurchaseOrderIn,
     PurchaseOrderOut,
     PurchaseReturnIn,
@@ -899,6 +900,91 @@ def create_direct_purchase_invoice(
         cost_center_code=payload.cost_center_code,
     )
     return create_purchase_invoice(payload=inv_payload, db=db)
+
+
+@pinv_router.patch("/{inv_number}", response_model=PurchaseInvoiceOut)
+def update_purchase_invoice(
+    inv_number: str,
+    payload: PurchaseInvoiceUpdate,
+    db: Session = Depends(get_db),
+):
+    """تعديل الحقول غير المالية لفاتورة مشتريات موجودة (تاريخ الفاتورة،
+    رقم فاتورة المورد، فترة السماح، مركز التكلفة). لا يسمح هذا المسار
+    بتعديل الأصناف أو الكميات أو التكلفة حفاظاً على سلامة القيود
+    المحاسبية والتكلفة المتوسطة المرحّلة أصلاً على إذن الاستلام."""
+    invoice = (
+        db.query(PurchaseInvoice)
+        .filter(PurchaseInvoice.inv_number == inv_number)
+        .first()
+    )
+    if not invoice:
+        raise HTTPException(
+            status_code=404,
+            detail=f"فاتورة المشتريات {inv_number} غير موجودة",
+        )
+    if invoice.status == "cancelled":
+        raise HTTPException(status_code=400, detail="لا يمكن تعديل فاتورة ملغاة")
+
+    if payload.cost_center_code is not None:
+        if payload.cost_center_code:
+            cost_center = (
+                db.query(CostCenter)
+                .filter(CostCenter.code == payload.cost_center_code)
+                .first()
+            )
+            if not cost_center:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"مركز التكلفة {payload.cost_center_code} غير موجود",
+                )
+        invoice.cost_center_code = payload.cost_center_code or None
+
+    if payload.inv_date is not None:
+        invoice.inv_date = payload.inv_date
+    if payload.supplier_inv_number is not None:
+        invoice.supplier_inv_number = payload.supplier_inv_number or None
+    if payload.payment_terms_days is not None:
+        invoice.payment_terms_days = payload.payment_terms_days
+
+    db.commit()
+    db.refresh(invoice)
+    return invoice
+
+
+@pinv_router.post("/{inv_number}/cancel", response_model=PurchaseInvoiceOut)
+def cancel_purchase_invoice(
+    inv_number: str,
+    db: Session = Depends(get_db),
+):
+    """إلغاء فاتورة مشتريات (وليس حذفها نهائياً) حفاظاً على سلامة السجل
+    المحاسبي والترقيم المتسلسل. تُعلَّم الفاتورة كملغاة ويعود إذن
+    الاستلام المرتبط بها قابلاً للفوترة من جديد."""
+    invoice = (
+        db.query(PurchaseInvoice)
+        .filter(PurchaseInvoice.inv_number == inv_number)
+        .first()
+    )
+    if not invoice:
+        raise HTTPException(
+            status_code=404,
+            detail=f"فاتورة المشتريات {inv_number} غير موجودة",
+        )
+    if invoice.status == "cancelled":
+        raise HTTPException(status_code=400, detail="الفاتورة ملغاة بالفعل")
+
+    invoice.status = "cancelled"
+
+    grn = (
+        db.query(GoodsReceipt)
+        .filter(GoodsReceipt.grn_number == invoice.grn_number)
+        .first()
+    )
+    if grn:
+        grn.invoice_status = "not_invoiced"
+
+    db.commit()
+    db.refresh(invoice)
+    return invoice
 
 
 # =========================================================

@@ -136,7 +136,8 @@ def _validate_supplier_account(db: Session, account_code: str) -> str:
 
 def calc_payable(db: Session, supplier_code: str) -> float:
     invoiced = db.query(func.coalesce(func.sum(PurchaseInvoice.total), 0)).filter(
-        PurchaseInvoice.supplier_code == supplier_code
+        PurchaseInvoice.supplier_code == supplier_code,
+        PurchaseInvoice.status != "cancelled",
     ).scalar()
     returned = db.query(func.coalesce(func.sum(PurchaseReturn.total), 0)).filter(
         PurchaseReturn.supplier_code == supplier_code

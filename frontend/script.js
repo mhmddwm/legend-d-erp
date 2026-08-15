@@ -3375,6 +3375,9 @@ function renderInvoices(){
       <td>${fmt(inv.total)}</td>
       <td>${pinvEsc(inv.due_date||'-')}</td>
       <td>${getPinvBadge(inv)}</td>
+      <td style="text-align:center" onclick="event.stopPropagation()">
+        <button type="button" class="pinv-actions-btn" onclick="togglePinvActionsMenu(event,'${pinvEsc(inv.inv_number)}')" title="الإجراءات">⋮</button>
+      </td>
     </tr>`;
   }).join('');
 
@@ -3424,6 +3427,251 @@ window.openPurchaseInvoiceView = openPurchaseInvoiceView;
 
 function printPurchaseInvoice(){ window.print(); }
 window.printPurchaseInvoice = printPurchaseInvoice;
+
+// ============================================================
+// قائمة إجراءات فاتورة المشتريات (زر ⋮ في آخر كل سطر بالجدول)
+// عرض / تعديل / طباعة PDF / طباعة / نسخ / بريد / واتساب / حذف
+// ============================================================
+let pinvMenuCurrentInv = null;
+
+function ensurePinvActionsMenu(){
+  let menu = document.getElementById('pinvActionsMenu');
+  if(!menu){
+    menu = document.createElement('div');
+    menu.id = 'pinvActionsMenu';
+    menu.className = 'pinv-actions-menu';
+    menu.innerHTML = `
+      <button onclick="pinvMenuRun('view')">👁️ عرض</button>
+      <button onclick="pinvMenuRun('edit')">✏️ تعديل</button>
+      <button onclick="pinvMenuRun('pdf')">📄 طباعة PDF</button>
+      <button onclick="pinvMenuRun('print')">🖨️ طباعة</button>
+      <button onclick="pinvMenuRun('copy')">📋 نسخ</button>
+      <button onclick="pinvMenuRun('email')">✉️ إرسال عبر البريد</button>
+      <button onclick="pinvMenuRun('whatsapp')">💬 إرسال عبر واتساب</button>
+      <hr>
+      <button class="danger" onclick="pinvMenuRun('delete')">🗑️ حذف</button>
+    `;
+    document.body.appendChild(menu);
+  }
+  return menu;
+}
+
+function togglePinvActionsMenu(e, invNumber){
+  e.stopPropagation();
+  const menu = ensurePinvActionsMenu();
+  const wasOpenForThis = menu.classList.contains('show') && pinvMenuCurrentInv === invNumber;
+  closePinvActionsMenu();
+  if (wasOpenForThis) return;
+  const rect = e.currentTarget.getBoundingClientRect();
+  menu.style.top = (rect.bottom + 6) + 'px';
+  menu.style.left = Math.max(8, rect.left - 190) + 'px';
+  menu.classList.add('show');
+  pinvMenuCurrentInv = invNumber;
+}
+window.togglePinvActionsMenu = togglePinvActionsMenu;
+
+function closePinvActionsMenu(){
+  const menu = document.getElementById('pinvActionsMenu');
+  if (menu) menu.classList.remove('show');
+  pinvMenuCurrentInv = null;
+}
+document.addEventListener('click', closePinvActionsMenu);
+
+function pinvMenuRun(action){
+  const invNumber = pinvMenuCurrentInv;
+  closePinvActionsMenu();
+  if(!invNumber) return;
+  if(action==='view') openPinvPrintTab(invNumber, {autoPrint:false});
+  else if(action==='edit') openPinvEditDialog(invNumber);
+  else if(action==='pdf') openPinvPrintTab(invNumber, {autoPrint:true});
+  else if(action==='print') openPinvPrintTab(invNumber, {autoPrint:true});
+  else if(action==='copy') copyPinvToNewInvoice(invNumber);
+  else if(action==='email') sendPinvByEmail(invNumber);
+  else if(action==='whatsapp') sendPinvByWhatsapp(invNumber);
+  else if(action==='delete') deletePinvInvoice(invNumber);
+}
+window.pinvMenuRun = pinvMenuRun;
+
+// بناء صفحة HTML مطبوعة/قابلة للعرض للفاتورة (تُفتح في تبويب جديد)
+function buildPinvPrintHtml(inv){
+  const sup=(suppliers||[]).find(s=>s.code===inv.supplier_code);
+  const cc=(costCenters||[]).find(c=>c.code===inv.cost_center_code);
+  const rows=(inv.lines||[]).map((l,idx)=>{
+    const it=(items||[]).find(i=>i.id===l.item_id);
+    return `<tr>
+      <td>${idx+1}</td>
+      <td>${pinvEsc(it?it.code+' — '+it.name:l.item_id)}</td>
+      <td class="num">${fmt(l.qty)}</td>
+      <td class="num">${pinvEsc(it?it.unit:'-')}</td>
+      <td class="num">${fmt(l.unit_cost)}</td>
+      <td class="num">${fmt(l.qty*l.unit_cost)}</td>
+    </tr>`;
+  }).join('');
+  const badge = inv.status==='cancelled'
+    ? '<span class="pinv-badge cancelled">ملغاة</span>'
+    : '<span class="pinv-badge">مرحّلة</span>';
+  return `<!DOCTYPE html>
+<html lang="ar" dir="rtl"><head><meta charset="UTF-8">
+<title>فاتورة مشتريات ${pinvEsc(inv.inv_number)}</title>
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;900&display=swap" rel="stylesheet">
+<style>
+  *{box-sizing:border-box;}
+  body{font-family:'Cairo',sans-serif;margin:0;padding:32px;color:#1c2430;background:#fff;}
+  .pinv-print-head{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #1c2430;padding-bottom:16px;margin-bottom:22px;}
+  .pinv-print-head h1{font-size:21px;margin:0 0 6px;}
+  .pinv-print-head .muted{color:#666;font-size:13px;}
+  .pinv-badge{display:inline-block;padding:4px 12px;border-radius:14px;font-size:12px;font-weight:700;background:#2e7d3222;color:#2e7d32;border:1px solid #2e7d3255;}
+  .pinv-badge.cancelled{background:#c6282822;color:#c62828;border-color:#c6282855;}
+  .pinv-info-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px 24px;margin-bottom:26px;}
+  .pinv-info-grid div{font-size:13px;}
+  .pinv-info-grid label{display:block;color:#888;font-size:11px;margin-bottom:3px;}
+  table{width:100%;border-collapse:collapse;font-size:13px;}
+  th,td{border:1px solid #ddd;padding:8px 10px;text-align:right;}
+  th{background:#f4f5f7;font-weight:700;}
+  td.num,th.num{text-align:left;font-family:monospace,'Cairo';}
+  .pinv-total-row{margin-top:16px;display:flex;justify-content:flex-end;}
+  .pinv-total-row .box{min-width:260px;display:flex;justify-content:space-between;font-size:16px;font-weight:800;border-top:2px solid #1c2430;padding-top:10px;}
+  .pinv-print-toolbar{margin-bottom:20px;}
+  .pinv-print-toolbar button{font-family:'Cairo',sans-serif;padding:9px 18px;border-radius:8px;border:1px solid #1c2430;background:#1c2430;color:#fff;cursor:pointer;font-size:13px;font-weight:600;}
+  @media print{ .pinv-print-toolbar{display:none;} body{padding:0;} }
+</style></head>
+<body>
+  <div class="pinv-print-toolbar"><button onclick="window.print()">🖨️ طباعة</button></div>
+  <div class="pinv-print-head">
+    <div>
+      <h1>LEGEND D — فاتورة مشتريات</h1>
+      <div class="muted">رقم الفاتورة: ${pinvEsc(inv.inv_number)}</div>
+    </div>
+    <div>${badge}</div>
+  </div>
+  <div class="pinv-info-grid">
+    <div><label>المورد</label>${pinvEsc(sup?sup.name:inv.supplier_code)}</div>
+    <div><label>تاريخ الفاتورة</label>${pinvEsc(inv.inv_date)}</div>
+    <div><label>تاريخ الاستحقاق</label>${pinvEsc(inv.due_date||'-')}</div>
+    <div><label>الاستلام المرتبط</label>${pinvEsc(inv.grn_number)}</div>
+    <div><label>رقم فاتورة المورد</label>${pinvEsc(inv.supplier_inv_number||'-')}</div>
+    <div><label>مركز التكلفة</label>${pinvEsc(cc?cc.code+' — '+cc.name_ar:'—')}</div>
+  </div>
+  <table><thead><tr><th>#</th><th>الصنف</th><th class="num">الكمية</th><th class="num">الوحدة</th><th class="num">التكلفة</th><th class="num">الإجمالي</th></tr></thead>
+  <tbody>${rows}</tbody></table>
+  <div class="pinv-total-row"><div class="box"><span>الإجمالي الكلي</span><span>${fmt(inv.total)}</span></div></div>
+</body></html>`;
+}
+
+// عرض/طباعة الفاتورة في تبويب جديد (عرض = بدون طباعة تلقائية، طباعة/PDF = طباعة تلقائية)
+function openPinvPrintTab(invNumber, opts){
+  const inv=(invoices||[]).find(i=>i.inv_number===invNumber);
+  if(!inv){ alert('تعذر العثور على الفاتورة'); return; }
+  const w=window.open('', '_blank');
+  if(!w){ alert('يرجى السماح بفتح النوافذ المنبثقة لعرض الفاتورة'); return; }
+  w.document.open();
+  w.document.write(buildPinvPrintHtml(inv));
+  w.document.close();
+  if(opts && opts.autoPrint){
+    w.onload=()=>{ setTimeout(()=>{ try{ w.print(); }catch(err){} }, 300); };
+  }
+}
+window.openPinvPrintTab = openPinvPrintTab;
+
+// تعديل بيانات الفاتورة (الحقول غير المالية فقط، حفاظاً على سلامة القيود المرحّلة)
+function openPinvEditDialog(invNumber){
+  const inv=(invoices||[]).find(i=>i.inv_number===invNumber);
+  if(!inv) return;
+  if(inv.status==='cancelled'){ alert('لا يمكن تعديل فاتورة ملغاة'); return; }
+  const ccOptions = '<option value="">— بدون —</option>' + (costCenters||[]).map(c=>
+    `<option value="${pinvEsc(c.code)}" ${c.code===inv.cost_center_code?'selected':''}>${pinvEsc(c.code)} — ${pinvEsc(c.name_ar)}</option>`
+  ).join('');
+  const html=`<div class="po-decision-dialog" id="pinvEditDialog"><div class="box">
+    <div class="rfq-section-head">
+      <h3>تعديل فاتورة ${pinvEsc(inv.inv_number)}</h3>
+      <button class="btn secondary" onclick="document.getElementById('pinvEditDialog').remove()">إغلاق</button>
+    </div>
+    <div class="po-info-grid" style="margin-bottom:14px">
+      <div class="field"><label>تاريخ الفاتورة</label><input type="date" id="pinvEditDate" value="${pinvEsc(inv.inv_date)}"></div>
+      <div class="field"><label>رقم فاتورة المورد</label><input id="pinvEditSupNum" value="${pinvEsc(inv.supplier_inv_number||'')}"></div>
+      <div class="field"><label>فترة السماح (أيام)</label><input type="number" min="0" id="pinvEditTerms" value="${inv.payment_terms_days||0}"></div>
+      <div class="field"><label>مركز التكلفة</label><select id="pinvEditCostCenter">${ccOptions}</select></div>
+    </div>
+    <div id="pinvEditErr" style="color:#c62828;font-size:13px;margin-bottom:10px"></div>
+    <div style="display:flex;gap:10px;justify-content:flex-end">
+      <button class="btn secondary" onclick="document.getElementById('pinvEditDialog').remove()">إلغاء</button>
+      <button class="btn" onclick="submitPinvEdit('${pinvEsc(inv.inv_number)}')">حفظ التعديلات</button>
+    </div>
+  </div></div>`;
+  document.body.insertAdjacentHTML('beforeend', html);
+}
+window.openPinvEditDialog = openPinvEditDialog;
+
+async function submitPinvEdit(invNumber){
+  const err=document.getElementById('pinvEditErr');
+  const inv_date=document.getElementById('pinvEditDate').value;
+  const supplier_inv_number=document.getElementById('pinvEditSupNum').value.trim()||null;
+  const payment_terms_days=parseInt(document.getElementById('pinvEditTerms').value)||0;
+  const cost_center_code=document.getElementById('pinvEditCostCenter').value||null;
+  if(!inv_date){ if(err) err.textContent='يرجى إدخال تاريخ الفاتورة'; return; }
+  try{
+    await api('PATCH', `/api/purchase-invoices/${encodeURIComponent(invNumber)}`, {
+      inv_date, supplier_inv_number, payment_terms_days, cost_center_code
+    });
+    document.getElementById('pinvEditDialog')?.remove();
+    await loadAll();
+  }catch(e){ if(err) err.textContent = e.message; }
+}
+window.submitPinvEdit = submitPinvEdit;
+
+// نسخ الفاتورة: تعبئة نموذج الفاتورة المباشرة بنفس البيانات والأصناف كمسودة جاهزة للحفظ
+function copyPinvToNewInvoice(invNumber){
+  const inv=(invoices||[]).find(i=>i.inv_number===invNumber);
+  if(!inv) return;
+  dinvLines = (inv.lines||[]).map(l=>{
+    lineCounter++;
+    const it=(items||[]).find(i=>i.id===l.item_id);
+    return { id:lineCounter, itemCode: it?it.code:'', qty:Number(l.qty)||0, cost:Number(l.unit_cost)||0, unit: it?it.unit:'' };
+  });
+  if(!dinvLines.length) addDinvLine();
+  toggleDirectInvoiceForm(true);
+  const supEl=document.getElementById('dinvSupplier'); if(supEl) supEl.value=inv.supplier_code||'';
+  const dateEl=document.getElementById('dinvDate'); if(dateEl) dateEl.value=new Date().toISOString().slice(0,10);
+  const numEl=document.getElementById('dinvSupNum'); if(numEl) numEl.value='';
+  const refEl=document.getElementById('dinvRef'); if(refEl) refEl.value=`نسخة من الفاتورة ${inv.inv_number}`;
+  const termsEl=document.getElementById('dinvTerms'); if(termsEl) termsEl.value=inv.payment_terms_days||0;
+  const ccEl=document.getElementById('dinvCostCenter'); if(ccEl) ccEl.value=inv.cost_center_code||'';
+  renderDinvLines();
+}
+window.copyPinvToNewInvoice = copyPinvToNewInvoice;
+
+// نص موجز للفاتورة يُستخدم في مشاركة البريد/واتساب
+function buildPinvShareText(inv){
+  const sup=(suppliers||[]).find(s=>s.code===inv.supplier_code);
+  return `فاتورة مشتريات رقم ${inv.inv_number}\nالمورد: ${sup?sup.name:inv.supplier_code}\nالتاريخ: ${inv.inv_date}\nالإجمالي: ${fmt(inv.total)}\nتاريخ الاستحقاق: ${inv.due_date||'-'}`;
+}
+
+function sendPinvByEmail(invNumber){
+  const inv=(invoices||[]).find(i=>i.inv_number===invNumber);
+  if(!inv) return;
+  const subject=encodeURIComponent(`فاتورة مشتريات ${inv.inv_number}`);
+  const body=encodeURIComponent(buildPinvShareText(inv));
+  window.open(`mailto:?subject=${subject}&body=${body}`, '_blank');
+}
+window.sendPinvByEmail = sendPinvByEmail;
+
+function sendPinvByWhatsapp(invNumber){
+  const inv=(invoices||[]).find(i=>i.inv_number===invNumber);
+  if(!inv) return;
+  const text=encodeURIComponent(buildPinvShareText(inv));
+  window.open(`https://wa.me/?text=${text}`, '_blank');
+}
+window.sendPinvByWhatsapp = sendPinvByWhatsapp;
+
+// حذف الفاتورة: إلغاء (وليس حذفاً نهائياً) حفاظاً على سلامة الحسابات، مع إعادة فتح إذن الاستلام للفوترة من جديد
+async function deletePinvInvoice(invNumber){
+  if(!confirm(`سيتم إلغاء الفاتورة ${invNumber} (لن تُحذف نهائياً بل تُعلَّم كملغاة، وسيعود إذن الاستلام المرتبط قابلاً للفوترة من جديد). هل تريد المتابعة؟`)) return;
+  try{
+    await api('POST', `/api/purchase-invoices/${encodeURIComponent(invNumber)}/cancel`, {});
+    await loadAll();
+  }catch(e){ alert(e.message); }
+}
+window.deletePinvInvoice = deletePinvInvoice;
 
 // ============================================================
 // فاتورة مشتريات مباشرة (بدون المرور بدورة الشراء الكاملة)

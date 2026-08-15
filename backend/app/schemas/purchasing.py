@@ -99,6 +99,15 @@ class DirectPurchaseInvoiceIn(BaseModel):
 
 
 
+class PurchaseInvoiceUpdate(BaseModel):
+    """تعديل فاتورة مشتريات مرحّلة — يقتصر على الحقول غير المالية حفاظاً
+    على سلامة القيود المحاسبية والتكلفة المتوسطة المرتبطة بالفاتورة."""
+    inv_date: Optional[date] = None
+    supplier_inv_number: Optional[str] = None
+    payment_terms_days: Optional[int] = None
+    cost_center_code: Optional[str] = None
+
+
 class PInvLineOut(BaseModel):
     item_id: int
     qty: float

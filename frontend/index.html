@@ -692,6 +692,29 @@ table.grid td.muted{color:var(--muted);font-size:12px;}
 }
 .acc-actions-menu button:hover{background:var(--accent-light);color:var(--accent);}
 .acc-actions-menu button.danger:hover{background:var(--coral-bg);color:var(--coral);}.acc-add-bar{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;flex-wrap:wrap;gap:10px;}
+
+.pinv-actions-btn{
+  width:32px;height:32px;border:1px solid var(--line);border-radius:8px;
+  background:var(--bg-card);cursor:pointer;display:inline-flex;
+  align-items:center;justify-content:center;color:var(--muted);font-size:17px;font-weight:900;
+  transition:background .15s,border-color .15s,color .15s,box-shadow .15s;
+}
+.pinv-actions-btn:hover{background:var(--accent-light);border-color:var(--accent);color:var(--accent);box-shadow:0 2px 8px rgba(21,101,192,.18);}
+.pinv-actions-menu{
+  position:fixed;min-width:210px;background:var(--bg-card);
+  border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow-lg);
+  padding:6px;z-index:9999;display:none;
+}
+.pinv-actions-menu.show{display:block;}
+.pinv-actions-menu button{
+  width:100%;text-align:right;padding:9px 12px;border:none;background:none;
+  border-radius:7px;font-size:13px;color:var(--ink);cursor:pointer;
+  display:flex;align-items:center;gap:8px;font-family:inherit;transition:background .12s;
+}
+.pinv-actions-menu button:hover{background:var(--accent-light);color:var(--accent);}
+.pinv-actions-menu button.danger{color:var(--coral);}
+.pinv-actions-menu button.danger:hover{background:var(--coral-bg);color:var(--coral);}
+.pinv-actions-menu hr{border:none;border-top:1px solid var(--line);margin:4px 2px;}
 .jvat-toggle-wrap{display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap}
 .jvat-toggle-btn.jvat-active{background:var(--accent);color:#fff;border-color:var(--accent)}
 .acc-add-bar-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
@@ -2594,7 +2617,7 @@ html[dir="ltr"] .brand-center{direction:ltr;}
 
     <div class="formcard rfq-card" style="margin-top:14px">
       <div class="rfq-saved-toolbar"><div><h3 style="margin:0">فواتير المشتريات المسجّلة</h3><small id="pinvSavedCount">0 فاتورة</small></div><input id="pinvSearch" placeholder="بحث برقم الفاتورة أو المورد أو رقم فاتورة المورد" oninput="renderInvoices()"></div>
-      <div class="scrollx"><table class="grid po-list-table"><thead><tr><th>رقم الفاتورة</th><th>التاريخ</th><th>المورد</th><th>الاستلام</th><th>فاتورة المورد</th><th>الإجمالي</th><th>تاريخ الاستحقاق</th><th>الحالة</th></tr></thead><tbody id="pinvBody"></tbody></table></div>
+      <div class="scrollx"><table class="grid po-list-table"><thead><tr><th>رقم الفاتورة</th><th>التاريخ</th><th>المورد</th><th>الاستلام</th><th>فاتورة المورد</th><th>الإجمالي</th><th>تاريخ الاستحقاق</th><th>الحالة</th><th style="text-align:center">الإجراءات</th></tr></thead><tbody id="pinvBody"></tbody></table></div>
       <div id="pinvEmpty" class="pr-list-empty" style="display:none">لا توجد فواتير مشتريات مسجلة حتى الآن</div>
     </div>
   </div>
