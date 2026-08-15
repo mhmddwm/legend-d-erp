@@ -123,19 +123,21 @@ def _validate_lines(lines, document_name: str) -> None:
 
 def _item_has_transactions(db: Session, item_code: str) -> bool:
     item = db.query(Item).filter(Item.code == item_code).first()
+    if not item:
+        return False
     checks = (
-        db.query(StockMove.id).filter(StockMove.item_id == item.id).first() if item else None,
+        db.query(StockMove.id).filter(StockMove.item_id == item.id).first(),
         db.query(PurchaseOrderLine)
-        .filter(PurchaseOrderLine.item_code == item_code)
+        .filter(PurchaseOrderLine.item_id == item.id)
         .first(),
         db.query(GoodsReceiptLine)
-        .filter(GoodsReceiptLine.item_code == item_code)
+        .filter(GoodsReceiptLine.item_id == item.id)
         .first(),
         db.query(PurchaseInvoiceLine)
-        .filter(PurchaseInvoiceLine.item_code == item_code)
+        .filter(PurchaseInvoiceLine.item_id == item.id)
         .first(),
         db.query(PurchaseReturnLine)
-        .filter(PurchaseReturnLine.item_code == item_code)
+        .filter(PurchaseReturnLine.item_id == item.id)
         .first(),
     )
     return any(checks)
@@ -552,7 +554,7 @@ def create_purchase_order(
 
         qty = _validate_positive(line.qty, "الكمية")
         unit_price = _validate_non_negative(line.unit_price, "سعر الوحدة")
-        prepared_lines.append((item.code, qty, unit_price))
+        prepared_lines.append((item.id, qty, unit_price))
 
     try:
         purchase_order = PurchaseOrder(
@@ -566,11 +568,11 @@ def create_purchase_order(
         db.flush()
 
         total = 0.0
-        for item_code, qty, unit_price in prepared_lines:
+        for item_id, qty, unit_price in prepared_lines:
             db.add(
                 PurchaseOrderLine(
                     po_number=purchase_order.po_number,
-                    item_code=item_code,
+                    item_id=item_id,
                     qty=qty,
                     unit_price=unit_price,
                 )
@@ -669,7 +671,7 @@ def create_grn(
                 db.query(PurchaseOrderLine)
                 .filter(
                     PurchaseOrderLine.po_number == purchase_order.po_number,
-                    PurchaseOrderLine.item_code == item.code,
+                    PurchaseOrderLine.item_id == item.id,
                 )
                 .first()
             )
@@ -709,7 +711,7 @@ def create_grn(
             db.add(
                 GoodsReceiptLine(
                     grn_number=grn.grn_number,
-                    item_code=item.code,
+                    item_id=item.id,
                     qty=qty,
                     unit_cost=unit_cost,
                 )
@@ -841,7 +843,7 @@ def create_purchase_invoice(
             db.add(
                 PurchaseInvoiceLine(
                     inv_number=invoice.inv_number,
-                    item_code=line.item_code,
+                    item_id=line.item_id,
                     qty=qty,
                     unit_cost=unit_cost,
                 )
@@ -937,11 +939,25 @@ def create_purchase_return(
     for line in payload.lines:
         qty = _validate_positive(line.qty, "كمية المرتجع")
 
+        item = (
+            db.query(Item)
+            .filter(
+                Item.code == line.item_code,
+                Item.is_active.is_(True),
+            )
+            .first()
+        )
+        if not item:
+            raise HTTPException(
+                status_code=404,
+                detail=f"الصنف {line.item_code} غير موجود أو غير نشط",
+            )
+
         invoice_line = (
             db.query(PurchaseInvoiceLine)
             .filter(
                 PurchaseInvoiceLine.inv_number == invoice.inv_number,
-                PurchaseInvoiceLine.item_code == line.item_code,
+                PurchaseInvoiceLine.item_id == item.id,
             )
             .first()
         )
@@ -959,7 +975,7 @@ def create_purchase_return(
             )
             .filter(
                 PurchaseReturn.inv_number == invoice.inv_number,
-                PurchaseReturnLine.item_code == line.item_code,
+                PurchaseReturnLine.item_id == item.id,
             )
             .scalar()
         )
@@ -974,20 +990,6 @@ def create_purchase_return(
                     f"كمية مرتجع الصنف {line.item_code} أكبر من الكمية "
                     f"المتبقية القابلة للإرجاع ({remaining_returnable})"
                 ),
-            )
-
-        item = (
-            db.query(Item)
-            .filter(
-                Item.code == line.item_code,
-                Item.is_active.is_(True),
-            )
-            .first()
-        )
-        if not item:
-            raise HTTPException(
-                status_code=404,
-                detail=f"الصنف {line.item_code} غير موجود أو غير نشط",
             )
 
         current_qty = _to_float(item.qty)
@@ -1021,7 +1023,7 @@ def create_purchase_return(
             db.add(
                 PurchaseReturnLine(
                     rt_number=purchase_return.rt_number,
-                    item_code=item.code,
+                    item_id=item.id,
                     qty=qty,
                     unit_cost=unit_cost,
                 )

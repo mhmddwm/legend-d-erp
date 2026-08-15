@@ -1386,15 +1386,18 @@ function renderStock(){
   if(!body) return;
   if(!stockMoves.length){body.innerHTML=''; if(empty) empty.style.display='block'; return;}
   if(empty) empty.style.display='none';
-  body.innerHTML=stockMoves.map(m=>`<tr>
+  body.innerHTML=stockMoves.map(m=>{
+    const it=(items||[]).find(i=>i.id===m.item_id);
+    return `<tr>
     <td>${m.move_date||''}</td>
-    <td>${m.item_code||''}</td>
+    <td>${it?it.code+' — '+it.name:m.item_id||''}</td>
     <td>${m.move_type||''}</td>
     <td>${m.reference||'-'}</td>
     <td class="num ${m.qty>0?'stock-pos':'stock-neg'}">${fmt(m.qty)}</td>
     <td class="num">${fmt(m.unit_cost)}</td>
     <td class="num">${fmt(m.balance_after)}</td>
-  </tr>`).join('');
+  </tr>`;
+  }).join('');
 }
 
 // ============================================================
@@ -3114,13 +3117,17 @@ function renderGrnLines(){
   const body=document.getElementById('grnLinesBody');
   if(!body) return;
   const itemOpts='<option value="">— اختر صنف —</option>'+items.map(i=>`<option value="${i.code}">${i.code} — ${i.name}</option>`).join('');
-  body.innerHTML=grnLines.map(l=>`<tr>
+  body.innerHTML=grnLines.map(l=>{
+    const it=items.find(i=>i.code===l.itemCode);
+    return `<tr>
     <td><select onchange="onGrnLineChange(${l.id},'itemCode',this.value)">${itemOpts.replace(`value="${l.itemCode}"`,`value="${l.itemCode}" selected`)}</select></td>
     <td><input type="number" step="0.01" min="0" value="${l.qty}" onchange="onGrnLineChange(${l.id},'qty',this.value)"></td>
+    <td class="unitcell">${it?it.unit:'-'}</td>
     <td><input type="number" step="0.01" min="0" value="${l.cost}" onchange="onGrnLineChange(${l.id},'cost',this.value)"></td>
     <td class="linetotal">${fmt(l.qty*l.cost)}</td>
     <td><button class="rm-line" onclick="removeGrnLine(${l.id})">✕</button></td>
-  </tr>`).join('');
+  </tr>`;
+  }).join('');
   const total=grnLines.reduce((s,l)=>s+l.qty*l.cost,0);
   const el=document.getElementById('grnTotal');
   if(el) el.textContent=fmt(total);
@@ -3131,7 +3138,11 @@ function onGrnPoChange(){
   if(!po) return;
   document.getElementById('grnSupplier').value=po.supplier_code;
   grnLines=[];
-  (po.lines||[]).forEach(l=>{lineCounter++;grnLines.push({id:lineCounter,itemCode:l.item_code,qty:l.qty,cost:l.unit_price});});
+  (po.lines||[]).forEach(l=>{
+    const it=(items||[]).find(i=>i.id===l.item_id);
+    lineCounter++;
+    grnLines.push({id:lineCounter,itemCode:it?it.code:'',qty:l.qty,cost:l.unit_price});
+  });
   renderGrnLines();
 }
 
@@ -3240,10 +3251,10 @@ function onPinvGrnChange(){
   const termsEl=document.getElementById('pinvTerms');
   if(termsEl) termsEl.value = sup ? (sup.payment_terms_days||0) : 0;
   const rows=(grn.lines||[]).map(l=>{
-    const it=items.find(i=>i.code===l.item_code);
-    return `<tr><td>${it?it.code+' — '+it.name:l.item_code}</td><td class="num">${fmt(l.qty)}</td><td class="num">${fmt(l.unit_cost)}</td><td class="num">${fmt(l.qty*l.unit_cost)}</td></tr>`;
+    const it=items.find(i=>i.id===l.item_id);
+    return `<tr><td>${it?it.code+' — '+it.name:l.item_id}</td><td class="num">${fmt(l.qty)}</td><td class="num">${it?it.unit:'-'}</td><td class="num">${fmt(l.unit_cost)}</td><td class="num">${fmt(l.qty*l.unit_cost)}</td></tr>`;
   }).join('');
-  wrap.innerHTML=`<table class="line-items"><thead><tr><th>الصنف</th><th>الكمية</th><th>التكلفة</th><th>الإجمالي</th></tr></thead><tbody>${rows}</tbody></table>`;
+  wrap.innerHTML=`<table class="line-items"><thead><tr><th>الصنف</th><th>الكمية</th><th>الوحدة</th><th>التكلفة</th><th>الإجمالي</th></tr></thead><tbody>${rows}</tbody></table>`;
   document.getElementById('pinvTotal').textContent=fmt(grn.total);
 }
 
@@ -3401,13 +3412,17 @@ function renderDinvLines(){
   const body=document.getElementById('dinvLinesBody');
   if(!body) return;
   const itemOpts='<option value="">— اختر صنف —</option>'+(items||[]).map(i=>`<option value="${i.code}">${i.code} — ${i.name}</option>`).join('');
-  body.innerHTML=dinvLines.map(l=>`<tr>
+  body.innerHTML=dinvLines.map(l=>{
+    const it=(items||[]).find(i=>i.code===l.itemCode);
+    return `<tr>
     <td><select onchange="onDinvLineChange(${l.id},'itemCode',this.value)">${itemOpts.replace(`value="${l.itemCode}"`,`value="${l.itemCode}" selected`)}</select></td>
     <td><input type="number" step="0.01" min="0" value="${l.qty}" onchange="onDinvLineChange(${l.id},'qty',this.value)"></td>
+    <td class="unitcell">${it?it.unit:'-'}</td>
     <td><input type="number" step="0.01" min="0" value="${l.cost}" onchange="onDinvLineChange(${l.id},'cost',this.value)"></td>
     <td class="linetotal">${fmt(l.qty*l.cost)}</td>
     <td><button class="rm-line" onclick="removeDinvLine(${l.id})">✕</button></td>
-  </tr>`).join('');
+  </tr>`;
+  }).join('');
   const total=dinvLines.reduce((s,l)=>s+l.qty*l.cost,0);
   const el=document.getElementById('dinvTotal');
   if(el) el.textContent=fmt(total);
@@ -3466,7 +3481,10 @@ function onPrtInvChange(){
   const inv=invoices.find(i=>i.inv_number===document.getElementById('prtInv').value);
   const wrap=document.getElementById('prtLinesWrap');
   if(!inv){wrap.innerHTML=''; prtCurrentLines=[]; document.getElementById('prtTotal').textContent='0.00'; return;}
-  prtCurrentLines=(inv.lines||[]).map(l=>({item_code:l.item_code,unit_cost:l.unit_cost,max_qty:l.qty,qty:0}));
+  prtCurrentLines=(inv.lines||[]).map(l=>{
+    const it=(items||[]).find(i=>i.id===l.item_id);
+    return {item_code:it?it.code:'',unit_cost:l.unit_cost,max_qty:l.qty,qty:0};
+  });
   renderPrtLines();
 }
 
@@ -3938,7 +3956,8 @@ document.addEventListener('click', function(e){
 });
 
 function deleteItemSafe(code){
- const hasMove=(stockMoves||[]).some(m=>m.item_code===code);
+ const it=(items||[]).find(i=>i.code===code);
+ const hasMove=(stockMoves||[]).some(m=>it && m.item_id===it.id);
  if(hasMove){alert('لا يمكن حذف منتج عليه حركات مخزنية');return;}
  deleteItem(code);
 }
