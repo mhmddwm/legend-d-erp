@@ -2624,7 +2624,266 @@ html[dir="ltr"] .brand-center{direction:ltr;}
 </div>
   <div class="panel" id="panel-purchase_returns"><div class="formcard"><h3>مرتجعات المشتريات</h3><div class="empty-msg">جاهزة للتطوير</div></div></div>
   <div class="panel" id="panel-supplier_payments"><div class="formcard"><h3>مدفوعات الموردين</h3><div class="empty-msg">جاهزة للتطوير</div></div></div>
-  <div class="panel" id="panel-purchase_settings"><div class="formcard"><h3>إعدادات المشتريات</h3><div class="empty-msg">جاهزة للتطوير</div></div></div>
+  <div class="panel" id="panel-purchase_settings">
+  <div class="pset-page erp-watermark-page">
+    <div class="tax-watermark">LEGEND D ERP SYS<br><span>إعدادات المشتريات</span></div>
+    <div class="formcard pset-card">
+      <div class="tax-page-head">
+        <div>
+          <span class="tax-mini-label">المشتريات / الإعدادات</span>
+          <h2>إعدادات المشتريات</h2>
+          <p>تحكّم كامل في سياسات دورة الشراء: الموافقات، المطابقة الثلاثية، الفوترة والضرائب، التقييم، والموردين.</p>
+        </div>
+        <div class="tax-head-actions">
+          <button type="button" class="btn secondary" onclick="resetPurchaseSettingsToDefault()">استعادة الافتراضي</button>
+          <button type="button" class="btn primary" onclick="savePurchaseSettings()">💾 حفظ الإعدادات</button>
+        </div>
+      </div>
+
+      <div class="pset-body">
+        <div class="pset-nav">
+          <button class="pset-nav-btn active" data-pset="general" onclick="showPsetSection('general')">⚙️ عام</button>
+          <button class="pset-nav-btn" data-pset="approvals" onclick="showPsetSection('approvals')">✅ الموافقات وسير العمل</button>
+          <button class="pset-nav-btn" data-pset="matching" onclick="showPsetSection('matching')">🔗 الاستلام والمطابقة</button>
+          <button class="pset-nav-btn" data-pset="tax" onclick="showPsetSection('tax')">🧾 الفوترة والضرائب</button>
+          <button class="pset-nav-btn" data-pset="costing" onclick="showPsetSection('costing')">📦 التكلفة والتقييم</button>
+          <button class="pset-nav-btn" data-pset="vendors" onclick="showPsetSection('vendors')">🤝 الموردون</button>
+          <button class="pset-nav-btn" data-pset="notifications" onclick="showPsetSection('notifications')">🔔 الإشعارات</button>
+        </div>
+
+        <div class="pset-content">
+
+          <!-- ===== عام ===== -->
+          <div class="pset-section active" data-pset="general">
+            <div class="pset-section-head"><h3>الإعدادات العامة</h3><p>القيم الافتراضية التي تُستخدم تلقائياً عند إنشاء مستندات الشراء الجديدة.</p></div>
+            <div class="pset-group">
+              <div class="pset-row">
+                <div class="pset-row-text"><label>الفرع الافتراضي للمشتريات</label><small>يُستخدم كفرع افتراضي عند إنشاء طلبات وأوامر الشراء.</small></div>
+                <div class="pset-row-control"><select id="psetDefaultBranch"></select></div>
+              </div>
+              <div class="pset-row">
+                <div class="pset-row-text"><label>مركز التكلفة الافتراضي</label><small>يُعبَّأ تلقائياً في نماذج الفواتير المباشرة والاستلام عند عدم التحديد.</small></div>
+                <div class="pset-row-control"><select id="psetDefaultCostCenter"></select></div>
+              </div>
+              <div class="pset-row">
+                <div class="pset-row-text"><label>شروط الدفع الافتراضية للموردين الجدد</label><small>عدد أيام السماح الافتراضي عند عدم وجود شرط دفع خاص بالمورد.</small></div>
+                <div class="pset-row-control pset-suffix"><input type="number" id="psetDefaultPaymentTerms" min="0"><span>يوم</span></div>
+              </div>
+              <div class="pset-row">
+                <div class="pset-row-text"><label>العملة الافتراضية للمشتريات</label><small>تُستخدم في المستندات الجديدة ما لم يُحدَّد غير ذلك.</small></div>
+                <div class="pset-row-control">
+                  <select id="psetDefaultCurrency">
+                    <option value="SAR">ريال سعودي (SAR)</option>
+                    <option value="USD">دولار أمريكي (USD)</option>
+                    <option value="EUR">يورو (EUR)</option>
+                    <option value="AED">درهم إماراتي (AED)</option>
+                  </select>
+                </div>
+              </div>
+              <div class="pset-row">
+                <div class="pset-row-text"><label>تفعيل الفاتورة المباشرة</label><small>السماح بإنشاء فاتورة مشتريات دون المرور بدورة الشراء الكاملة (طلب ← عرض سعر ← أمر شراء ← استلام).</small></div>
+                <div class="pset-row-control"><label class="pset-switch"><input type="checkbox" id="psetDirectInvoiceEnabled"><span class="pset-switch-track"></span></label></div>
+              </div>
+              <div class="pset-row">
+                <div class="pset-row-text"><label>إلزام عرض أسعار قبل ترسية أمر الشراء</label><small>منع إنشاء أمر شراء دون عرض سعر واحد على الأقل مرتبط به.</small></div>
+                <div class="pset-row-control"><label class="pset-switch"><input type="checkbox" id="psetRequireRfqBeforePo"><span class="pset-switch-track"></span></label></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- ===== الموافقات وسير العمل ===== -->
+          <div class="pset-section" data-pset="approvals">
+            <div class="pset-section-head"><h3>الموافقات وسير العمل</h3><p>ضبط حدود ومستويات الموافقة على طلبات وأوامر الشراء، بما في ذلك موافقات الذكاء الاصطناعي.</p></div>
+            <div class="pset-group">
+              <div class="pset-row">
+                <div class="pset-row-text"><label>تفعيل نظام الموافقات</label><small>تتطلب أوامر الشراء موافقة صريحة قبل الترحيل والإرسال للمورد.</small></div>
+                <div class="pset-row-control"><label class="pset-switch"><input type="checkbox" id="psetApprovalsEnabled"><span class="pset-switch-track"></span></label></div>
+              </div>
+              <div class="pset-row">
+                <div class="pset-row-text"><label>حد المبلغ المستوجب للموافقة</label><small>أوامر الشراء التي تتجاوز هذا المبلغ تتطلب موافقة يدوية إلزامية.</small></div>
+                <div class="pset-row-control pset-suffix"><input type="number" id="psetApprovalThreshold" min="0"><span>ر.س</span></div>
+              </div>
+              <div class="pset-row">
+                <div class="pset-row-text"><label>عدد مستويات الموافقة</label><small>عدد الأشخاص/الأدوار الذين يجب أن يوافقوا بالتسلسل قبل الاعتماد النهائي.</small></div>
+                <div class="pset-row-control">
+                  <select id="psetApprovalLevels"><option value="1">مستوى واحد</option><option value="2">مستويان</option><option value="3">ثلاثة مستويات</option></select>
+                </div>
+              </div>
+              <div class="pset-row">
+                <div class="pset-row-text"><label>الموافقة الذكية التلقائية (AI)</label><small>اعتماد تلقائي بواسطة الذكاء الاصطناعي للطلبات الأقل من الحد المحدد أدناه.</small></div>
+                <div class="pset-row-control"><label class="pset-switch"><input type="checkbox" id="psetAiAutoApprove"><span class="pset-switch-track"></span></label></div>
+              </div>
+              <div class="pset-row">
+                <div class="pset-row-text"><label>حد الموافقة الذكية التلقائية</label><small>الطلبات الأقل من هذا المبلغ تُعتمد تلقائياً عند تفعيل الموافقة الذكية.</small></div>
+                <div class="pset-row-control pset-suffix"><input type="number" id="psetAiAutoApproveThreshold" min="0"><span>ر.س</span></div>
+              </div>
+              <div class="pset-row">
+                <div class="pset-row-text"><label>تذكير عند تأخر الموافقة</label><small>إرسال تذكير للمعتمدين إذا تجاوز الطلب هذه المدة دون رد.</small></div>
+                <div class="pset-row-control pset-suffix"><input type="number" id="psetApprovalReminderDays" min="0"><span>يوم</span></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- ===== الاستلام والمطابقة ===== -->
+          <div class="pset-section" data-pset="matching">
+            <div class="pset-section-head"><h3>الاستلام والمطابقة الثلاثية</h3><p>التحقق التلقائي من تطابق أمر الشراء مع إذن الاستلام مع فاتورة المورد.</p></div>
+            <div class="pset-tip"><span>ℹ️</span><span><b>المطابقة الثلاثية (3-Way Match):</b> مقارنة تلقائية بين الكمية والسعر في أمر الشراء وإذن الاستلام وفاتورة المورد، لمنع فروقات الفوترة قبل الترحيل.</span></div>
+            <div class="pset-group">
+              <div class="pset-row">
+                <div class="pset-row-text"><label>تفعيل المطابقة الثلاثية</label><small>التحقق من تطابق أمر الشراء ↔ الاستلام ↔ الفاتورة قبل الترحيل.</small></div>
+                <div class="pset-row-control"><label class="pset-switch"><input type="checkbox" id="psetThreeWayMatch"><span class="pset-switch-track"></span></label></div>
+              </div>
+              <div class="pset-row">
+                <div class="pset-row-text"><label>نسبة التفاوت المسموحة في الكمية</label><small>الحد الأقصى لفرق الكمية بين الاستلام والفاتورة دون تنبيه.</small></div>
+                <div class="pset-row-control pset-suffix"><input type="number" id="psetQtyTolerancePct" min="0" step="0.1"><span>%</span></div>
+              </div>
+              <div class="pset-row">
+                <div class="pset-row-text"><label>نسبة التفاوت المسموحة في السعر</label><small>الحد الأقصى لفرق سعر الوحدة بين أمر الشراء والفاتورة دون تنبيه.</small></div>
+                <div class="pset-row-control pset-suffix"><input type="number" id="psetPriceTolerancePct" min="0" step="0.1"><span>%</span></div>
+              </div>
+              <div class="pset-row">
+                <div class="pset-row-text"><label>منع ترحيل فاتورة تتجاوز الاستلام</label><small>رفض ترحيل الفاتورة إذا كانت كميتها أكبر من الكمية المستلمة فعلياً.</small></div>
+                <div class="pset-row-control"><label class="pset-switch"><input type="checkbox" id="psetBlockOverInvoice"><span class="pset-switch-track"></span></label></div>
+              </div>
+              <div class="pset-row">
+                <div class="pset-row-text"><label>السماح بالاستلام الجزئي</label><small>إمكانية استلام كمية أقل من كمية أمر الشراء على أكثر من دفعة.</small></div>
+                <div class="pset-row-control"><label class="pset-switch"><input type="checkbox" id="psetAllowPartialReceipt"><span class="pset-switch-track"></span></label></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- ===== الفوترة والضرائب ===== -->
+          <div class="pset-section" data-pset="tax">
+            <div class="pset-section-head"><h3>الفوترة والضرائب</h3><p>الإعدادات الافتراضية لاحتساب الضريبة على فواتير المشتريات.</p></div>
+            <div class="tax-info-strip" style="margin-bottom:16px">
+              <div><b>متضمنة</b><span>الضريبة جزء من سعر الشراء ولا تُضاف على الإجمالي، مع إظهار قيمتها في خانة مستقلة.</span></div>
+              <div><b>غير متضمنة</b><span>الضريبة بند مستقل يُحسب من سعر الشراء × النسبة، ثم يُضاف إلى إجمالي الفاتورة.</span></div>
+            </div>
+            <div class="pset-group">
+              <div class="pset-row">
+                <div class="pset-row-text"><label>نوع الضريبة الافتراضي لفواتير المشتريات</label><small>يُقترح تلقائياً عند إنشاء فاتورة مشتريات جديدة، مع إمكانية التغيير يدوياً.</small></div>
+                <div class="pset-row-control"><select id="psetDefaultTaxType"><option value="">— بدون ضريبة —</option></select></div>
+              </div>
+              <div class="pset-row">
+                <div class="pset-row-text"><label>طريقة احتساب الضريبة</label><small>هل السعر المُدخل شامل الضريبة أم يُضاف عليها الاحتساب لاحقاً.</small></div>
+                <div class="pset-row-control">
+                  <div class="pset-radio-group" id="psetTaxCalcMethodGroup">
+                    <label><input type="radio" name="psetTaxCalcMethod" value="exclusive"> غير متضمنة</label>
+                    <label><input type="radio" name="psetTaxCalcMethod" value="inclusive"> متضمنة</label>
+                  </div>
+                </div>
+              </div>
+              <div class="pset-row">
+                <div class="pset-row-text"><label>مستوى تطبيق الضريبة</label><small>احتساب الضريبة لكل سطر صنف على حدة، أو كبند واحد على إجمالي الفاتورة.</small></div>
+                <div class="pset-row-control">
+                  <div class="pset-radio-group" id="psetTaxApplyLevelGroup">
+                    <label><input type="radio" name="psetTaxApplyLevel" value="line"> لكل سطر</label>
+                    <label><input type="radio" name="psetTaxApplyLevel" value="invoice"> إجمالي الفاتورة</label>
+                  </div>
+                </div>
+              </div>
+              <div class="pset-row">
+                <div class="pset-row-text"><label>حساب ضريبة المشتريات (المدخلات)</label><small>الحساب المحاسبي من دليل الحسابات الذي تُرحَّل عليه ضريبة المشتريات القابلة للخصم.</small></div>
+                <div class="pset-row-control"><select id="psetTaxInputAccount"><option value="">— اختر حساباً —</option></select></div>
+              </div>
+              <div class="pset-row">
+                <div class="pset-row-text"><label>السماح بتخصيص ضريبة مختلفة لكل مورد</label><small>تجاوز الضريبة الافتراضية عند وجود إعداد ضريبي خاص بمورد معيّن.</small></div>
+                <div class="pset-row-control"><label class="pset-switch"><input type="checkbox" id="psetAllowSupplierTaxOverride"><span class="pset-switch-track"></span></label></div>
+              </div>
+              <div class="pset-row">
+                <div class="pset-row-text"><label>استثناء الموردين المعفيين تلقائياً</label><small>عدم احتساب أي ضريبة على فواتير الموردين المصنّفين كمعفيين من الضريبة.</small></div>
+                <div class="pset-row-control"><label class="pset-switch"><input type="checkbox" id="psetAutoExemptSuppliers"><span class="pset-switch-track"></span></label></div>
+              </div>
+              <div class="pset-row">
+                <div class="pset-row-text"><label>ترقيم مستقل للفاتورة الضريبية</label><small>استخدام تسلسل ترقيم منفصل عن رقم فاتورة المشتريات العادي للفاتورة الضريبية المعتمدة.</small></div>
+                <div class="pset-row-control"><label class="pset-switch"><input type="checkbox" id="psetSeparateTaxInvoiceNumbering"><span class="pset-switch-track"></span></label></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- ===== التكلفة والتقييم ===== -->
+          <div class="pset-section" data-pset="costing">
+            <div class="pset-section-head"><h3>التكلفة والتقييم</h3><p>سياسات تقييم المخزون وتوزيع التكاليف الإضافية على تكلفة الأصناف.</p></div>
+            <div class="pset-group">
+              <div class="pset-row">
+                <div class="pset-row-text"><label>طريقة تقييم المخزون</label><small>الطريقة المعتمدة في النظام لاحتساب تكلفة الأصناف — ثابتة على مستوى النظام.</small></div>
+                <div class="pset-row-control"><span class="pset-readonly-badge">المتوسط المرجح (WAC)</span></div>
+              </div>
+              <div class="pset-row">
+                <div class="pset-row-text"><label>تضمين التكاليف الإضافية ضمن تكلفة الصنف</label><small>توزيع تكاليف الشحن والجمارك والتخليص تلقائياً على تكلفة الأصناف عند الاستلام.</small></div>
+                <div class="pset-row-control"><label class="pset-switch"><input type="checkbox" id="psetIncludeLandedCost"><span class="pset-switch-track"></span></label></div>
+              </div>
+              <div class="pset-row">
+                <div class="pset-row-text"><label>عدد الخانات العشرية لتقريب التكلفة</label><small>دقة التقريب المستخدمة في احتساب التكلفة المتوسطة المرجحة.</small></div>
+                <div class="pset-row-control">
+                  <select id="psetCostRoundingDecimals"><option value="2">خانتان</option><option value="3">3 خانات</option><option value="4">4 خانات</option></select>
+                </div>
+              </div>
+              <div class="pset-row">
+                <div class="pset-row-text"><label>السماح بالاستلام مع رصيد مخزون سالب</label><small>السماح بتسجيل الاستلام حتى في حال عدم توفر رصيد كافٍ مؤقتاً بالنظام.</small></div>
+                <div class="pset-row-control"><label class="pset-switch"><input type="checkbox" id="psetAllowNegativeStock"><span class="pset-switch-track"></span></label></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- ===== الموردون ===== -->
+          <div class="pset-section" data-pset="vendors">
+            <div class="pset-section-head"><h3>الموردون</h3><p>سياسات تقييم الموردين والحد الأدنى من عروض الأسعار المطلوبة قبل الترسية.</p></div>
+            <div class="pset-group">
+              <div class="pset-row">
+                <div class="pset-row-text"><label>تفعيل تقييم أداء الموردين</label><small>احتساب تقييم دوري للموردين بناءً على الالتزام بالمواعيد والجودة.</small></div>
+                <div class="pset-row-control"><label class="pset-switch"><input type="checkbox" id="psetSupplierEvaluationEnabled"><span class="pset-switch-track"></span></label></div>
+              </div>
+              <div class="pset-row">
+                <div class="pset-row-text"><label>الحد الأدنى لعروض الأسعار قبل الترسية</label><small>عدد عروض الأسعار الواجب الحصول عليها قبل اعتماد أمر الشراء.</small></div>
+                <div class="pset-row-control pset-suffix"><input type="number" id="psetMinRfqQuotes" min="0"><span>عرض</span></div>
+              </div>
+              <div class="pset-row">
+                <div class="pset-row-text"><label>القائمة السوداء التلقائية للموردين</label><small>تصنيف المورد تلقائياً كموقوف بعد تكرار المخالفات المحددة أدناه.</small></div>
+                <div class="pset-row-control"><label class="pset-switch"><input type="checkbox" id="psetAutoBlacklist"><span class="pset-switch-track"></span></label></div>
+              </div>
+              <div class="pset-row">
+                <div class="pset-row-text"><label>عدد المخالفات قبل الإيقاف التلقائي</label><small>عدد مرات التأخر أو المخالفة قبل تصنيف المورد كموقوف تلقائياً.</small></div>
+                <div class="pset-row-control pset-suffix"><input type="number" id="psetBlacklistViolations" min="0"><span>مخالفة</span></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- ===== الإشعارات ===== -->
+          <div class="pset-section" data-pset="notifications">
+            <div class="pset-section-head"><h3>الإشعارات</h3><p>تنبيهات المشتريات المرسلة للمسؤولين والمعتمدين.</p></div>
+            <div class="pset-group">
+              <div class="pset-row">
+                <div class="pset-row-text"><label>إشعار عند اقتراب تاريخ التسليم المتوقع</label><small>تنبيه المسؤول عن أمر الشراء عند اقتراب موعد التسليم المتفق عليه.</small></div>
+                <div class="pset-row-control"><label class="pset-switch"><input type="checkbox" id="psetNotifyPoDueDate"><span class="pset-switch-track"></span></label></div>
+              </div>
+              <div class="pset-row">
+                <div class="pset-row-text"><label>إشعار عند اقتراب استحقاق فاتورة المورد</label><small>تنبيه مسبق قبل تاريخ استحقاق سداد فاتورة المورد بعدد الأيام أدناه.</small></div>
+                <div class="pset-row-control"><label class="pset-switch"><input type="checkbox" id="psetNotifyInvoiceDue"><span class="pset-switch-track"></span></label></div>
+              </div>
+              <div class="pset-row">
+                <div class="pset-row-text"><label>عدد أيام التنبيه المسبق للاستحقاق</label><small>عدد الأيام قبل تاريخ الاستحقاق التي يُرسل خلالها التنبيه.</small></div>
+                <div class="pset-row-control pset-suffix"><input type="number" id="psetNotifyInvoiceDueDays" min="0"><span>يوم</span></div>
+              </div>
+              <div class="pset-row">
+                <div class="pset-row-text"><label>إشعار الموافقات المعلّقة</label><small>تنبيه المعتمدين عند وجود طلبات أو أوامر شراء بانتظار موافقتهم.</small></div>
+                <div class="pset-row-control"><label class="pset-switch"><input type="checkbox" id="psetNotifyApprovalPending"><span class="pset-switch-track"></span></label></div>
+              </div>
+              <div class="pset-row">
+                <div class="pset-row-text"><label>قناة الإشعار</label><small>الوسيلة المستخدمة لإرسال تنبيهات المشتريات.</small></div>
+                <div class="pset-row-control">
+                  <select id="psetNotifyChannel"><option value="system">داخل النظام فقط</option><option value="email">بريد إلكتروني فقط</option><option value="both">داخل النظام + بريد إلكتروني</option></select>
+                </div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+      <div id="psetMsg" class="tax-msg"></div>
+    </div>
+  </div>
+</div>
   <div class="panel" id="panel-sales_quote"><div class="formcard"><h3>عرض سعر</h3><div class="empty-msg">جاهزة للتطوير</div></div></div>
   <div class="panel" id="panel-sales_order"><div class="formcard"><h3>أمر بيع</h3><div class="empty-msg">جاهزة للتطوير</div></div></div>
   <div class="panel" id="panel-delivery_note"><div class="formcard"><h3>إذن تسليم/صرف بضاعة</h3><div class="empty-msg">جاهزة للتطوير</div></div></div>
@@ -5359,6 +5618,55 @@ table.uz-matrix input[type=checkbox]{width:16px;height:16px;cursor:pointer;accen
 .tax-info-strip{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px}.tax-info-strip>div{background:linear-gradient(135deg,#f8fbff,#eef6ff);border:1px solid #dbe7f6;border-radius:16px;padding:14px 16px}.tax-info-strip b{display:block;color:#0f3768;font-size:15px;margin-bottom:5px}.tax-info-strip span{display:block;color:#64748b;font-size:12px;line-height:1.6}
 .tax-table-wrap{border:1px solid #dbe7f6;border-radius:18px;overflow:hidden;background:#fff}.tax-table{width:100%;border-collapse:collapse}.tax-table th{background:#edf4fb;color:#203a5c;font-weight:950;padding:12px;border-bottom:1px solid #dbe7f6}.tax-table td{padding:10px;border-bottom:1px solid #edf2f7;vertical-align:middle}.tax-table input,.tax-table select{width:100%;height:42px;border:1px solid #cbd8ea;border-radius:12px;background:#fff;padding:0 12px;font-family:inherit;font-weight:800;color:#132b49}.tax-table input:focus,.tax-table select:focus{outline:0;border-color:#1f78d1;box-shadow:0 0 0 3px rgba(31,120,209,.12)}.tax-rate-wrap{display:flex;align-items:center;gap:8px}.tax-percent-badge{display:inline-flex;align-items:center;justify-content:center;width:42px;height:42px;border:1px solid #cbd8ea;border-radius:12px;background:#f8fbff;color:#0b5db8;font-weight:950}.tax-percent-fixed{display:inline-flex;justify-content:center;align-items:center;width:100%;height:42px;border-radius:12px;background:#eef6ff;color:#0b5db8;border:1px solid #cfe4ff;font-weight:950}.tax-delete-btn{border:0;background:#fee2e2;color:#991b1b;border-radius:12px;padding:10px 13px;font-weight:900;cursor:pointer}.tax-delete-btn:hover{background:#fecaca}.tax-msg{margin-top:12px;font-weight:900;color:#166534;min-height:22px}.tax-empty{padding:22px;text-align:center;color:#64748b;font-weight:800;background:#fbfdff}
 @media(max-width:900px){.tax-info-strip{grid-template-columns:1fr}.tax-watermark{font-size:36px}.tax-table-wrap{overflow:auto}.tax-table{min-width:780px}.tax-page-head{flex-direction:column}}
+
+/* ===== شاشة إعدادات المشتريات (احترافية بأسلوب Odoo/SAP) ===== */
+.pset-page{position:relative;min-height:calc(100vh - 90px);padding:0 0 24px;direction:rtl}
+.pset-page .formcard{position:relative;z-index:1}
+.pset-card{min-height:calc(100vh - 130px);padding:22px;background:rgba(255,255,255,.96);border:1px solid #dbe7f6;border-radius:20px;box-shadow:0 18px 45px rgba(10,35,70,.10)}
+.pset-body{display:flex;gap:22px;align-items:flex-start}
+.pset-nav{width:230px;flex-shrink:0;display:flex;flex-direction:column;gap:4px;position:sticky;top:14px}
+.pset-nav-btn{display:flex;align-items:center;gap:9px;text-align:right;background:transparent;border:none;border-radius:12px;
+  padding:11px 14px;font-family:inherit;font-size:13.5px;font-weight:700;color:#4a5b74;cursor:pointer;transition:.15s}
+.pset-nav-btn:hover{background:#f1f7ff;color:#0b5db8}
+.pset-nav-btn.active{background:linear-gradient(135deg,#0b67c2,#1f78d1);color:#fff;box-shadow:0 6px 16px rgba(11,103,194,.28)}
+.pset-content{flex:1;min-width:0}
+.pset-section{display:none;animation:psetFadeIn .18s ease}
+.pset-section.active{display:block}
+@keyframes psetFadeIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
+.pset-section-head{margin-bottom:14px;padding-bottom:12px;border-bottom:1px solid #e6eef8}
+.pset-section-head h3{margin:0 0 4px;color:#08244a;font-size:18px;font-weight:900}
+.pset-section-head p{margin:0;color:#7286a0;font-size:12.5px;line-height:1.6}
+.pset-group{background:#fbfdff;border:1px solid #e6eef8;border-radius:16px;padding:6px 18px;margin-bottom:16px}
+.pset-row{display:flex;justify-content:space-between;align-items:center;gap:20px;padding:14px 0;border-bottom:1px solid #eef3fa}
+.pset-row:last-child{border-bottom:none}
+.pset-row-text{flex:1;min-width:0}
+.pset-row-text label{display:block;font-size:13.5px;font-weight:800;color:#1c3557;margin-bottom:3px}
+.pset-row-text small{display:block;font-size:11.5px;color:#7c8ba3;line-height:1.6}
+.pset-row-control{flex-shrink:0;min-width:160px;display:flex;justify-content:flex-end}
+.pset-row-control select,.pset-row-control input[type=number],.pset-row-control input[type=text]{
+  height:40px;border:1px solid #cbd8ea;border-radius:10px;background:#fff;padding:0 12px;
+  font-family:inherit;font-weight:700;color:#132b49;min-width:170px;font-size:13px}
+.pset-row-control select:focus,.pset-row-control input:focus{outline:0;border-color:#1f78d1;box-shadow:0 0 0 3px rgba(31,120,209,.12)}
+.pset-row-control .pset-suffix{display:flex;align-items:center;gap:6px}
+.pset-row-control .pset-suffix span{color:#7c8ba3;font-size:12px;font-weight:700}
+.pset-readonly-badge{background:#eef6ff;color:#0b5db8;border:1px solid #cfe4ff;border-radius:10px;padding:9px 16px;font-weight:900;font-size:12.5px}
+.pset-switch{position:relative;width:46px;height:26px;flex-shrink:0;display:inline-block}
+.pset-switch input{opacity:0;width:0;height:0}
+.pset-switch .pset-switch-track{position:absolute;inset:0;background:#d6dfec;border-radius:999px;cursor:pointer;transition:.2s}
+.pset-switch .pset-switch-track::before{content:'';position:absolute;width:20px;height:20px;left:3px;top:3px;background:#fff;
+  border-radius:50%;transition:.2s;box-shadow:0 1px 3px rgba(0,0,0,.25)}
+.pset-switch input:checked+.pset-switch-track{background:#1f9d55}
+.pset-switch input:checked+.pset-switch-track::before{transform:translateX(-20px)}
+.pset-radio-group{display:flex;gap:8px;background:#f1f5fb;border-radius:12px;padding:4px}
+.pset-radio-group label{display:flex;align-items:center;gap:6px;padding:8px 14px;border-radius:9px;font-size:12.5px;font-weight:800;color:#4a5b74;cursor:pointer;transition:.15s}
+.pset-radio-group input{accent-color:#0b67c2}
+.pset-radio-group label.checked{background:#fff;color:#0b5db8;box-shadow:0 2px 8px rgba(10,35,70,.08)}
+.pset-tip{display:flex;gap:10px;background:linear-gradient(135deg,#f8fbff,#eef6ff);border:1px solid #dbe7f6;
+  border-radius:14px;padding:12px 16px;margin-bottom:16px;font-size:12.5px;color:#3a4d68;line-height:1.7}
+.pset-tip b{color:#0f3768}
+@media(max-width:980px){.pset-body{flex-direction:column}.pset-nav{width:100%;flex-direction:row;flex-wrap:wrap;position:static}
+  .pset-row{flex-direction:column;align-items:flex-start;gap:10px}.pset-row-control{width:100%;justify-content:flex-start}
+  .pset-row-control select,.pset-row-control input{width:100%}}
 
 /* ===== شاشة مراكز التكلفة (Cost Centers) ===== */
 .cc-page{direction:rtl}

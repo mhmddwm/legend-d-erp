@@ -3674,6 +3674,247 @@ async function deletePinvInvoice(invNumber){
 window.deletePinvInvoice = deletePinvInvoice;
 
 // ============================================================
+// إعدادات المشتريات (شاشة احترافية بأسلوب Odoo/SAP)
+// تُحفظ محلياً بنفس أسلوب باقي شاشات الإعدادات بالنظام (إعدادات الترقيم المتسلسل)
+// ============================================================
+const PSET_STORAGE_KEY = 'legend_purchase_settings_v1';
+
+const PSET_DEFAULTS = {
+  // عام
+  defaultBranch: '',
+  defaultCostCenter: '',
+  defaultPaymentTerms: 30,
+  defaultCurrency: 'SAR',
+  directInvoiceEnabled: true,
+  requireRfqBeforePo: false,
+  // الموافقات وسير العمل
+  approvalsEnabled: true,
+  approvalThreshold: 10000,
+  approvalLevels: '1',
+  aiAutoApprove: true,
+  aiAutoApproveThreshold: 2000,
+  approvalReminderDays: 2,
+  // الاستلام والمطابقة
+  threeWayMatch: true,
+  qtyTolerancePct: 0,
+  priceTolerancePct: 0,
+  blockOverInvoice: true,
+  allowPartialReceipt: true,
+  // الفوترة والضرائب
+  defaultTaxType: '',
+  taxCalcMethod: 'exclusive',
+  taxApplyLevel: 'line',
+  taxInputAccount: '',
+  allowSupplierTaxOverride: true,
+  autoExemptSuppliers: false,
+  separateTaxInvoiceNumbering: false,
+  // التكلفة والتقييم
+  includeLandedCost: false,
+  costRoundingDecimals: '2',
+  allowNegativeStock: false,
+  // الموردون
+  supplierEvaluationEnabled: false,
+  minRfqQuotes: 1,
+  autoBlacklist: false,
+  blacklistViolations: 3,
+  // الإشعارات
+  notifyPoDueDate: true,
+  notifyInvoiceDue: true,
+  notifyInvoiceDueDays: 3,
+  notifyApprovalPending: true,
+  notifyChannel: 'system',
+};
+
+function loadPurchaseSettings(){
+  try{
+    const saved = JSON.parse(localStorage.getItem(PSET_STORAGE_KEY) || '{}');
+    return { ...PSET_DEFAULTS, ...(saved && typeof saved === 'object' ? saved : {}) };
+  }catch(e){
+    return { ...PSET_DEFAULTS };
+  }
+}
+window.loadPurchaseSettings = loadPurchaseSettings;
+
+function writePurchaseSettings(settings){
+  try{ localStorage.setItem(PSET_STORAGE_KEY, JSON.stringify(settings||{})); }catch(e){}
+}
+
+// التنقل بين أقسام شاشة إعدادات المشتريات
+function showPsetSection(section){
+  document.querySelectorAll('.pset-nav-btn').forEach(b=> b.classList.toggle('active', b.dataset.pset===section));
+  document.querySelectorAll('.pset-section').forEach(s=> s.classList.toggle('active', s.dataset.pset===section));
+}
+window.showPsetSection = showPsetSection;
+
+function pinvSettingsEsc(s){ return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+// تعبئة شاشة الإعدادات بالقوائم الديناميكية (الفروع/مراكز التكلفة/أنواع الضرائب/دليل الحسابات) وقيم الإعدادات المحفوظة
+function populatePurchaseSettingsForm(){
+  const s = loadPurchaseSettings();
+
+  const branchSel = document.getElementById('psetDefaultBranch');
+  if(branchSel){
+    branchSel.innerHTML = '<option value="">— بدون تحديد —</option>' +
+      (branches||[]).map(b=>`<option value="${pinvSettingsEsc(b.code)}">${pinvSettingsEsc(b.name_ar || b.name || b.code)}</option>`).join('');
+    branchSel.value = s.defaultBranch || '';
+  }
+
+  const ccSel = document.getElementById('psetDefaultCostCenter');
+  if(ccSel){
+    ccSel.innerHTML = '<option value="">— بدون تحديد —</option>' +
+      (costCenters||[]).map(c=>`<option value="${pinvSettingsEsc(c.code)}">${pinvSettingsEsc(c.code)} — ${pinvSettingsEsc(c.name_ar)}</option>`).join('');
+    ccSel.value = s.defaultCostCenter || '';
+  }
+
+  const taxSel = document.getElementById('psetDefaultTaxType');
+  if(taxSel){
+    taxSel.innerHTML = '<option value="">— بدون ضريبة —</option>' +
+      (taxTypes||[]).map(t=>`<option value="${pinvSettingsEsc(t.code)}">${pinvSettingsEsc(t.name_ar||t.code)} (${fmt(t.rate)}%)</option>`).join('');
+    taxSel.value = s.defaultTaxType || '';
+  }
+
+  const acctSel = document.getElementById('psetTaxInputAccount');
+  if(acctSel){
+    acctSel.innerHTML = '<option value="">— اختر حساباً —</option>' +
+      (accounts||[]).map(a=>`<option value="${pinvSettingsEsc(a.code)}">${pinvSettingsEsc(a.code)} — ${pinvSettingsEsc(a.name_ar)}</option>`).join('');
+    acctSel.value = s.taxInputAccount || '';
+  }
+
+  const setVal = (id, val)=>{ const el=document.getElementById(id); if(el) el.value = val; };
+  const setChecked = (id, val)=>{ const el=document.getElementById(id); if(el) el.checked = !!val; };
+  const setRadio = (name, val)=>{
+    document.querySelectorAll(`input[name="${name}"]`).forEach(r=>{
+      r.checked = (r.value === val);
+      r.closest('label')?.classList.toggle('checked', r.checked);
+    });
+  };
+
+  setVal('psetDefaultPaymentTerms', s.defaultPaymentTerms);
+  setVal('psetDefaultCurrency', s.defaultCurrency);
+  setChecked('psetDirectInvoiceEnabled', s.directInvoiceEnabled);
+  setChecked('psetRequireRfqBeforePo', s.requireRfqBeforePo);
+
+  setChecked('psetApprovalsEnabled', s.approvalsEnabled);
+  setVal('psetApprovalThreshold', s.approvalThreshold);
+  setVal('psetApprovalLevels', s.approvalLevels);
+  setChecked('psetAiAutoApprove', s.aiAutoApprove);
+  setVal('psetAiAutoApproveThreshold', s.aiAutoApproveThreshold);
+  setVal('psetApprovalReminderDays', s.approvalReminderDays);
+
+  setChecked('psetThreeWayMatch', s.threeWayMatch);
+  setVal('psetQtyTolerancePct', s.qtyTolerancePct);
+  setVal('psetPriceTolerancePct', s.priceTolerancePct);
+  setChecked('psetBlockOverInvoice', s.blockOverInvoice);
+  setChecked('psetAllowPartialReceipt', s.allowPartialReceipt);
+
+  setRadio('psetTaxCalcMethod', s.taxCalcMethod);
+  setRadio('psetTaxApplyLevel', s.taxApplyLevel);
+  setChecked('psetAllowSupplierTaxOverride', s.allowSupplierTaxOverride);
+  setChecked('psetAutoExemptSuppliers', s.autoExemptSuppliers);
+  setChecked('psetSeparateTaxInvoiceNumbering', s.separateTaxInvoiceNumbering);
+
+  setChecked('psetIncludeLandedCost', s.includeLandedCost);
+  setVal('psetCostRoundingDecimals', s.costRoundingDecimals);
+  setChecked('psetAllowNegativeStock', s.allowNegativeStock);
+
+  setChecked('psetSupplierEvaluationEnabled', s.supplierEvaluationEnabled);
+  setVal('psetMinRfqQuotes', s.minRfqQuotes);
+  setChecked('psetAutoBlacklist', s.autoBlacklist);
+  setVal('psetBlacklistViolations', s.blacklistViolations);
+
+  setChecked('psetNotifyPoDueDate', s.notifyPoDueDate);
+  setChecked('psetNotifyInvoiceDue', s.notifyInvoiceDue);
+  setVal('psetNotifyInvoiceDueDays', s.notifyInvoiceDueDays);
+  setChecked('psetNotifyApprovalPending', s.notifyApprovalPending);
+  setVal('psetNotifyChannel', s.notifyChannel);
+}
+window.populatePurchaseSettingsForm = populatePurchaseSettingsForm;
+
+// تلوين خيار المجموعة الإشعاعية (radio) المختار داخل pset-radio-group عند الضغط
+document.addEventListener('change', (e)=>{
+  if(e.target && e.target.name && (e.target.name==='psetTaxCalcMethod' || e.target.name==='psetTaxApplyLevel')){
+    document.querySelectorAll(`input[name="${e.target.name}"]`).forEach(r=>{
+      r.closest('label')?.classList.toggle('checked', r.checked);
+    });
+  }
+});
+
+function getRadioValue(name, fallback){
+  const el = document.querySelector(`input[name="${name}"]:checked`);
+  return el ? el.value : fallback;
+}
+
+// جمع القيم من الشاشة وحفظها
+function savePurchaseSettings(){
+  const getVal = (id, fallback)=>{ const el=document.getElementById(id); return el ? el.value : fallback; };
+  const getNum = (id, fallback)=>{ const el=document.getElementById(id); const n=parseFloat(el ? el.value : fallback); return isNaN(n) ? 0 : n; };
+  const getChecked = (id, fallback)=>{ const el=document.getElementById(id); return el ? el.checked : fallback; };
+
+  const settings = {
+    defaultBranch: getVal('psetDefaultBranch',''),
+    defaultCostCenter: getVal('psetDefaultCostCenter',''),
+    defaultPaymentTerms: getNum('psetDefaultPaymentTerms', PSET_DEFAULTS.defaultPaymentTerms),
+    defaultCurrency: getVal('psetDefaultCurrency', PSET_DEFAULTS.defaultCurrency),
+    directInvoiceEnabled: getChecked('psetDirectInvoiceEnabled', PSET_DEFAULTS.directInvoiceEnabled),
+    requireRfqBeforePo: getChecked('psetRequireRfqBeforePo', PSET_DEFAULTS.requireRfqBeforePo),
+
+    approvalsEnabled: getChecked('psetApprovalsEnabled', PSET_DEFAULTS.approvalsEnabled),
+    approvalThreshold: getNum('psetApprovalThreshold', PSET_DEFAULTS.approvalThreshold),
+    approvalLevels: getVal('psetApprovalLevels', PSET_DEFAULTS.approvalLevels),
+    aiAutoApprove: getChecked('psetAiAutoApprove', PSET_DEFAULTS.aiAutoApprove),
+    aiAutoApproveThreshold: getNum('psetAiAutoApproveThreshold', PSET_DEFAULTS.aiAutoApproveThreshold),
+    approvalReminderDays: getNum('psetApprovalReminderDays', PSET_DEFAULTS.approvalReminderDays),
+
+    threeWayMatch: getChecked('psetThreeWayMatch', PSET_DEFAULTS.threeWayMatch),
+    qtyTolerancePct: getNum('psetQtyTolerancePct', PSET_DEFAULTS.qtyTolerancePct),
+    priceTolerancePct: getNum('psetPriceTolerancePct', PSET_DEFAULTS.priceTolerancePct),
+    blockOverInvoice: getChecked('psetBlockOverInvoice', PSET_DEFAULTS.blockOverInvoice),
+    allowPartialReceipt: getChecked('psetAllowPartialReceipt', PSET_DEFAULTS.allowPartialReceipt),
+
+    defaultTaxType: getVal('psetDefaultTaxType',''),
+    taxCalcMethod: getRadioValue('psetTaxCalcMethod', PSET_DEFAULTS.taxCalcMethod),
+    taxApplyLevel: getRadioValue('psetTaxApplyLevel', PSET_DEFAULTS.taxApplyLevel),
+    taxInputAccount: getVal('psetTaxInputAccount',''),
+    allowSupplierTaxOverride: getChecked('psetAllowSupplierTaxOverride', PSET_DEFAULTS.allowSupplierTaxOverride),
+    autoExemptSuppliers: getChecked('psetAutoExemptSuppliers', PSET_DEFAULTS.autoExemptSuppliers),
+    separateTaxInvoiceNumbering: getChecked('psetSeparateTaxInvoiceNumbering', PSET_DEFAULTS.separateTaxInvoiceNumbering),
+
+    includeLandedCost: getChecked('psetIncludeLandedCost', PSET_DEFAULTS.includeLandedCost),
+    costRoundingDecimals: getVal('psetCostRoundingDecimals', PSET_DEFAULTS.costRoundingDecimals),
+    allowNegativeStock: getChecked('psetAllowNegativeStock', PSET_DEFAULTS.allowNegativeStock),
+
+    supplierEvaluationEnabled: getChecked('psetSupplierEvaluationEnabled', PSET_DEFAULTS.supplierEvaluationEnabled),
+    minRfqQuotes: getNum('psetMinRfqQuotes', PSET_DEFAULTS.minRfqQuotes),
+    autoBlacklist: getChecked('psetAutoBlacklist', PSET_DEFAULTS.autoBlacklist),
+    blacklistViolations: getNum('psetBlacklistViolations', PSET_DEFAULTS.blacklistViolations),
+
+    notifyPoDueDate: getChecked('psetNotifyPoDueDate', PSET_DEFAULTS.notifyPoDueDate),
+    notifyInvoiceDue: getChecked('psetNotifyInvoiceDue', PSET_DEFAULTS.notifyInvoiceDue),
+    notifyInvoiceDueDays: getNum('psetNotifyInvoiceDueDays', PSET_DEFAULTS.notifyInvoiceDueDays),
+    notifyApprovalPending: getChecked('psetNotifyApprovalPending', PSET_DEFAULTS.notifyApprovalPending),
+    notifyChannel: getVal('psetNotifyChannel', PSET_DEFAULTS.notifyChannel),
+  };
+
+  writePurchaseSettings(settings);
+
+  const msg = document.getElementById('psetMsg');
+  if(msg){
+    msg.textContent = '✅ تم حفظ إعدادات المشتريات بنجاح';
+    setTimeout(()=>{ if(msg.textContent.includes('تم حفظ')) msg.textContent=''; }, 3000);
+  }
+}
+window.savePurchaseSettings = savePurchaseSettings;
+
+function resetPurchaseSettingsToDefault(){
+  if(!confirm('سيتم استعادة كل إعدادات المشتريات إلى القيم الافتراضية. هل تريد المتابعة؟')) return;
+  try{ localStorage.removeItem(PSET_STORAGE_KEY); }catch(e){}
+  populatePurchaseSettingsForm();
+  const msg = document.getElementById('psetMsg');
+  if(msg){ msg.textContent = 'تمت استعادة الإعدادات الافتراضية'; setTimeout(()=>{ if(msg.textContent.includes('استعادة')) msg.textContent=''; }, 3000); }
+}
+window.resetPurchaseSettingsToDefault = resetPurchaseSettingsToDefault;
+
+// ============================================================
 // فاتورة مشتريات مباشرة (بدون المرور بدورة الشراء الكاملة)
 // ============================================================
 let dinvLines=[];
@@ -3772,9 +4013,18 @@ function resetDirectInvoiceForm(){
   const dt=document.getElementById('dinvDate'); if(dt) dt.value='';
   const sn=document.getElementById('dinvSupNum'); if(sn) sn.value='';
   const rf=document.getElementById('dinvRef'); if(rf) rf.value='';
-  const tm=document.getElementById('dinvTerms'); if(tm) tm.value='0';
-  const cc=document.getElementById('dinvCostCenter'); if(cc) cc.value='';
+  const tm=document.getElementById('dinvTerms');
+  const cc=document.getElementById('dinvCostCenter');
   const err=document.getElementById('dinvErr'); if(err) err.textContent='';
+  // تطبيق القيم الافتراضية من إعدادات المشتريات (مركز التكلفة وشروط الدفع)
+  if(typeof loadPurchaseSettings === 'function'){
+    const pset = loadPurchaseSettings();
+    if(tm) tm.value = pset.defaultPaymentTerms || 0;
+    if(cc) cc.value = pset.defaultCostCenter || '';
+  } else {
+    if(tm) tm.value='0';
+    if(cc) cc.value='';
+  }
 }
 window.resetDirectInvoiceForm = resetDirectInvoiceForm;
 
@@ -3928,6 +4178,11 @@ function activateTab(tabKey) {
   // تحديث تاج الوحدة
   const tag = document.getElementById('moduleTag');
   if (tag) tag.textContent = MODULE_TAGS[tabKey] || 'ERP';
+
+  // تهيئة شاشة إعدادات المشتريات عند فتحها (تعبئة القوائم من البيانات المحمّلة)
+  if (tabKey === 'purchase_settings' && typeof populatePurchaseSettingsForm === 'function') {
+    populatePurchaseSettingsForm();
+  }
 
   // تحديث القائمة الأفقية
   document.querySelectorAll('.nav-dd-item').forEach(it => {
