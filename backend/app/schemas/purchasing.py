@@ -80,6 +80,8 @@ class PurchaseInvoiceIn(BaseModel):
     inv_date: date
     grn_number: str
     supplier_inv_number: Optional[str] = None
+    payment_terms_days: Optional[int] = None
+    cost_center_code: Optional[str] = None
 
 
 class DirectPurchaseInvoiceIn(BaseModel):
@@ -91,6 +93,8 @@ class DirectPurchaseInvoiceIn(BaseModel):
     supplier_code: str
     supplier_inv_number: Optional[str] = None
     reference: Optional[str] = None
+    payment_terms_days: Optional[int] = None
+    cost_center_code: Optional[str] = None
     lines: List[GRNLineIn]
 
 
@@ -112,6 +116,9 @@ class PurchaseInvoiceOut(BaseModel):
     supplier_inv_number: Optional[str]
     total: float
     status: str
+    payment_terms_days: int = 0
+    cost_center_code: Optional[str] = None
+    due_date: Optional[date] = None
     lines: List[PInvLineOut] = []
 
     class Config:

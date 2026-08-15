@@ -1,3 +1,5 @@
+from datetime import timedelta
+
 from sqlalchemy import (
     Column, String, Numeric, Boolean, Date, DateTime, Integer,
     ForeignKey, CheckConstraint, Text, func
@@ -293,6 +295,11 @@ class Supplier(Base):
     # بأنظمة أودو/ساب حيث لكل مورد حساب دفع افتراضي بدليل الحسابات.
     account_code = Column(String(20), ForeignKey("accounts.code"), nullable=True)
 
+    # فترة السماح الافتراضية بالأيام لهذا المورد — تُستخدم لتعبئة فترة
+    # سماح فاتورة الشراء تلقائياً عند اختيار المورد (قابلة للتعديل يدوياً
+    # على مستوى كل فاتورة على حدة).
+    payment_terms_days = Column(Integer, nullable=False, default=0)
+
     is_active = Column(Boolean, nullable=False, default=True)
 
     created_at = Column(
@@ -464,10 +471,30 @@ class PurchaseInvoice(Base):
         default="posted"
     )
 
+    # فترة السماح بالأيام لهذه الفاتورة تحديداً — تُعبَّأ تلقائياً من
+    # فترة السماح الافتراضية لدى المورد عند إنشاء الفاتورة، وتبقى قابلة
+    # للتعديل اليدوي دون التأثير على إعداد المورد نفسه.
+    payment_terms_days = Column(Integer, nullable=False, default=0)
+
+    # مركز التكلفة المرتبط بالفاتورة (اختياري) — لتحليل تكاليف المشتريات
+    # حسب الإدارة/الفرع بالتقارير.
+    cost_center_code = Column(
+        String(20),
+        ForeignKey("cost_centers.code"),
+        nullable=True,
+    )
+
     created_at = Column(
         DateTime(timezone=True),
         server_default=func.now()
     )
+
+    @property
+    def due_date(self):
+        """تاريخ الاستحقاق المحسوب = تاريخ الفاتورة + فترة السماح بالأيام."""
+        if self.inv_date is None:
+            return None
+        return self.inv_date + timedelta(days=self.payment_terms_days or 0)
 
     lines = relationship(
         "PurchaseInvoiceLine",

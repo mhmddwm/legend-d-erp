@@ -61,6 +61,7 @@ class SupplierIn(BaseModel):
     email: Optional[str] = None
     notes: Optional[str] = None
     account_code: Optional[str] = None
+    payment_terms_days: int = 0
 
 
 class SupplierUpdate(BaseModel):
@@ -70,6 +71,7 @@ class SupplierUpdate(BaseModel):
     email: Optional[str] = None
     notes: Optional[str] = None
     account_code: Optional[str] = None
+    payment_terms_days: Optional[int] = None
 
 
 class SupplierOut(BaseModel):
@@ -79,6 +81,7 @@ class SupplierOut(BaseModel):
     email: Optional[str]
     notes: Optional[str]
     account_code: Optional[str] = None
+    payment_terms_days: int = 0
     payable_balance: float = 0
 
     class Config:

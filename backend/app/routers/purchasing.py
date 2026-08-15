@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.models import (
+    CostCenter,
     GoodsReceipt,
     GoodsReceiptLine,
     Item,
@@ -350,6 +351,7 @@ def list_suppliers(db: Session = Depends(get_db)):
             phone=supplier.phone,
             email=supplier.email,
             notes=supplier.notes,
+            payment_terms_days=supplier.payment_terms_days or 0,
             payable_balance=calc_payable(db, supplier.code),
         )
         for supplier in suppliers
@@ -384,6 +386,7 @@ def create_supplier(
             phone=supplier.phone,
             email=supplier.email,
             notes=supplier.notes,
+            payment_terms_days=supplier.payment_terms_days or 0,
             payable_balance=0,
         )
 
@@ -439,6 +442,7 @@ def update_supplier(
             phone=supplier.phone,
             email=supplier.email,
             notes=supplier.notes,
+            payment_terms_days=supplier.payment_terms_days or 0,
             payable_balance=calc_payable(db, supplier.code),
         )
 
@@ -768,12 +772,35 @@ def create_purchase_invoice(
             detail="إذن الاستلام لا يحتوي على أصناف",
         )
 
+    if payload.cost_center_code:
+        cost_center = (
+            db.query(CostCenter)
+            .filter(CostCenter.code == payload.cost_center_code)
+            .first()
+        )
+        if not cost_center:
+            raise HTTPException(
+                status_code=404,
+                detail=f"مركز التكلفة {payload.cost_center_code} غير موجود",
+            )
+
+    payment_terms_days = payload.payment_terms_days
+    if payment_terms_days is None:
+        supplier = (
+            db.query(Supplier)
+            .filter(Supplier.code == grn.supplier_code)
+            .first()
+        )
+        payment_terms_days = (supplier.payment_terms_days or 0) if supplier else 0
+
     try:
         invoice = PurchaseInvoice(
             inv_date=payload.inv_date,
             grn_number=grn.grn_number,
             supplier_code=grn.supplier_code,
             supplier_inv_number=payload.supplier_inv_number,
+            payment_terms_days=payment_terms_days,
+            cost_center_code=payload.cost_center_code,
             total=0,
             status="posted",
         )
@@ -840,6 +867,8 @@ def create_direct_purchase_invoice(
         inv_date=payload.inv_date,
         grn_number=grn.grn_number,
         supplier_inv_number=payload.supplier_inv_number,
+        payment_terms_days=payload.payment_terms_days,
+        cost_center_code=payload.cost_center_code,
     )
     return create_purchase_invoice(payload=inv_payload, db=db)
 
