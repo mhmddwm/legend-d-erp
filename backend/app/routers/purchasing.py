@@ -83,6 +83,29 @@ def _validate_positive(value, field_name: str) -> float:
     return number
 
 
+def _next_document_number(db: Session, model, column_name: str, prefix: str, pad: int = 6) -> str:
+    """توليد رقم مستند تسلسلي بالصيغة PREFIX-000001.
+
+    أعمدة أرقام المستندات (po_number / grn_number / inv_number) هي
+    مفاتيح أساسية نصية بلا قيمة افتراضية أو Sequence على مستوى قاعدة
+    البيانات، لذا يجب توليدها هنا صراحة قبل الإدراج بالاعتماد على أعلى
+    رقم موجود حالياً بنفس البادئة.
+    """
+    column = getattr(model, column_name)
+    last_row = (
+        db.query(column)
+        .filter(column.like(f"{prefix}-%"))
+        .order_by(column.desc())
+        .first()
+    )
+    next_seq = 1
+    if last_row and last_row[0]:
+        tail = last_row[0].split("-")[-1]
+        if tail.isdigit():
+            next_seq = int(tail) + 1
+    return f"{prefix}-{str(next_seq).zfill(pad)}"
+
+
 def _validate_lines(lines, document_name: str) -> None:
     if not lines:
         raise HTTPException(
@@ -533,6 +556,7 @@ def create_purchase_order(
 
     try:
         purchase_order = PurchaseOrder(
+            po_number=_next_document_number(db, PurchaseOrder, "po_number", "PO"),
             po_date=payload.po_date,
             supplier_code=payload.supplier_code,
             status="draft",
@@ -659,6 +683,7 @@ def create_grn(
 
     try:
         grn = GoodsReceipt(
+            grn_number=_next_document_number(db, GoodsReceipt, "grn_number", "GRN"),
             grn_date=payload.grn_date,
             supplier_code=payload.supplier_code,
             po_number=payload.po_number,
@@ -795,6 +820,7 @@ def create_purchase_invoice(
 
     try:
         invoice = PurchaseInvoice(
+            inv_number=_next_document_number(db, PurchaseInvoice, "inv_number", "INV"),
             inv_date=payload.inv_date,
             grn_number=grn.grn_number,
             supplier_code=grn.supplier_code,
@@ -979,6 +1005,7 @@ def create_purchase_return(
 
     try:
         purchase_return = PurchaseReturn(
+            rt_number=_next_document_number(db, PurchaseReturn, "rt_number", "PRT"),
             rt_date=payload.rt_date,
             inv_number=invoice.inv_number,
             supplier_code=invoice.supplier_code,
