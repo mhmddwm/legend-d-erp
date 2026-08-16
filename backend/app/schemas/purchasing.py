@@ -69,6 +69,7 @@ class GoodsReceiptOut(BaseModel):
     reference: Optional[str]
     total: float
     invoice_status: str
+    journal_entry_id: Optional[int] = None
     lines: List[GRNLineOut] = []
 
     class Config:

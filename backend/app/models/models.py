@@ -398,6 +398,11 @@ class GoodsReceipt(Base):
         default="not_invoiced"
     )
 
+    # القيد المحاسبي المُرحَّل تلقائياً عند إنشاء إذن الاستلام (مدين
+    # المخزون / دائن حساب "بضاعة مستلمة غير مفوترة" GRNI) — أول قيد
+    # محاسبي يُرحَّل بدورة الشراء الآن، قبل وصول فاتورة المورد.
+    journal_entry_id = Column(Integer, ForeignKey("journal_entries.id"), nullable=True)
+
     created_at = Column(
         DateTime(timezone=True),
         server_default=func.now()
