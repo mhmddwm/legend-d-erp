@@ -4597,6 +4597,7 @@ table.uz-matrix input[type=checkbox]{width:16px;height:16px;cursor:pointer;accen
           <button class="row-menu-trigger" title="خيارات المورد" onclick="toggleSupplierMenu('${code}', event)"><span></span><span></span><span></span></button>
           <div id="sup-menu-${code}" class="menu-popup" style="display:none">
             <button onclick="viewSupplier('${code}')"><b>👁</b><span>عرض</span></button>
+            <button onclick="openSupplierStatement('${code}')"><b>📊</b><span>كشف حساب</span></button>
             <button onclick="editSupplier('${code}')"><b>✎</b><span>تعديل</span></button>
             <button class="danger" onclick="deleteSupplier('${code}')"><b>🗑</b><span>حذف</span></button>
           </div></div></td>
@@ -4620,6 +4621,49 @@ table.uz-matrix input[type=checkbox]{width:16px;height:16px;cursor:pointer;accen
   window.viewSupplier=function(code){
     const s=(suppliers||[]).find(x=>String(x.code)===String(code)); if(!s) return;
     alert(`المورد: ${supplierDisplayName(s)}\nرقم المورد: ${s.code||''}\nالهاتف: ${s.phone||'-'}\nالجوال: ${s.mobile||'-'}\nالبريد: ${supplierEmail(s)||'-'}\nالنوع: ${s.supplier_type==='individual'?'فردي':'تجاري'}\nالرقم الضريبي: ${s.vat_no||'-'}`);
+  };
+  // كشف حساب المورد — دفتر أستاذ مساعد مبني على فواتير/مرتجعات المورد
+  // (نفس منطق حساب الرصيد المستخدم بشاشة إدارة الموردين، لكن بتفصيل كل حركة)
+  window.openSupplierStatement=async function(code){
+    const s=(suppliers||[]).find(x=>String(x.code)===String(code));
+    let data;
+    try{
+      data = await api('GET', `/api/suppliers/${encodeURIComponent(code)}/statement`);
+    }catch(e){
+      alert('تعذر تحميل كشف الحساب: '+(e.message||e));
+      return;
+    }
+    document.getElementById('supStatementDialog')?.remove();
+    const rows=(data.entries||[]).map(en=>{
+      const typeLabel = en.doc_type==='purchase_return' ? 'مرتجع مشتريات' : 'فاتورة مشتريات';
+      return `<tr>
+        <td>${esc(en.date||'')}</td>
+        <td>${typeLabel}</td>
+        <td>${esc(en.doc_number||'')}</td>
+        <td>${esc(en.description||'')}</td>
+        <td class="num">${en.debit ? fmt(en.debit) : '-'}</td>
+        <td class="num">${en.credit ? fmt(en.credit) : '-'}</td>
+        <td class="num" style="font-weight:700">${fmt(en.balance)}</td>
+      </tr>`;
+    }).join('');
+    const emptyRow=(data.entries||[]).length ? '' : `<tr><td colspan="7" style="text-align:center;color:#94a3b8;padding:18px">لا توجد حركات على هذا المورد بعد</td></tr>`;
+    const html=`<div class="po-decision-dialog" id="supStatementDialog"><div class="box" style="max-width:920px">
+      <div class="rfq-section-head">
+        <h3>كشف حساب المورد — ${esc(s?supplierDisplayName(s):(data.supplier_name||code))}</h3>
+        <button class="btn secondary" onclick="document.getElementById('supStatementDialog').remove()">إغلاق</button>
+      </div>
+      <div class="po-info-grid" style="margin-bottom:14px">
+        <div class="field"><label>رقم المورد</label><input disabled value="${esc(data.supplier_code||code)}"></div>
+        <div class="field"><label>الحساب المحاسبي المرتبط</label><input disabled value="${esc(data.account_code||'— بدون —')}"></div>
+        <div class="field"><label>الرصيد الحالي المستحق</label><input disabled value="${fmt(data.closing_balance)}" style="font-weight:800;color:#0b5db8"></div>
+      </div>
+      <div class="scrollx"><table class="grid po-list-table">
+        <thead><tr><th>التاريخ</th><th>النوع</th><th>المستند</th><th>البيان</th><th>مدين</th><th>دائن</th><th>الرصيد</th></tr></thead>
+        <tbody>${rows}${emptyRow}</tbody>
+      </table></div>
+      <div class="hint" style="margin-top:10px">الرصيد = فواتير الشراء المرحّلة − مرتجعات الشراء، مبني على حركات هذا المورد ضمن حساب الموردين بدليل الحسابات (دفتر أستاذ مساعد، دون إنشاء حساب منفصل لكل مورد).</div>
+    </div></div>`;
+    document.body.insertAdjacentHTML('beforeend', html);
   };
   window.hasSupplierTransactions=function(code){
     code=String(code);
