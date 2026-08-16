@@ -484,6 +484,17 @@ class PurchaseInvoice(Base):
         nullable=True,
     )
 
+    # الضريبة على مستوى الفاتورة (اختيارية) — subtotal = صافي قيمة
+    # الأصناف قبل الضريبة، tax_amount = مبلغ الضريبة المحتسب، بينما
+    # total تبقى الإجمالي الكلي المستحق للمورد (صافي + ضريبة).
+    subtotal = Column(Numeric(18, 2), nullable=False, default=0)
+    tax_type_code = Column(String(20), ForeignKey("tax_types.code"), nullable=True)
+    tax_amount = Column(Numeric(18, 2), nullable=False, default=0)
+
+    # القيد المحاسبي المُرحَّل تلقائياً عند إنشاء الفاتورة (مدين المخزون
+    # [+ مدين ضريبة المشتريات القابلة للخصم] / دائن حساب المورد)
+    journal_entry_id = Column(Integer, ForeignKey("journal_entries.id"), nullable=True)
+
     created_at = Column(
         DateTime(timezone=True),
         server_default=func.now()

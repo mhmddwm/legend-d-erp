@@ -82,6 +82,10 @@ class PurchaseInvoiceIn(BaseModel):
     supplier_inv_number: Optional[str] = None
     payment_terms_days: Optional[int] = None
     cost_center_code: Optional[str] = None
+    tax_type_code: Optional[str] = None
+    # طريقة احتساب الضريبة: "exclusive" (تُضاف على القيمة) أو
+    # "inclusive" (القيمة المُدخلة شاملة الضريبة أصلاً)
+    tax_calc_method: Optional[str] = "exclusive"
 
 
 class DirectPurchaseInvoiceIn(BaseModel):
@@ -95,6 +99,8 @@ class DirectPurchaseInvoiceIn(BaseModel):
     reference: Optional[str] = None
     payment_terms_days: Optional[int] = None
     cost_center_code: Optional[str] = None
+    tax_type_code: Optional[str] = None
+    tax_calc_method: Optional[str] = "exclusive"
     lines: List[GRNLineIn]
 
 
@@ -123,11 +129,15 @@ class PurchaseInvoiceOut(BaseModel):
     supplier_code: str
     grn_number: str
     supplier_inv_number: Optional[str]
+    subtotal: float = 0
+    tax_type_code: Optional[str] = None
+    tax_amount: float = 0
     total: float
     status: str
     payment_terms_days: int = 0
     cost_center_code: Optional[str] = None
     due_date: Optional[date] = None
+    journal_entry_id: Optional[int] = None
     lines: List[PInvLineOut] = []
 
     class Config:

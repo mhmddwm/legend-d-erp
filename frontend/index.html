@@ -2592,12 +2592,25 @@ html[dir="ltr"] .brand-center{direction:ltr;}
         <div class="field"><label>فترة السماح (أيام)</label><input id="dinvTerms" type="number" min="0" step="1" value="0" placeholder="تُعبَّأ تلقائياً من بيانات المورد"></div>
         <div class="field"><label>مركز التكلفة</label><select id="dinvCostCenter" class="cost-center-select" data-empty-label="— بدون مركز تكلفة —"><option value="">— بدون مركز تكلفة —</option></select></div>
       </div>
+      <div class="frow two">
+        <div class="field"><label>نوع الضريبة</label><select id="dinvTaxType" onchange="recalcDinvTotals()"><option value="">— بدون ضريبة —</option></select></div>
+        <div class="field"><label>طريقة الاحتساب</label>
+          <select id="dinvTaxCalcMethod" onchange="recalcDinvTotals()">
+            <option value="exclusive">غير متضمنة (تُضاف على القيمة)</option>
+            <option value="inclusive">متضمنة (القيمة شاملة الضريبة)</option>
+          </select>
+        </div>
+      </div>
       <table class="line-items">
         <thead><tr><th style="width:30%">الصنف</th><th style="width:12%">الكمية</th><th style="width:10%">الوحدة</th><th style="width:18%">تكلفة الوحدة</th><th style="width:16%">الإجمالي</th><th></th></tr></thead>
         <tbody id="dinvLinesBody"></tbody>
       </table>
       <button class="add-line-btn" onclick="addDinvLine()">+ إضافة سطر</button>
-      <div class="totals-box"><div class="row grand"><span>إجمالي الفاتورة</span><span id="dinvTotal">0.00</span></div></div>
+      <div class="totals-box">
+        <div class="row"><span>الصافي قبل الضريبة</span><span id="dinvSubtotal">0.00</span></div>
+        <div class="row"><span id="dinvTaxLabel">الضريبة</span><span id="dinvTaxAmount">0.00</span></div>
+        <div class="row grand"><span>إجمالي الفاتورة</span><span id="dinvTotal">0.00</span></div>
+      </div>
       <div style="margin-top:14px;display:flex;gap:8px">
         <button class="btn" onclick="submitDirectPinv()">ترحيل الفاتورة المباشرة</button>
         <button class="btn secondary" onclick="toggleDirectInvoiceForm(false)">إلغاء</button>
@@ -2623,8 +2636,21 @@ html[dir="ltr"] .brand-center{direction:ltr;}
         <div class="field"><label>فترة السماح (أيام)</label><input id="pinvTerms" type="number" min="0" step="1" value="0" placeholder="تُعبَّأ تلقائياً من بيانات المورد"></div>
         <div class="field"><label>مركز التكلفة</label><select id="pinvCostCenter" class="cost-center-select" data-empty-label="— بدون مركز تكلفة —"><option value="">— بدون مركز تكلفة —</option></select></div>
       </div>
+      <div class="frow two">
+        <div class="field"><label>نوع الضريبة</label><select id="pinvTaxType" onchange="recalcPinvTotals()"><option value="">— بدون ضريبة —</option></select></div>
+        <div class="field"><label>طريقة الاحتساب</label>
+          <select id="pinvTaxCalcMethod" onchange="recalcPinvTotals()">
+            <option value="exclusive">غير متضمنة (تُضاف على القيمة)</option>
+            <option value="inclusive">متضمنة (القيمة شاملة الضريبة)</option>
+          </select>
+        </div>
+      </div>
       <div id="pinvLinesWrap"></div>
-      <div class="totals-box"><div class="row grand"><span>إجمالي الفاتورة</span><span id="pinvTotal">0.00</span></div></div>
+      <div class="totals-box">
+        <div class="row"><span>الصافي قبل الضريبة</span><span id="pinvSubtotal">0.00</span></div>
+        <div class="row"><span id="pinvTaxLabel">الضريبة</span><span id="pinvTaxAmount">0.00</span></div>
+        <div class="row grand"><span>إجمالي الفاتورة</span><span id="pinvTotal">0.00</span></div>
+      </div>
       <div style="margin-top:14px"><button class="btn" onclick="submitPinv()">ترحيل الفاتورة</button></div>
       <div class="err" id="pinvErr"></div>
       <div class="hint">لا يمكن ترحيل أكثر من فاتورة واحدة لنفس إذن الاستلام. تظهر في القائمة أعلاه أذون الاستلام التي لم تُفوتر بعد فقط.</div>

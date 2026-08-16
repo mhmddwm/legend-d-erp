@@ -3277,7 +3277,14 @@ function togglePinvNewForm(forceOpen){
   const open = forceOpen===true ? true : (forceOpen===false ? false : isHidden);
   box.style.display = open ? 'block' : 'none';
   if(open){
-    if(typeof renderGRNs === 'function') { /* القائمة تُحدَّث أصلاً عبر loadAll، لا حاجة لإعادة تحميل هنا */ }
+    if(typeof populatePinvTaxTypeSelects === 'function') populatePinvTaxTypeSelects();
+    // تطبيق نوع الضريبة وطريقة الاحتساب الافتراضيين من إعدادات المشتريات
+    if(typeof loadPurchaseSettings === 'function'){
+      const pset = loadPurchaseSettings();
+      const tt=document.getElementById('pinvTaxType'); if(tt) tt.value = pset.defaultTaxType || '';
+      const tcm=document.getElementById('pinvTaxCalcMethod'); if(tcm) tcm.value = pset.taxCalcMethod || 'exclusive';
+    }
+    if(typeof recalcPinvTotals === 'function') recalcPinvTotals();
     box.scrollIntoView({behavior:'smooth', block:'nearest'});
   }
 }
@@ -3286,7 +3293,13 @@ window.togglePinvNewForm = togglePinvNewForm;
 function onPinvGrnChange(){
   const grn=grns.find(g=>g.grn_number===document.getElementById('pinvGrn').value);
   const wrap=document.getElementById('pinvLinesWrap');
-  if(!grn){wrap.innerHTML=''; document.getElementById('pinvSupplier').value=''; document.getElementById('pinvTotal').textContent='0.00'; return;}
+  if(!grn){
+    wrap.innerHTML='';
+    document.getElementById('pinvSupplier').value='';
+    if(typeof recalcPinvTotals === 'function') recalcPinvTotals();
+    else document.getElementById('pinvTotal').textContent='0.00';
+    return;
+  }
   const sup=suppliers.find(s=>s.code===grn.supplier_code);
   document.getElementById('pinvSupplier').value=sup?sup.name:'';
   const termsEl=document.getElementById('pinvTerms');
@@ -3296,7 +3309,8 @@ function onPinvGrnChange(){
     return `<tr><td>${it?it.code+' — '+it.name:l.item_id}</td><td class="num">${fmt(l.qty)}</td><td class="num">${it?it.unit:'-'}</td><td class="num">${fmt(l.unit_cost)}</td><td class="num">${fmt(l.qty*l.unit_cost)}</td></tr>`;
   }).join('');
   wrap.innerHTML=`<table class="line-items"><thead><tr><th>الصنف</th><th>الكمية</th><th>الوحدة</th><th>التكلفة</th><th>الإجمالي</th></tr></thead><tbody>${rows}</tbody></table>`;
-  document.getElementById('pinvTotal').textContent=fmt(grn.total);
+  if(typeof recalcPinvTotals === 'function') recalcPinvTotals();
+  else document.getElementById('pinvTotal').textContent=fmt(grn.total);
 }
 
 async function submitPinv(){
@@ -3305,19 +3319,24 @@ async function submitPinv(){
   const supplier_inv_number=document.getElementById('pinvSupNum').value.trim()||null;
   const payment_terms_days=parseInt(document.getElementById('pinvTerms').value)||0;
   const cost_center_code=document.getElementById('pinvCostCenter').value||null;
+  const tax_type_code=document.getElementById('pinvTaxType')?.value||null;
+  const tax_calc_method=document.getElementById('pinvTaxCalcMethod')?.value||'exclusive';
   const err=document.getElementById('pinvErr');
   if(!grn_number){err.textContent='يرجى اختيار عملية الاستلام'; return;}
   if(!inv_date){err.textContent='يرجى إدخال تاريخ الفاتورة'; return;}
   err.textContent='';
   try{
-    await api('POST','/api/purchase-invoices',{grn_number,inv_date,supplier_inv_number,payment_terms_days,cost_center_code});
+    await api('POST','/api/purchase-invoices',{grn_number,inv_date,supplier_inv_number,payment_terms_days,cost_center_code,tax_type_code,tax_calc_method});
     document.getElementById('pinvGrn').value='';
     document.getElementById('pinvSupNum').value='';
     document.getElementById('pinvTerms').value='0';
     document.getElementById('pinvCostCenter').value='';
+    document.getElementById('pinvTaxType').value='';
+    document.getElementById('pinvTaxCalcMethod').value='exclusive';
     document.getElementById('pinvLinesWrap').innerHTML='';
-    document.getElementById('pinvTotal').textContent='0.00';
     document.getElementById('pinvSupplier').value='';
+    if(typeof recalcPinvTotals === 'function') recalcPinvTotals();
+    else document.getElementById('pinvTotal').textContent='0.00';
     if(typeof togglePinvNewForm === 'function') togglePinvNewForm(false);
     await loadAll();
   }catch(e){err.textContent=e.message;}
@@ -3389,7 +3408,7 @@ function renderInvoices(){
       <td>${pinvEsc(sup?sup.name:inv.supplier_code)}</td>
       <td>${pinvEsc(inv.grn_number)}</td>
       <td>${pinvEsc(inv.supplier_inv_number||'-')}</td>
-      <td>${fmt(inv.total)}</td>
+      <td>${fmt(inv.total)}${(inv.tax_amount && Number(inv.tax_amount)>0) ? `<div style="font-size:10.5px;color:#0b67c2;margin-top:2px">شامل ضريبة ${fmt(inv.tax_amount)}</div>` : ''}</td>
       <td>${pinvEsc(inv.due_date||'-')}</td>
       <td>${getPinvBadge(inv)}</td>
       <td style="text-align:center" onclick="event.stopPropagation()">
@@ -3412,6 +3431,7 @@ function openPurchaseInvoiceView(invNumber){
   if(!inv) return;
   const sup=(suppliers||[]).find(s=>s.code===inv.supplier_code);
   const cc=(costCenters||[]).find(c=>c.code===inv.cost_center_code);
+  const taxType=(taxTypes||[]).find(t=>t.code===inv.tax_type_code);
   const rows=(inv.lines||[]).map(l=>{
     const it=(items||[]).find(i=>i.id===l.item_id);
     return `<tr>
@@ -3422,6 +3442,10 @@ function openPurchaseInvoiceView(invNumber){
       <td class="num">${fmt(l.qty*l.unit_cost)}</td>
     </tr>`;
   }).join('');
+  const taxRowsHtml = (inv.tax_amount && Number(inv.tax_amount)>0)
+    ? `<div class="row"><span>الصافي قبل الضريبة</span><span>${fmt(inv.subtotal)}</span></div>
+       <div class="row"><span>الضريبة${taxType?` (${pinvEsc(taxType.name_ar||taxType.code)} ${fmt(taxType.rate)}%)`:''}</span><span>${fmt(inv.tax_amount)}</span></div>`
+    : '';
   const html=`<div class="po-decision-dialog" id="pinvViewDialog"><div class="box">
     <div class="rfq-section-head">
       <h3>فاتورة مشتريات ${pinvEsc(inv.inv_number)}</h3>
@@ -3436,7 +3460,11 @@ function openPurchaseInvoiceView(invNumber){
       <div class="field"><label>مركز التكلفة</label><input disabled value="${pinvEsc(cc?cc.code+' — '+cc.name_ar:'— بدون —')}"></div>
     </div>
     <table class="grid po-list-table"><thead><tr><th>الصنف</th><th>الكمية</th><th>الوحدة</th><th>التكلفة</th><th>الإجمالي</th></tr></thead><tbody>${rows}</tbody></table>
-    <div class="totals-box" style="margin-top:12px"><div class="row grand"><span>إجمالي الفاتورة</span><span>${fmt(inv.total)}</span></div></div>
+    <div class="totals-box" style="margin-top:12px">
+      ${taxRowsHtml}
+      <div class="row grand"><span>إجمالي الفاتورة</span><span>${fmt(inv.total)}</span></div>
+    </div>
+    ${inv.journal_entry_id ? `<div class="hint" style="margin-top:10px">✅ تم ترحيل القيد المحاسبي رقم ${inv.journal_entry_id} تلقائياً (مدين المخزون${inv.tax_amount>0?' وضريبة المشتريات':''} / دائن حساب المورد).</div>` : ''}
   </div></div>`;
   document.body.insertAdjacentHTML('beforeend', html);
 }
@@ -3513,6 +3541,7 @@ window.pinvMenuRun = pinvMenuRun;
 function buildPinvPrintHtml(inv){
   const sup=(suppliers||[]).find(s=>s.code===inv.supplier_code);
   const cc=(costCenters||[]).find(c=>c.code===inv.cost_center_code);
+  const taxType=(taxTypes||[]).find(t=>t.code===inv.tax_type_code);
   const rows=(inv.lines||[]).map((l,idx)=>{
     const it=(items||[]).find(i=>i.id===l.item_id);
     return `<tr>
@@ -3527,6 +3556,11 @@ function buildPinvPrintHtml(inv){
   const badge = inv.status==='cancelled'
     ? '<span class="pinv-badge cancelled">ملغاة</span>'
     : '<span class="pinv-badge">مرحّلة</span>';
+  const hasTax = inv.tax_amount && Number(inv.tax_amount) > 0;
+  const taxSummaryRows = hasTax
+    ? `<div class="row"><span>الصافي قبل الضريبة</span><span>${fmt(inv.subtotal)}</span></div>
+       <div class="row"><span>الضريبة${taxType?` (${pinvEsc(taxType.name_ar||taxType.code)} ${fmt(taxType.rate)}%)`:''}</span><span>${fmt(inv.tax_amount)}</span></div>`
+    : '';
   return `<!DOCTYPE html>
 <html lang="ar" dir="rtl"><head><meta charset="UTF-8">
 <title>فاتورة مشتريات ${pinvEsc(inv.inv_number)}</title>
@@ -3547,7 +3581,9 @@ function buildPinvPrintHtml(inv){
   th{background:#f4f5f7;font-weight:700;}
   td.num,th.num{text-align:left;font-family:monospace,'Cairo';}
   .pinv-total-row{margin-top:16px;display:flex;justify-content:flex-end;}
-  .pinv-total-row .box{min-width:260px;display:flex;justify-content:space-between;font-size:16px;font-weight:800;border-top:2px solid #1c2430;padding-top:10px;}
+  .pinv-total-row .box{min-width:280px;display:flex;flex-direction:column;gap:6px;font-size:13px;border-top:2px solid #1c2430;padding-top:10px;}
+  .pinv-total-row .box .row{display:flex;justify-content:space-between;color:#555;}
+  .pinv-total-row .box .grand{display:flex;justify-content:space-between;font-size:16px;font-weight:800;color:#1c2430;margin-top:4px;}
   .pinv-print-toolbar{margin-bottom:20px;}
   .pinv-print-toolbar button{font-family:'Cairo',sans-serif;padding:9px 18px;border-radius:8px;border:1px solid #1c2430;background:#1c2430;color:#fff;cursor:pointer;font-size:13px;font-weight:600;}
   @media print{ .pinv-print-toolbar{display:none;} body{padding:0;} }
@@ -3571,7 +3607,10 @@ function buildPinvPrintHtml(inv){
   </div>
   <table><thead><tr><th>#</th><th>الصنف</th><th class="num">الكمية</th><th class="num">الوحدة</th><th class="num">التكلفة</th><th class="num">الإجمالي</th></tr></thead>
   <tbody>${rows}</tbody></table>
-  <div class="pinv-total-row"><div class="box"><span>الإجمالي الكلي</span><span>${fmt(inv.total)}</span></div></div>
+  <div class="pinv-total-row"><div class="box">
+    ${taxSummaryRows}
+    <div class="grand"><span>الإجمالي الكلي</span><span>${fmt(inv.total)}</span></div>
+  </div></div>
 </body></html>`;
 }
 
@@ -3653,6 +3692,7 @@ function copyPinvToNewInvoice(invNumber){
   const refEl=document.getElementById('dinvRef'); if(refEl) refEl.value=`نسخة من الفاتورة ${inv.inv_number}`;
   const termsEl=document.getElementById('dinvTerms'); if(termsEl) termsEl.value=inv.payment_terms_days||0;
   const ccEl=document.getElementById('dinvCostCenter'); if(ccEl) ccEl.value=inv.cost_center_code||'';
+  const ttEl=document.getElementById('dinvTaxType'); if(ttEl) ttEl.value=inv.tax_type_code||'';
   renderDinvLines();
 }
 window.copyPinvToNewInvoice = copyPinvToNewInvoice;
@@ -3944,6 +3984,7 @@ function toggleDirectInvoiceForm(forceOpen){
   box.style.display = open ? 'block' : 'none';
   if(open){
     if(!dinvLines.length) addDinvLine();
+    if(typeof populatePinvTaxTypeSelects === 'function') populatePinvTaxTypeSelects();
     box.scrollIntoView({behavior:'smooth', block:'nearest'});
   }
 }
@@ -4010,11 +4051,68 @@ function renderDinvLines(){
     <td><button class="rm-line" onclick="removeDinvLine(${l.id})">✕</button></td>
   </tr>`;
   }).join('');
-  const total=dinvLines.reduce((s,l)=>s+l.qty*l.cost,0);
-  const el=document.getElementById('dinvTotal');
-  if(el) el.textContent=fmt(total);
+  if(typeof recalcDinvTotals === 'function') recalcDinvTotals();
 }
 window.renderDinvLines = renderDinvLines;
+
+// ============================================================
+// حساب الضريبة على فاتورة المشتريات (معاينة بالفرونت أثناء الإدخال —
+// الحساب الملزم والنهائي يعاد احتسابه بالباك إند عند الترحيل)
+// ============================================================
+function pinvTaxPreview(linesTotal, taxTypeCode, calcMethod){
+  linesTotal = Number(linesTotal)||0;
+  if(!taxTypeCode) return { subtotal: linesTotal, tax: 0, total: linesTotal, taxType: null };
+  const t = (taxTypes||[]).find(x=>x.code===taxTypeCode);
+  if(!t) return { subtotal: linesTotal, tax: 0, total: linesTotal, taxType: null };
+  const rate = Number(t.rate)||0;
+  let subtotal, tax;
+  if(calcMethod === 'inclusive'){
+    subtotal = rate ? (linesTotal / (1 + rate/100)) : linesTotal;
+    tax = linesTotal - subtotal;
+  } else {
+    subtotal = linesTotal;
+    tax = linesTotal * rate / 100;
+  }
+  return { subtotal, tax, total: subtotal+tax, taxType: t };
+}
+
+// تعبئة قوائم "نوع الضريبة" بنموذجي الفاتورة (من استلام / مباشرة) مع الحفاظ على الاختيار الحالي
+function populatePinvTaxTypeSelects(){
+  const opts = '<option value="">— بدون ضريبة —</option>' + (taxTypes||[]).map(t=>`<option value="${pinvEsc(t.code)}">${pinvEsc(t.name_ar||t.code)} (${fmt(t.rate)}%)</option>`).join('');
+  ['dinvTaxType','pinvTaxType'].forEach(id=>{
+    const el=document.getElementById(id);
+    if(!el) return;
+    const current=el.value;
+    el.innerHTML=opts;
+    el.value = current || '';
+  });
+}
+window.populatePinvTaxTypeSelects = populatePinvTaxTypeSelects;
+
+function recalcDinvTotals(){
+  const linesTotal = (dinvLines||[]).reduce((s,l)=>s+l.qty*l.cost,0);
+  const taxTypeCode = document.getElementById('dinvTaxType')?.value || '';
+  const calcMethod = document.getElementById('dinvTaxCalcMethod')?.value || 'exclusive';
+  const r = pinvTaxPreview(linesTotal, taxTypeCode, calcMethod);
+  const subEl=document.getElementById('dinvSubtotal'); if(subEl) subEl.textContent=fmt(r.subtotal);
+  const taxEl=document.getElementById('dinvTaxAmount'); if(taxEl) taxEl.textContent=fmt(r.tax);
+  const taxLabel=document.getElementById('dinvTaxLabel'); if(taxLabel) taxLabel.textContent = r.taxType ? `الضريبة (${r.taxType.name_ar||r.taxType.code} ${fmt(r.taxType.rate)}%)` : 'الضريبة';
+  const totalEl=document.getElementById('dinvTotal'); if(totalEl) totalEl.textContent=fmt(r.total);
+}
+window.recalcDinvTotals = recalcDinvTotals;
+
+function recalcPinvTotals(){
+  const grn=(grns||[]).find(g=>g.grn_number===document.getElementById('pinvGrn')?.value);
+  const linesTotal = grn ? (Number(grn.total)||0) : 0;
+  const taxTypeCode = document.getElementById('pinvTaxType')?.value || '';
+  const calcMethod = document.getElementById('pinvTaxCalcMethod')?.value || 'exclusive';
+  const r = pinvTaxPreview(linesTotal, taxTypeCode, calcMethod);
+  const subEl=document.getElementById('pinvSubtotal'); if(subEl) subEl.textContent=fmt(r.subtotal);
+  const taxEl=document.getElementById('pinvTaxAmount'); if(taxEl) taxEl.textContent=fmt(r.tax);
+  const taxLabel=document.getElementById('pinvTaxLabel'); if(taxLabel) taxLabel.textContent = r.taxType ? `الضريبة (${r.taxType.name_ar||r.taxType.code} ${fmt(r.taxType.rate)}%)` : 'الضريبة';
+  const totalEl=document.getElementById('pinvTotal'); if(totalEl) totalEl.textContent=fmt(r.total);
+}
+window.recalcPinvTotals = recalcPinvTotals;
 
 function onDinvSupplierChange(){
   const sup=(suppliers||[]).find(s=>s.code===document.getElementById('dinvSupplier').value);
@@ -4032,16 +4130,23 @@ function resetDirectInvoiceForm(){
   const rf=document.getElementById('dinvRef'); if(rf) rf.value='';
   const tm=document.getElementById('dinvTerms');
   const cc=document.getElementById('dinvCostCenter');
+  const tt=document.getElementById('dinvTaxType');
+  const tcm=document.getElementById('dinvTaxCalcMethod');
   const err=document.getElementById('dinvErr'); if(err) err.textContent='';
-  // تطبيق القيم الافتراضية من إعدادات المشتريات (مركز التكلفة وشروط الدفع)
+  // تطبيق القيم الافتراضية من إعدادات المشتريات (مركز التكلفة، شروط الدفع، الضريبة)
   if(typeof loadPurchaseSettings === 'function'){
     const pset = loadPurchaseSettings();
     if(tm) tm.value = pset.defaultPaymentTerms || 0;
     if(cc) cc.value = pset.defaultCostCenter || '';
+    if(tt) tt.value = pset.defaultTaxType || '';
+    if(tcm) tcm.value = pset.taxCalcMethod || 'exclusive';
   } else {
     if(tm) tm.value='0';
     if(cc) cc.value='';
+    if(tt) tt.value='';
+    if(tcm) tcm.value='exclusive';
   }
+  if(typeof recalcDinvTotals === 'function') recalcDinvTotals();
 }
 window.resetDirectInvoiceForm = resetDirectInvoiceForm;
 
@@ -4052,6 +4157,8 @@ async function submitDirectPinv(){
   const reference=document.getElementById('dinvRef').value.trim()||null;
   const payment_terms_days=parseInt(document.getElementById('dinvTerms').value)||0;
   const cost_center_code=document.getElementById('dinvCostCenter').value||null;
+  const tax_type_code=document.getElementById('dinvTaxType')?.value||null;
+  const tax_calc_method=document.getElementById('dinvTaxCalcMethod')?.value||'exclusive';
   const err=document.getElementById('dinvErr');
   const valid=dinvLines.filter(l=>l.itemCode && l.qty>0);
   if(!supplier_code){err.textContent='يرجى اختيار المورد'; return;}
@@ -4061,6 +4168,7 @@ async function submitDirectPinv(){
   try{
     await api('POST','/api/purchase-invoices/direct',{
       supplier_code, inv_date, supplier_inv_number, reference, payment_terms_days, cost_center_code,
+      tax_type_code, tax_calc_method,
       lines: valid.map(l=>{
         const it=(items||[]).find(i=>i.code===l.itemCode);
         const factor = it ? (getItemUnitFactor(it, l.unit)||1) : 1;

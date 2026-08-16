@@ -6,10 +6,13 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.models import (
+    Account,
     CostCenter,
     GoodsReceipt,
     GoodsReceiptLine,
     Item,
+    JournalEntry,
+    JournalEntryLine,
     PurchaseInvoice,
     PurchaseInvoiceLine,
     PurchaseOrder,
@@ -18,6 +21,7 @@ from app.models.models import (
     PurchaseReturnLine,
     StockMove,
     Supplier,
+    TaxType,
 )
 from app.schemas.inventory import (
     ItemIn,
@@ -753,6 +757,130 @@ def create_grn(
 
 
 # =========================================================
+# ضريبة فاتورة المشتريات + الترحيل المحاسبي التلقائي
+# =========================================================
+
+def _resolve_invoice_tax(db: Session, lines_total: float, tax_type_code, tax_calc_method):
+    """يحدد صافي قيمة الأصناف ومبلغ الضريبة وإجمالي الفاتورة بناءً على
+    نوع الضريبة المختار وطريقة الاحتساب (متضمنة/غير متضمنة). عند عدم
+    اختيار ضريبة، الصافي = الإجمالي = مجموع الأصناف كما كان سابقاً."""
+    if not tax_type_code:
+        total = round(lines_total, 2)
+        return total, 0.0, total, None
+
+    tax_type = (
+        db.query(TaxType)
+        .filter(TaxType.code == tax_type_code, TaxType.is_active.is_(True))
+        .first()
+    )
+    if not tax_type:
+        raise HTTPException(
+            status_code=404,
+            detail=f"نوع الضريبة {tax_type_code} غير موجود أو غير مفعّل",
+        )
+
+    rate = _to_float(tax_type.rate)
+    if tax_calc_method == "inclusive":
+        subtotal = (lines_total / (1 + rate / 100)) if rate else lines_total
+        tax_amount = lines_total - subtotal
+    else:
+        subtotal = lines_total
+        tax_amount = lines_total * rate / 100
+
+    subtotal = round(subtotal, 2)
+    tax_amount = round(tax_amount, 2)
+    total = round(subtotal + tax_amount, 2)
+    return subtotal, tax_amount, total, tax_type
+
+
+def _post_purchase_invoice_journal(
+    db: Session,
+    invoice: PurchaseInvoice,
+    subtotal: float,
+    tax_amount: float,
+    total: float,
+    tax_type,
+):
+    """يرحّل القيد المحاسبي التلقائي لفاتورة المشتريات:
+    مدين المخزون (123) [+ مدين حساب ضريبة المشتريات إن كان نوع الضريبة
+    مرتبطاً بحساب بدليل الحسابات] / دائن حساب المورد (فرع من 211)."""
+    inventory_account = db.query(Account).filter(Account.code == "123").first()
+    if not inventory_account:
+        raise HTTPException(
+            status_code=400,
+            detail="حساب المخزون (123) غير موجود بدليل الحسابات — لا يمكن ترحيل القيد المحاسبي للفاتورة. "
+                   "يرجى إنشاء الحساب أولاً من شاشة دليل الحسابات.",
+        )
+
+    supplier = db.query(Supplier).filter(Supplier.code == invoice.supplier_code).first()
+    payable_account_code = (supplier.account_code if supplier and supplier.account_code else None) or "211"
+    payable_account = db.query(Account).filter(Account.code == payable_account_code).first()
+    if not payable_account:
+        raise HTTPException(
+            status_code=400,
+            detail=f"الحساب المحاسبي المرتبط بالمورد ({payable_account_code}) غير موجود بدليل الحسابات.",
+        )
+
+    tax_account = None
+    if tax_type and tax_type.account_code:
+        tax_account = db.query(Account).filter(Account.code == tax_type.account_code).first()
+
+    entry = JournalEntry(
+        entry_date=invoice.inv_date,
+        description=f"فاتورة مشتريات {invoice.inv_number} — المورد {invoice.supplier_code}",
+        source_type="purchase_invoice",
+        source_ref=invoice.inv_number,
+        invoice_number=invoice.inv_number,
+        supplier_code=invoice.supplier_code,
+        status="posted",
+        cost_center_code=invoice.cost_center_code,
+        total_amount=total,
+    )
+    db.add(entry)
+    db.flush()
+
+    line_no = 1
+    if tax_amount and tax_account:
+        # حساب ضريبة مستقل ومربوط بدليل الحسابات: مدين المخزون بالصافي + مدين حساب الضريبة
+        db.add(JournalEntryLine(
+            entry_id=entry.id, line_no=line_no, account_code=inventory_account.code,
+            debit=subtotal, credit=0,
+            line_description=f"مخزون — فاتورة مشتريات {invoice.inv_number}",
+        ))
+        line_no += 1
+        db.add(JournalEntryLine(
+            entry_id=entry.id, line_no=line_no, account_code=tax_account.code,
+            debit=tax_amount, credit=0,
+            line_description=f"ضريبة مشتريات (مدخلات) — فاتورة {invoice.inv_number}",
+            tax_type_code=tax_type.code, tax_rate=tax_type.rate, tax_amount=tax_amount,
+        ))
+        line_no += 1
+    else:
+        # لا يوجد نوع ضريبة، أو نوع الضريبة غير مربوط بحساب مستقل: تُطوى
+        # الضريبة (إن وُجدت) داخل تكلفة المخزون وتبقى مجرد قيمة معلوماتية
+        line_kwargs = dict(
+            entry_id=entry.id, line_no=line_no, account_code=inventory_account.code,
+            debit=round(subtotal + (tax_amount or 0), 2), credit=0,
+            line_description=f"مخزون — فاتورة مشتريات {invoice.inv_number}",
+        )
+        if tax_type and tax_amount:
+            line_kwargs.update(
+                tax_type_code=tax_type.code, tax_rate=tax_type.rate, tax_amount=tax_amount,
+            )
+        db.add(JournalEntryLine(**line_kwargs))
+        line_no += 1
+
+    db.add(JournalEntryLine(
+        entry_id=entry.id, line_no=line_no, account_code=payable_account.code,
+        debit=0, credit=total,
+        line_description=f"مستحق للمورد {invoice.supplier_code} — فاتورة {invoice.inv_number}",
+    ))
+
+    invoice.journal_entry_id = entry.id
+    return entry
+
+
+# =========================================================
 # PURCHASE INVOICE
 # =========================================================
 @pinv_router.get("", response_model=list[PurchaseInvoiceOut])
@@ -851,8 +979,16 @@ def create_purchase_invoice(
             )
             total += qty * unit_cost
 
+        subtotal, tax_amount, total, tax_type = _resolve_invoice_tax(
+            db, total, payload.tax_type_code, payload.tax_calc_method
+        )
+        invoice.subtotal = subtotal
+        invoice.tax_amount = tax_amount
+        invoice.tax_type_code = tax_type.code if tax_type else None
         invoice.total = total
         grn.invoice_status = "invoiced"
+
+        _post_purchase_invoice_journal(db, invoice, subtotal, tax_amount, total, tax_type)
 
         db.commit()
         db.refresh(invoice)
@@ -898,6 +1034,8 @@ def create_direct_purchase_invoice(
         supplier_inv_number=payload.supplier_inv_number,
         payment_terms_days=payload.payment_terms_days,
         cost_center_code=payload.cost_center_code,
+        tax_type_code=payload.tax_type_code,
+        tax_calc_method=payload.tax_calc_method,
     )
     return create_purchase_invoice(payload=inv_payload, db=db)
 
@@ -941,6 +1079,11 @@ def update_purchase_invoice(
 
     if payload.inv_date is not None:
         invoice.inv_date = payload.inv_date
+        # مزامنة تاريخ القيد المحاسبي المرتبط حتى يبقى متسقاً مع تاريخ الفاتورة
+        if invoice.journal_entry_id:
+            entry = db.query(JournalEntry).filter(JournalEntry.id == invoice.journal_entry_id).first()
+            if entry:
+                entry.entry_date = payload.inv_date
     if payload.supplier_inv_number is not None:
         invoice.supplier_inv_number = payload.supplier_inv_number or None
     if payload.payment_terms_days is not None:
@@ -958,7 +1101,8 @@ def cancel_purchase_invoice(
 ):
     """إلغاء فاتورة مشتريات (وليس حذفها نهائياً) حفاظاً على سلامة السجل
     المحاسبي والترقيم المتسلسل. تُعلَّم الفاتورة كملغاة ويعود إذن
-    الاستلام المرتبط بها قابلاً للفوترة من جديد."""
+    الاستلام المرتبط بها قابلاً للفوترة من جديد، ويُلغى القيد المحاسبي
+    المرتبط بها (بدلاً من حذفه) حتى لا يبقى مؤثراً على أي رصيد."""
     invoice = (
         db.query(PurchaseInvoice)
         .filter(PurchaseInvoice.inv_number == inv_number)
@@ -981,6 +1125,11 @@ def cancel_purchase_invoice(
     )
     if grn:
         grn.invoice_status = "not_invoiced"
+
+    if invoice.journal_entry_id:
+        entry = db.query(JournalEntry).filter(JournalEntry.id == invoice.journal_entry_id).first()
+        if entry and entry.status == "posted":
+            entry.status = "cancelled"
 
     db.commit()
     db.refresh(invoice)
