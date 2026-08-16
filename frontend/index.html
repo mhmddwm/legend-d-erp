@@ -1170,6 +1170,12 @@ html[dir="ltr"] .brand-center{direction:ltr;}
 /* تغميق لون خط الوصف والتلميحات قليلاً لتحسين وضوح القراءة */
 #panel-purchase_invoices .po-hero p{color:#4b5768}
 #panel-purchase_invoices .hint{color:#48566b}
+#panel-purchase_invoices .po-hero{padding:14px 18px}
+#panel-purchase_invoices .po-hero h2{font-size:20px;margin:2px 0 4px}
+#panel-purchase_invoices .po-hero p{font-size:12.5px}
+#panel-purchase_invoices .po-trace{margin-bottom:12px}
+#panel-purchase_invoices .pinv-list-main{min-height:520px;display:flex;flex-direction:column}
+#panel-purchase_invoices .pinv-list-scroll{flex:1}
 </style>
 </head>
 <body class="erp-body">
@@ -2559,11 +2565,17 @@ html[dir="ltr"] .brand-center{direction:ltr;}
       <div class="po-actions">
         <button class="btn secondary" onclick="renderInvoices()">تحديث</button>
         <button class="btn secondary" onclick="printPurchaseInvoice()">طباعة</button>
-        <button class="btn secondary" onclick="window.toggleDirectInvoiceForm()">+ إنشاء فاتورة مباشرة</button>
-        <button class="btn" onclick="submitPinv()">ترحيل الفاتورة</button>
+        <button class="btn secondary" onclick="window.togglePinvNewForm()">+ فاتورة من استلام</button>
+        <button class="btn" onclick="window.toggleDirectInvoiceForm()">+ إنشاء فاتورة مباشرة</button>
       </div>
     </div>
     <div class="po-trace formcard rfq-timeline" id="pinvTraceBar"><span onclick="window.goPoWorkflowStage('purchase_request')">طلب شراء</span><b>←</b><span onclick="window.goPoWorkflowStage('quotation_request')">طلب عرض سعر</span><b>←</b><span onclick="window.goPoWorkflowStage('compare')">مقارنة العروض</span><b>←</b><span onclick="window.goPoWorkflowStage('purchase_orders')">أمر شراء</span><b>←</b><span onclick="window.goPoWorkflowStage('goods_receipt')">استلام</span><b>←</b><span class="active" onclick="window.goPoWorkflowStage('purchase_invoices')">فاتورة</span><b>←</b><span onclick="window.goPoWorkflowStage('supplier_payments')">الدفع</span></div>
+
+    <div class="formcard rfq-card pinv-list-main" style="margin-top:14px">
+      <div class="rfq-saved-toolbar"><div><h3 style="margin:0">فواتير المشتريات المسجّلة</h3><small id="pinvSavedCount">0 فاتورة</small></div><input id="pinvSearch" placeholder="بحث برقم الفاتورة أو المورد أو رقم فاتورة المورد" oninput="renderInvoices()"></div>
+      <div class="scrollx pinv-list-scroll"><table class="grid po-list-table"><thead><tr><th>رقم الفاتورة</th><th>التاريخ</th><th>المورد</th><th>الاستلام</th><th>فاتورة المورد</th><th>الإجمالي</th><th>تاريخ الاستحقاق</th><th>الحالة</th><th style="text-align:center">الإجراءات</th></tr></thead><tbody id="pinvBody"></tbody></table></div>
+      <div id="pinvEmpty" class="pr-list-empty" style="display:none">لا توجد فواتير مشتريات مسجلة حتى الآن</div>
+    </div>
 
     <div id="dinvFormBox" class="formcard" style="display:none;margin-top:14px;border:1.5px dashed #93c5fd">
       <h3>فاتورة مشتريات مباشرة (بدون دورة شراء)</h3>
@@ -2593,8 +2605,11 @@ html[dir="ltr"] .brand-center{direction:ltr;}
       <div class="err" id="dinvErr"></div>
     </div>
 
-    <div class="formcard" style="margin-top:14px">
-      <h3>فاتورة مشتريات جديدة</h3>
+    <div id="pinvNewFormBox" class="formcard" style="display:none;margin-top:14px;border:1.5px dashed #93c5fd">
+      <div class="rfq-section-head">
+        <h3>فاتورة مشتريات جديدة (من إذن استلام)</h3>
+        <button class="btn secondary" onclick="togglePinvNewForm(false)">إلغاء</button>
+      </div>
       <div class="frow two">
         <div class="field"><label>الاستلام المرتبط</label>
           <select id="pinvGrn" onchange="onPinvGrnChange()"><option value="">— اختر استلامًا —</option></select></div>
@@ -2613,12 +2628,6 @@ html[dir="ltr"] .brand-center{direction:ltr;}
       <div style="margin-top:14px"><button class="btn" onclick="submitPinv()">ترحيل الفاتورة</button></div>
       <div class="err" id="pinvErr"></div>
       <div class="hint">لا يمكن ترحيل أكثر من فاتورة واحدة لنفس إذن الاستلام. تظهر في القائمة أعلاه أذون الاستلام التي لم تُفوتر بعد فقط.</div>
-    </div>
-
-    <div class="formcard rfq-card" style="margin-top:14px">
-      <div class="rfq-saved-toolbar"><div><h3 style="margin:0">فواتير المشتريات المسجّلة</h3><small id="pinvSavedCount">0 فاتورة</small></div><input id="pinvSearch" placeholder="بحث برقم الفاتورة أو المورد أو رقم فاتورة المورد" oninput="renderInvoices()"></div>
-      <div class="scrollx"><table class="grid po-list-table"><thead><tr><th>رقم الفاتورة</th><th>التاريخ</th><th>المورد</th><th>الاستلام</th><th>فاتورة المورد</th><th>الإجمالي</th><th>تاريخ الاستحقاق</th><th>الحالة</th><th style="text-align:center">الإجراءات</th></tr></thead><tbody id="pinvBody"></tbody></table></div>
-      <div id="pinvEmpty" class="pr-list-empty" style="display:none">لا توجد فواتير مشتريات مسجلة حتى الآن</div>
     </div>
   </div>
 </div>

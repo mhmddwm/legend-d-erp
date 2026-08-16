@@ -3267,6 +3267,22 @@ window.printGoodsReceipt = printGoodsReceipt;
 // ============================================================
 // فاتورة المشتريات
 // ============================================================
+
+// إظهار/إخفاء نموذج "فاتورة مشتريات جديدة (من إذن استلام)" — مطوي افتراضياً
+// حتى تبقى قائمة الفواتير المسجّلة هي الجزء الأكبر والأبرز بالشاشة
+function togglePinvNewForm(forceOpen){
+  const box=document.getElementById('pinvNewFormBox');
+  if(!box) return;
+  const isHidden = box.style.display==='none' || !box.style.display;
+  const open = forceOpen===true ? true : (forceOpen===false ? false : isHidden);
+  box.style.display = open ? 'block' : 'none';
+  if(open){
+    if(typeof renderGRNs === 'function') { /* القائمة تُحدَّث أصلاً عبر loadAll، لا حاجة لإعادة تحميل هنا */ }
+    box.scrollIntoView({behavior:'smooth', block:'nearest'});
+  }
+}
+window.togglePinvNewForm = togglePinvNewForm;
+
 function onPinvGrnChange(){
   const grn=grns.find(g=>g.grn_number===document.getElementById('pinvGrn').value);
   const wrap=document.getElementById('pinvLinesWrap');
@@ -3302,6 +3318,7 @@ async function submitPinv(){
     document.getElementById('pinvLinesWrap').innerHTML='';
     document.getElementById('pinvTotal').textContent='0.00';
     document.getElementById('pinvSupplier').value='';
+    if(typeof togglePinvNewForm === 'function') togglePinvNewForm(false);
     await loadAll();
   }catch(e){err.textContent=e.message;}
 }
