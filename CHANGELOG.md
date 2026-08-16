@@ -80,3 +80,7 @@
 - Purchase Invoice: the automatic journal entry posted on invoicing no longer debits Inventory a second time. It now debits GRNI (`217`) to clear the accrual raised at receipt [+ debit the purchase-tax account when applicable] / credit the supplier's payable account — so inventory is only ever debited once, at receipt.
 - Cancelling a posted purchase invoice still only cancels the invoice's own journal entry (the GRNI-clearing/payable entry); the GRN's inventory/GRNI entry is untouched, which correctly re-opens the GRNI accrual until the GRN is invoiced again.
 - Frontend: updated the purchase invoice detail view's auto-posting hint to describe the new GRNI-clearing entry instead of the old (now inaccurate) "debit inventory" wording.
+
+## ACC-PUR-007 — Fix missing Inventory account (123) blocking auto-posting
+- Root-cause fix for `حساب المخزون (123) غير موجود بدليل الحسابات`: the codebase had two competing account codes for Inventory — `schema.sql`/migration `002` seeded `113`, while migration `003`'s comments and all backend posting logic (`purchasing.py`) assumed `123` already existed without ever creating it. Any database bootstrapped from `schema.sql` alone therefore had no working Inventory account for automatic journal posting.
+- Migration `023_ensure_inventory_account.sql`: creates system account `123` — المخزون / Inventory — under Current Assets (`11`) if missing, idempotently. Deactivates the old unused `113` account automatically, but only if it has no journal lines posted against it (never touches historical data).
