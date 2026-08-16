@@ -46,11 +46,6 @@ from app.schemas.purchasing import (
 )
 
 
-# حسابات نظامية يعتمد عليها الترحيل الآلي بالكود (دليل الحسابات):
-INVENTORY_ACCOUNT_CODE = "123"   # المخزون
-GRNI_ACCOUNT_CODE = "217"        # بضاعة مستلمة غير مفوترة (حساب وسيط مؤقت)
-DEFAULT_PAYABLE_ACCOUNT_CODE = "211"  # الموردون (احتياطي إن لم يكن للمورد حساب مخصص)
-
 router = APIRouter(prefix="/api/items", tags=["Items"])
 stock_router = APIRouter(prefix="/api/stock-moves", tags=["StockMoves"])
 supplier_router = APIRouter(prefix="/api/suppliers", tags=["Suppliers"])
@@ -622,6 +617,67 @@ def create_grn(
     payload: GoodsReceiptIn,
     db: Session = Depends(get_db),
 ):
+    return _create_grn_core(payload, db, post_journal=True)
+
+
+def _post_grn_journal(db: Session, grn: GoodsReceipt, total: float):
+    """يرحّل قيد الاستلام: مدين المخزون (123) / دائن بضاعة مستلمة غير
+    مفوترة (217) — يعكس دخول البضاعة فعلياً للمخزون فور استلامها، قبل
+    وصول فاتورة المورد بفترة قد تمتد لأيام أو أسابيع."""
+    if not total:
+        return None
+
+    inventory_account = db.query(Account).filter(Account.code == "123").first()
+    if not inventory_account:
+        raise HTTPException(
+            status_code=400,
+            detail="حساب المخزون (123) غير موجود بدليل الحسابات — لا يمكن ترحيل قيد الاستلام.",
+        )
+    grni_account = db.query(Account).filter(Account.code == "217").first()
+    if not grni_account:
+        raise HTTPException(
+            status_code=400,
+            detail="حساب (بضاعة مستلمة غير مفوترة - 217) غير موجود بدليل الحسابات — لا يمكن ترحيل قيد الاستلام. "
+                   "يرجى تطبيق تحديث دليل الحسابات أولاً.",
+        )
+
+    entry = JournalEntry(
+        entry_date=grn.grn_date,
+        description=f"استلام بضاعة {grn.grn_number} — المورد {grn.supplier_code}",
+        source_type="goods_receipt",
+        source_ref=grn.grn_number,
+        supplier_code=grn.supplier_code,
+        status="posted",
+        total_amount=total,
+    )
+    db.add(entry)
+    db.flush()
+
+    db.add(JournalEntryLine(
+        entry_id=entry.id, line_no=1, account_code=inventory_account.code,
+        debit=total, credit=0,
+        line_description=f"مخزون — استلام {grn.grn_number}",
+    ))
+    db.add(JournalEntryLine(
+        entry_id=entry.id, line_no=2, account_code=grni_account.code,
+        debit=0, credit=total,
+        line_description=f"بضاعة مستلمة غير مفوترة — استلام {grn.grn_number}",
+    ))
+
+    grn.journal_entry_id = entry.id
+    return entry
+
+
+def _create_grn_core(
+    payload: GoodsReceiptIn,
+    db: Session,
+    post_journal: bool = True,
+):
+    """المنطق الفعلي لإنشاء إذن استلام. post_journal=True يرحّل قيد
+    الاستلام التلقائي (مدين المخزون / دائن بضاعة مستلمة غير مفوترة).
+    يُمرَّر post_journal=False فقط عند الإنشاء التلقائي خلف فاتورة
+    مشتريات مباشرة، حيث لا توجد فجوة زمنية حقيقية بين الاستلام والفوترة
+    (يحدثان بنفس اللحظة)، فيُكتفى بقيد الفاتورة المباشر بخطوة واحدة."""
     _validate_lines(payload.lines, "إذن الاستلام")
 
     supplier = (
@@ -749,7 +805,8 @@ def create_grn(
         if purchase_order:
             purchase_order.status = "received"
 
-        _post_grn_journal(db, grn, total)
+        if post_journal:
+            _post_grn_journal(db, grn, total)
 
         db.commit()
         db.refresh(grn)
@@ -761,57 +818,6 @@ def create_grn(
     except Exception:
         db.rollback()
         raise
-
-
-def _post_grn_journal(db: Session, grn: GoodsReceipt, total: float):
-    """يرحّل القيد المحاسبي التلقائي لإذن الاستلام (GRN) فور تأكيد
-    استلام البضاعة فعلياً — قبل وصول فاتورة المورد: مدين المخزون (123)
-    / دائن حساب "بضاعة مستلمة غير مفوترة" (217) كحساب وسيط مؤقت يمثل
-    التزاماً غير مفوتر بعد تجاه المورد. هذا أول قيد محاسبي يُرحّل بدورة
-    الشراء الآن (بدلاً من فاتورة المشتريات سابقاً)."""
-    inventory_account = db.query(Account).filter(Account.code == INVENTORY_ACCOUNT_CODE).first()
-    if not inventory_account:
-        raise HTTPException(
-            status_code=400,
-            detail=f"حساب المخزون ({INVENTORY_ACCOUNT_CODE}) غير موجود بدليل الحسابات — لا يمكن ترحيل القيد "
-                   "المحاسبي لإذن الاستلام. يرجى إنشاء الحساب أولاً من شاشة دليل الحسابات.",
-        )
-
-    grni_account = db.query(Account).filter(Account.code == GRNI_ACCOUNT_CODE).first()
-    if not grni_account:
-        raise HTTPException(
-            status_code=400,
-            detail=f"حساب بضاعة مستلمة غير مفوترة ({GRNI_ACCOUNT_CODE}) غير موجود بدليل الحسابات — لا يمكن "
-                   "ترحيل القيد المحاسبي لإذن الاستلام. يرجى إنشاء الحساب أولاً من شاشة دليل الحسابات.",
-        )
-
-    amount = round(_to_float(total), 2)
-
-    entry = JournalEntry(
-        entry_date=grn.grn_date,
-        description=f"إذن استلام {grn.grn_number} — المورد {grn.supplier_code}",
-        source_type="goods_receipt",
-        source_ref=grn.grn_number,
-        supplier_code=grn.supplier_code,
-        status="posted",
-        total_amount=amount,
-    )
-    db.add(entry)
-    db.flush()
-
-    db.add(JournalEntryLine(
-        entry_id=entry.id, line_no=1, account_code=inventory_account.code,
-        debit=amount, credit=0,
-        line_description=f"مخزون — إذن استلام {grn.grn_number}",
-    ))
-    db.add(JournalEntryLine(
-        entry_id=entry.id, line_no=2, account_code=grni_account.code,
-        debit=0, credit=amount,
-        line_description=f"بضاعة مستلمة غير مفوترة — إذن استلام {grn.grn_number}",
-    ))
-
-    grn.journal_entry_id = entry.id
-    return entry
 
 
 # =========================================================
@@ -854,29 +860,45 @@ def _resolve_invoice_tax(db: Session, lines_total: float, tax_type_code, tax_cal
 def _post_purchase_invoice_journal(
     db: Session,
     invoice: PurchaseInvoice,
+    grn,
     subtotal: float,
     tax_amount: float,
     total: float,
     tax_type,
 ):
-    """يرحّل القيد المحاسبي التلقائي لفاتورة المشتريات: مدين حساب
-    "بضاعة مستلمة غير مفوترة" (217) لتصفيته [+ مدين حساب ضريبة
-    المشتريات إن كان نوع الضريبة مرتبطاً بحساب بدليل الحسابات] / دائن
-    حساب المورد (فرع من 211). قيد الفاتورة لا يمسّ حساب المخزون (123)
-    مطلقاً — المخزون يُمدَّن مرة واحدة فقط عند الاستلام (GRN)، وقيد
-    الفاتورة يقتصر على تصفية الالتزام الوسيط وإثبات المستحق للمورد."""
-    grni_account = db.query(Account).filter(Account.code == GRNI_ACCOUNT_CODE).first()
-    if not grni_account:
+    """يرحّل القيد المحاسبي التلقائي لفاتورة المشتريات.
+
+    - إن كان إذن الاستلام المرتبط قد رُحّل له قيد استلام مستقل مسبقاً
+      (مدين المخزون / دائن بضاعة مستلمة غير مفوترة — الحالة الطبيعية في
+      دورة الشراء الكاملة)، فقيد الفاتورة هنا **يقفل** ذلك الحساب
+      الوسيط: مدين بضاعة مستلمة غير مفوترة (بقيمة الصافي) [+ مدين حساب
+      الضريبة، أو تسوية تكلفة إضافية على المخزون إن لم يوجد حساب ضريبة
+      مرتبط] / دائن حساب المورد.
+    - وإن لم يوجد قيد استلام مستقل (حالة الفاتورة المباشرة، حيث لا
+      توجد فجوة زمنية حقيقية بين الاستلام والفوترة لأنهما يحدثان بنفس
+      اللحظة)، يُرحَّل القيد بخطوة واحدة كما كان: مدين المخزون مباشرة
+      / دائن حساب المورد."""
+    inventory_account = db.query(Account).filter(Account.code == "123").first()
+    if not inventory_account:
         raise HTTPException(
             status_code=400,
-            detail=f"حساب بضاعة مستلمة غير مفوترة ({GRNI_ACCOUNT_CODE}) غير موجود بدليل الحسابات — لا يمكن "
-                   "ترحيل القيد المحاسبي للفاتورة. يرجى إنشاء الحساب أولاً من شاشة دليل الحسابات.",
+            detail="حساب المخزون (123) غير موجود بدليل الحسابات — لا يمكن ترحيل القيد المحاسبي للفاتورة. "
+                   "يرجى إنشاء الحساب أولاً من شاشة دليل الحسابات.",
         )
 
+    use_grni = bool(grn and grn.journal_entry_id)
+    grni_account = None
+    if use_grni:
+        grni_account = db.query(Account).filter(Account.code == "217").first()
+        if not grni_account:
+            raise HTTPException(
+                status_code=400,
+                detail="حساب (بضاعة مستلمة غير مفوترة - 217) غير موجود بدليل الحسابات — "
+                       "لا يمكن ترحيل القيد المحاسبي للفاتورة. يرجى تطبيق تحديث دليل الحسابات أولاً.",
+            )
+
     supplier = db.query(Supplier).filter(Supplier.code == invoice.supplier_code).first()
-    payable_account_code = (
-        supplier.account_code if supplier and supplier.account_code else None
-    ) or DEFAULT_PAYABLE_ACCOUNT_CODE
+    payable_account_code = (supplier.account_code if supplier and supplier.account_code else None) or "211"
     payable_account = db.query(Account).filter(Account.code == payable_account_code).first()
     if not payable_account:
         raise HTTPException(
@@ -902,13 +924,20 @@ def _post_purchase_invoice_journal(
     db.add(entry)
     db.flush()
 
+    main_account_code = grni_account.code if use_grni else inventory_account.code
+    main_desc = (
+        f"تسوية بضاعة مستلمة غير مفوترة — فاتورة {invoice.inv_number} ({grn.grn_number})"
+        if use_grni else
+        f"مخزون — فاتورة مشتريات {invoice.inv_number}"
+    )
+
     line_no = 1
     if tax_amount and tax_account:
-        # حساب ضريبة مستقل ومربوط بدليل الحسابات: مدين تصفية GRNI بالصافي + مدين حساب الضريبة
+        # حساب ضريبة مستقل ومربوط بدليل الحسابات: إقفال GRNI/تسجيل المخزون بالصافي + مدين حساب الضريبة
         db.add(JournalEntryLine(
-            entry_id=entry.id, line_no=line_no, account_code=grni_account.code,
+            entry_id=entry.id, line_no=line_no, account_code=main_account_code,
             debit=subtotal, credit=0,
-            line_description=f"تصفية بضاعة مستلمة غير مفوترة — فاتورة مشتريات {invoice.inv_number}",
+            line_description=main_desc,
         ))
         line_no += 1
         db.add(JournalEntryLine(
@@ -918,13 +947,30 @@ def _post_purchase_invoice_journal(
             tax_type_code=tax_type.code, tax_rate=tax_type.rate, tax_amount=tax_amount,
         ))
         line_no += 1
+    elif tax_amount and use_grni:
+        # ضريبة بدون حساب مرتبط + قيد استلام سابق: تُقفل GRNI بالصافي فقط
+        # (لأن هذا هو المبلغ المُرحَّل أصلاً عند الاستلام)، وتُضاف الضريبة
+        # كتسوية تكلفة إضافية منفصلة على المخزون بدل خلطها بسطر الإقفال
+        db.add(JournalEntryLine(
+            entry_id=entry.id, line_no=line_no, account_code=main_account_code,
+            debit=subtotal, credit=0,
+            line_description=main_desc,
+        ))
+        line_no += 1
+        db.add(JournalEntryLine(
+            entry_id=entry.id, line_no=line_no, account_code=inventory_account.code,
+            debit=tax_amount, credit=0,
+            line_description=f"تسوية تكلفة (ضريبة غير مربوطة بحساب) — فاتورة {invoice.inv_number}",
+            tax_type_code=tax_type.code, tax_rate=tax_type.rate, tax_amount=tax_amount,
+        ))
+        line_no += 1
     else:
-        # لا يوجد نوع ضريبة، أو نوع الضريبة غير مربوط بحساب مستقل: تُطوى
-        # الضريبة (إن وُجدت) داخل تصفية GRNI وتبقى مجرد قيمة معلوماتية
+        # لا يوجد نوع ضريبة، أو (حالة الفاتورة المباشرة بدون GRNI) ضريبة
+        # بدون حساب مرتبط: تُطوى ضمن نفس سطر المخزون الرئيسي
         line_kwargs = dict(
-            entry_id=entry.id, line_no=line_no, account_code=grni_account.code,
+            entry_id=entry.id, line_no=line_no, account_code=main_account_code,
             debit=round(subtotal + (tax_amount or 0), 2), credit=0,
-            line_description=f"تصفية بضاعة مستلمة غير مفوترة — فاتورة مشتريات {invoice.inv_number}",
+            line_description=main_desc,
         )
         if tax_type and tax_amount:
             line_kwargs.update(
@@ -1051,7 +1097,7 @@ def create_purchase_invoice(
         invoice.total = total
         grn.invoice_status = "invoiced"
 
-        _post_purchase_invoice_journal(db, invoice, subtotal, tax_amount, total, tax_type)
+        _post_purchase_invoice_journal(db, invoice, grn, subtotal, tax_amount, total, tax_type)
 
         db.commit()
         db.refresh(invoice)
@@ -1089,7 +1135,11 @@ def create_direct_purchase_invoice(
         reference=payload.reference or "فاتورة مباشرة (بدون دورة شراء)",
         lines=payload.lines,
     )
-    grn = create_grn(payload=grn_payload, db=db)
+    # لا يُرحَّل قيد استلام مستقل هنا: الاستلام والفاتورة يحدثان بنفس
+    # اللحظة (بدون فجوة زمنية حقيقية)، فيُكتفى بقيد الفاتورة المباشر
+    # بخطوة واحدة (مدين المخزون مباشرة / دائن المورد) بدل المرور بحساب
+    # "بضاعة مستلمة غير مفوترة" الذي يُفتح ويُقفل بلا فائدة في نفس اللحظة.
+    grn = _create_grn_core(grn_payload, db, post_journal=False)
 
     inv_payload = PurchaseInvoiceIn(
         inv_date=payload.inv_date,

@@ -3464,7 +3464,7 @@ function openPurchaseInvoiceView(invNumber){
       ${taxRowsHtml}
       <div class="row grand"><span>إجمالي الفاتورة</span><span>${fmt(inv.total)}</span></div>
     </div>
-    ${inv.journal_entry_id ? `<div class="hint" style="margin-top:10px">✅ تم ترحيل القيد المحاسبي رقم ${inv.journal_entry_id} تلقائياً (مدين بضاعة مستلمة غير مفوترة (تصفية)${inv.tax_amount>0?' وضريبة المشتريات':''} / دائن حساب المورد). المخزون سبق ترحيله عند الاستلام.</div>` : ''}
+    ${inv.journal_entry_id ? `<div class="hint" style="margin-top:10px">✅ تم ترحيل القيد المحاسبي رقم ${inv.journal_entry_id} تلقائياً (مدين المخزون${inv.tax_amount>0?' وضريبة المشتريات':''} / دائن حساب المورد).</div>` : ''}
   </div></div>`;
   document.body.insertAdjacentHTML('beforeend', html);
 }
