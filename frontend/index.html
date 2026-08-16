@@ -626,6 +626,8 @@ table.grid td.muted{color:var(--muted);font-size:12px;}
 .badge.partial{background:var(--amber-bg);color:var(--amber);}
 .badge.posted{background:var(--accent-light);color:var(--accent);}
 .badge.returned{background:var(--coral-bg);color:var(--coral);}
+.badge.system{background:#eef6ff;color:#0b5db8;border:1px solid #cfe4ff;}
+.badge.manual{background:#f1f5f9;color:#475569;border:1px solid #e2e8f0;}
 .badge.not_invoiced{background:var(--bg-page);color:var(--muted);}
 
 
@@ -1818,7 +1820,7 @@ html[dir="ltr"] .brand-center{direction:ltr;}
       <table class="grid">
         <thead><tr>
           <th>رقم القيد</th><th>التاريخ</th><th>الفرع</th><th>الحسابات</th>
-          <th>الإجمالي</th><th>البيان</th><th>منشئ القيد</th><th>الحالة</th>
+          <th>الإجمالي</th><th>البيان</th><th>المصدر</th><th>منشئ القيد</th><th>الحالة</th>
           <th>
             <select id="journalSortSelect" class="journal-sort-select" onchange="applyJournalSort()" title="ترتيب القيود">
               <option value="entry_date_desc">ترتيب: تاريخ القيد (الأحدث)</option>

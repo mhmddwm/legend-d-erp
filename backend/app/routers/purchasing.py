@@ -889,6 +889,180 @@ def _create_grn_core(
         raise
 
 
+def _is_grn_edit_safe(db: Session, grn: GoodsReceipt):
+    """يتحقق أن أصناف إذن الاستلام لم تتأثر بأي حركة مخزون لاحقة (بيع،
+    مرتجع، استلام آخر...) قبل السماح بتعديل كامل يعكس أثر الكمية
+    والتكلفة المتوسطة. إن وُجدت حركة لاحقة، فالتعديل الكامل غير آمن
+    رياضياً (لا يمكن عكس متوسط مرجّح بدقة بعد أن تغيّر لاحقاً بحركات
+    أخرى) — يُرجع سبب الرفض عوضاً عن ذلك لتوجيه المستخدم لاستخدام
+    مرتجع مشتريات بدلاً من التعديل الكامل."""
+    lines = (
+        db.query(GoodsReceiptLine)
+        .filter(GoodsReceiptLine.grn_number == grn.grn_number)
+        .all()
+    )
+    for line in lines:
+        move = (
+            db.query(StockMove)
+            .filter(
+                StockMove.item_id == line.item_id,
+                StockMove.reference == f"GRN-{grn.grn_number}",
+            )
+            .order_by(StockMove.id.desc())
+            .first()
+        )
+        if not move:
+            continue
+        later_move = (
+            db.query(StockMove)
+            .filter(StockMove.item_id == line.item_id, StockMove.id > move.id)
+            .first()
+        )
+        if later_move:
+            item = db.query(Item).filter(Item.id == line.item_id).first()
+            item_label = item.code if item else str(line.item_id)
+            return False, (
+                f"لا يمكن التعديل الكامل: حدثت حركة مخزون لاحقة على الصنف {item_label} "
+                "(بيع أو مرتجع أو استلام آخر)، ما يجعل عكس التكلفة المتوسطة المرجّحة "
+                "غير دقيق رياضياً. استخدم مرتجع مشتريات لتصحيح الكمية أو الأصناف بدلاً من ذلك."
+            )
+    return True, ""
+
+
+@grn_router.put("/{grn_number}", response_model=GoodsReceiptOut)
+def update_grn(
+    grn_number: str,
+    payload: GoodsReceiptIn,
+    db: Session = Depends(get_db),
+):
+    """تعديل كامل لإذن استلام غير مفوتر: يعكس أثر الأصناف القديمة على
+    الكمية والتكلفة المتوسطة للأصناف (بأمان فقط، عبر _is_grn_edit_safe)،
+    ثم يطبّق الأصناف والمورد والتاريخ الجديد تماماً كإنشاء جديد. يُستخدم
+    هذا المسار من مسار "تعديل الفاتورة كاملة" بالفرونت إند: إلغاء
+    الفاتورة ← تعديل الاستلام ← إعادة ترحيل فاتورة جديدة على نفس الاستلام."""
+    grn = db.query(GoodsReceipt).filter(GoodsReceipt.grn_number == grn_number).first()
+    if not grn:
+        raise HTTPException(status_code=404, detail="إذن الاستلام غير موجود")
+    if grn.invoice_status == "invoiced":
+        raise HTTPException(
+            status_code=400,
+            detail="لا يمكن تعديل إذن استلام مرتبط بفاتورة مرحّلة — يجب إلغاء الفاتورة أولاً",
+        )
+    if grn.po_number and payload.supplier_code != grn.supplier_code:
+        raise HTTPException(
+            status_code=400,
+            detail="لا يمكن تغيير المورد لإذن استلام مرتبط بأمر شراء",
+        )
+
+    safe, reason = _is_grn_edit_safe(db, grn)
+    if not safe:
+        raise HTTPException(status_code=400, detail=reason)
+
+    _validate_lines(payload.lines, "إذن الاستلام")
+
+    supplier = (
+        db.query(Supplier)
+        .filter(Supplier.code == payload.supplier_code, Supplier.is_active.is_(True))
+        .first()
+    )
+    if not supplier:
+        raise HTTPException(status_code=404, detail="المورد غير موجود أو غير نشط")
+
+    prepared_lines = []
+    for line in payload.lines:
+        item = (
+            db.query(Item)
+            .filter(Item.code == line.item_code, Item.is_active.is_(True))
+            .first()
+        )
+        if not item:
+            raise HTTPException(status_code=404, detail=f"الصنف {line.item_code} غير موجود أو غير نشط")
+        qty = _validate_positive(line.qty, "الكمية المستلمة")
+        unit_cost = _validate_non_negative(line.unit_cost, "تكلفة الوحدة")
+        prepared_lines.append((item, qty, unit_cost))
+
+    try:
+        # 1) عكس أثر الأصناف القديمة على الكمية/التكلفة المتوسطة، وحذف حركاتها وسطورها القديمة
+        old_lines = (
+            db.query(GoodsReceiptLine)
+            .filter(GoodsReceiptLine.grn_number == grn.grn_number)
+            .all()
+        )
+        for old_line in old_lines:
+            item = db.query(Item).filter(Item.id == old_line.item_id).first()
+            if item:
+                old_qty = _to_float(item.qty)
+                old_avg = _to_float(item.avg_cost)
+                line_qty = _to_float(old_line.qty)
+                line_cost = _to_float(old_line.unit_cost)
+                new_qty = old_qty - line_qty
+                if new_qty < -0.0001:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"لا يمكن عكس الكمية القديمة للصنف {item.code} — الرصيد الحالي أقل من الكمية المطلوب عكسها",
+                    )
+                new_qty = max(new_qty, 0)
+                remaining_value = (old_qty * old_avg) - (line_qty * line_cost)
+                item.qty = new_qty
+                item.avg_cost = (remaining_value / new_qty) if new_qty > 0 else 0
+            db.query(StockMove).filter(
+                StockMove.item_id == old_line.item_id,
+                StockMove.reference == f"GRN-{grn.grn_number}",
+            ).delete()
+            db.delete(old_line)
+
+        # 2) إلغاء قيد الاستلام القديم (إن وُجد) قبل ترحيل قيد جديد
+        had_journal = bool(grn.journal_entry_id)
+        if grn.journal_entry_id:
+            old_entry = db.query(JournalEntry).filter(JournalEntry.id == grn.journal_entry_id).first()
+            if old_entry:
+                old_entry.status = "cancelled"
+            grn.journal_entry_id = None
+
+        # 3) تطبيق بيانات ثم أصناف الاستلام الجديدة (نفس منطق الإنشاء)
+        grn.supplier_code = payload.supplier_code
+        grn.grn_date = payload.grn_date
+        grn.reference = payload.reference
+
+        total = 0.0
+        for item, qty, unit_cost in prepared_lines:
+            old_qty = _to_float(item.qty)
+            old_avg_cost = _to_float(item.avg_cost)
+            new_qty = old_qty + qty
+            new_avg_cost = (
+                ((old_avg_cost * old_qty) + (unit_cost * qty)) / new_qty
+                if new_qty > 0 else 0
+            )
+
+            db.add(GoodsReceiptLine(
+                grn_number=grn.grn_number, item_id=item.id, qty=qty, unit_cost=unit_cost,
+            ))
+            item.qty = new_qty
+            item.avg_cost = new_avg_cost
+            db.add(StockMove(
+                move_date=payload.grn_date, item_id=item.id, move_type="استلام مشتريات (معدّل)",
+                reference=f"GRN-{grn.grn_number}", qty=qty, unit_cost=unit_cost, balance_after=new_qty,
+            ))
+            total += qty * unit_cost
+
+        grn.total = total
+        grn.invoice_status = "not_invoiced"
+
+        if had_journal:
+            _post_grn_journal(db, grn, total)
+
+        db.commit()
+        db.refresh(grn)
+        return grn
+
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception:
+        db.rollback()
+        raise
+
+
 # =========================================================
 # ضريبة فاتورة المشتريات + الترحيل المحاسبي التلقائي
 # =========================================================

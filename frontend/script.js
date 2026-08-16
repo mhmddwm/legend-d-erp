@@ -1225,6 +1225,18 @@ function toggleJournalSearch(){
   if(icon) icon.textContent = window.journalSearchOpen ? '▾' : '▸';
 }
 
+function journalSourceLabel(sourceType){
+  const map = {
+    purchase_invoice: 'فاتورة مشتريات',
+    goods_receipt: 'استلام بضاعة',
+  };
+  if (!sourceType || sourceType === 'manual') {
+    return { isSystem: false, text: 'يدوي' };
+  }
+  return { isSystem: true, text: map[sourceType] || 'تلقائي (نظام)' };
+}
+window.journalSourceLabel = journalSourceLabel;
+
 function renderJournal(){
   const body=document.getElementById('journalBody');
   const empty=document.getElementById('journalEmpty');
@@ -1280,7 +1292,11 @@ function renderJournal(){
     const statusBadge = status==='cancelled' ? `<span class="badge returned">ملغي</span>` : `<span class="badge posted">مرحّل</span>`;
     const isManual = e.source_type==='manual';
     const isCancelled = status==='cancelled';
-    
+    const src = journalSourceLabel(e.source_type);
+    const sourceBadge = src.isSystem
+      ? `<span class="badge system" title="قيد مُرحَّل تلقائياً من النظام${e.source_ref?' — '+e.source_ref:''}">⚙ تلقائي — ${src.text}</span>`
+      : `<span class="badge manual">✎ يدوي</span>`;
+
     return `<tr>
       <td><button class="entry-link" onclick="openEntryDetail(${e.id})">#${e.id||''}</button></td>
       <td>${e.entry_date||''}</td>
@@ -1288,6 +1304,7 @@ function renderJournal(){
       <td>${accountsCell}</td>
       <td><div class="jamt-cell"><span class="jamt-label">الإجمالي</span><span class="jamt-value">${fmt(e.total_amount ?? e.amount)}</span></div></td>
       <td>${e.description||'-'}</td>
+      <td>${sourceBadge}</td>
       <td>${e.created_by_name||'-'}</td>
       <td>${statusBadge}</td>
       <td>
@@ -3464,7 +3481,10 @@ function openPurchaseInvoiceView(invNumber){
       ${taxRowsHtml}
       <div class="row grand"><span>إجمالي الفاتورة</span><span>${fmt(inv.total)}</span></div>
     </div>
-    ${inv.journal_entry_id ? `<div class="hint" style="margin-top:10px">✅ تم ترحيل القيد المحاسبي رقم ${inv.journal_entry_id} تلقائياً (مدين المخزون${inv.tax_amount>0?' وضريبة المشتريات':''} / دائن حساب المورد).</div>` : ''}
+    ${inv.journal_entry_id ? `<div class="hint pinv-journal-link" style="margin-top:10px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
+      <span>✅ تم ترحيل القيد المحاسبي رقم <b>#${inv.journal_entry_id}</b> تلقائياً (مدين المخزون${inv.tax_amount>0?' وضريبة المشتريات':''} / دائن حساب المورد).</span>
+      <button class="btn secondary" onclick="document.getElementById('pinvViewDialog')?.remove(); openEntryDetail(${inv.journal_entry_id})">📒 فتح القيد المحاسبي</button>
+    </div>` : ''}
   </div></div>`;
   document.body.insertAdjacentHTML('beforeend', html);
 }
@@ -3546,7 +3566,7 @@ function pinvMenuRun(action){
   closePinvActionsMenu();
   if(!invNumber) return;
   if(action==='view') openPinvPrintTab(invNumber, {autoPrint:false});
-  else if(action==='edit') openPinvEditDialog(invNumber);
+  else if(action==='edit') openPinvFullEditDialog(invNumber);
   else if(action==='pdf') openPinvPrintTab(invNumber, {autoPrint:true});
   else if(action==='print') openPinvPrintTab(invNumber, {autoPrint:true});
   else if(action==='copy') copyPinvToNewInvoice(invNumber);
@@ -3694,6 +3714,206 @@ async function submitPinvEdit(invNumber){
   }catch(e){ if(err) err.textContent = e.message; }
 }
 window.submitPinvEdit = submitPinvEdit;
+
+// ============================================================
+// تعديل الفاتورة كاملة (الأصناف/الكميات/الأسعار/المورد) — عبر مسار آمن:
+// إلغاء الفاتورة الحالية ← تعديل إذن الاستلام المرتبط (بعكس أثره على
+// التكلفة المتوسطة بأمان) ← إعادة ترحيل فاتورة جديدة بنفس البيانات
+// المعدَّلة. يُرفض التعديل تلقائياً من الخادم لو تأثر الصنف بحركة
+// مخزون لاحقة (بيع/مرتجع)، لأن عكس المتوسط المرجّح حينها غير دقيق.
+// ============================================================
+let pinvFullEditLines = [];
+
+function openPinvFullEditDialog(invNumber){
+  const inv=(invoices||[]).find(i=>i.inv_number===invNumber);
+  if(!inv) return;
+  if(inv.status==='cancelled'){ alert('لا يمكن تعديل فاتورة ملغاة'); return; }
+  const grn=(grns||[]).find(g=>g.grn_number===inv.grn_number);
+  if(!grn){ alert('تعذر العثور على إذن الاستلام المرتبط بهذه الفاتورة'); return; }
+
+  pinvFullEditLines = (inv.lines||[]).map(l=>{
+    lineCounter++;
+    const it=(items||[]).find(i=>i.id===l.item_id);
+    return { id:lineCounter, itemCode: it?it.code:'', qty:Number(l.qty)||0, cost:Number(l.unit_cost)||0, unit: it?it.unit:'' };
+  });
+  if(!pinvFullEditLines.length){ lineCounter++; pinvFullEditLines.push({id:lineCounter, itemCode:'', qty:1, cost:0, unit:''}); }
+
+  const lockedSupplier = !!grn.po_number;
+  const supOptions = (suppliers||[]).map(s=>`<option value="${pinvEsc(s.code)}" ${s.code===inv.supplier_code?'selected':''}>${pinvEsc(s.name)} (${pinvEsc(s.code)})</option>`).join('');
+  const ccOptions = '<option value="">— بدون —</option>' + (costCenters||[]).map(c=>
+    `<option value="${pinvEsc(c.code)}" ${c.code===inv.cost_center_code?'selected':''}>${pinvEsc(c.code)} — ${pinvEsc(c.name_ar)}</option>`
+  ).join('');
+  const taxOptions = '<option value="">— بدون ضريبة —</option>' + (taxTypes||[]).map(t=>
+    `<option value="${pinvEsc(t.code)}" ${t.code===inv.tax_type_code?'selected':''}>${pinvEsc(t.name_ar||t.code)} (${fmt(t.rate)}%)</option>`
+  ).join('');
+
+  const html=`<div class="po-decision-dialog" id="pinvFullEditDialog"><div class="box" style="max-width:960px">
+    <div class="rfq-section-head">
+      <h3>تعديل الفاتورة كاملة ${pinvEsc(inv.inv_number)}</h3>
+      <button class="btn secondary" onclick="document.getElementById('pinvFullEditDialog').remove()">إغلاق</button>
+    </div>
+    <div class="hint" style="margin-bottom:12px">التعديل هنا يشمل الأصناف والكميات والأسعار والمورد. عند الحفظ: تُلغى الفاتورة الحالية وقيدها المحاسبي، ويُعدَّل إذن الاستلام المرتبط، ثم تُرحَّل فاتورة جديدة تلقائياً بنفس رقم الاستلام وبالبيانات المعدَّلة. لن يُسمح بالحفظ لو تأثر أحد الأصناف بحركة مخزون لاحقة (بيع/مرتجع) — استخدم مرتجع مشتريات في هذه الحالة بدلاً من ذلك.</div>
+    <div class="frow two">
+      <div class="field"><label>المورد${lockedSupplier?' (مرتبط بأمر شراء، غير قابل للتغيير)':''}</label>
+        <select id="pfeSupplier" ${lockedSupplier?'disabled':''}>${supOptions}</select></div>
+      <div class="field"><label>تاريخ الاستلام/الفاتورة</label><input type="date" id="pfeDate" value="${pinvEsc(inv.inv_date)}"></div>
+    </div>
+    <div class="frow two">
+      <div class="field"><label>رقم فاتورة المورد</label><input id="pfeSupNum" value="${pinvEsc(inv.supplier_inv_number||'')}"></div>
+      <div class="field"><label>فترة السماح (أيام)</label><input type="number" min="0" id="pfeTerms" value="${inv.payment_terms_days||0}"></div>
+    </div>
+    <div class="frow two">
+      <div class="field"><label>مركز التكلفة</label><select id="pfeCostCenter">${ccOptions}</select></div>
+      <div class="field"><label>نوع الضريبة</label><select id="pfeTaxType" onchange="recalcPinvFullEditTotals()">${taxOptions}</select></div>
+    </div>
+    <div class="frow two">
+      <div class="field"><label>طريقة احتساب الضريبة</label>
+        <select id="pfeTaxCalcMethod" onchange="recalcPinvFullEditTotals()">
+          <option value="exclusive">غير متضمنة (تُضاف على القيمة)</option>
+          <option value="inclusive">متضمنة (القيمة شاملة الضريبة)</option>
+        </select></div>
+      <div></div>
+    </div>
+    <table class="line-items">
+      <thead><tr><th style="width:28%">الصنف</th><th style="width:12%">الكمية</th><th style="width:10%">الوحدة</th><th style="width:16%">تكلفة الوحدة</th><th style="width:16%">الإجمالي</th><th></th></tr></thead>
+      <tbody id="pfeLinesBody"></tbody>
+    </table>
+    <button class="add-line-btn" onclick="addPinvFullEditLine()">+ إضافة سطر</button>
+    <div class="totals-box">
+      <div class="row"><span>الصافي قبل الضريبة</span><span id="pfeSubtotal">0.00</span></div>
+      <div class="row"><span id="pfeTaxLabel">الضريبة</span><span id="pfeTaxAmount">0.00</span></div>
+      <div class="row grand"><span>إجمالي الفاتورة</span><span id="pfeTotal">0.00</span></div>
+    </div>
+    <div id="pfeErr" style="color:#c62828;font-size:13px;margin:10px 0"></div>
+    <div style="display:flex;gap:10px;justify-content:flex-end">
+      <button class="btn secondary" onclick="document.getElementById('pinvFullEditDialog').remove()">إلغاء</button>
+      <button class="btn" id="pfeSubmitBtn" onclick="submitPinvFullEdit('${pinvEsc(inv.inv_number)}','${pinvEsc(grn.grn_number)}','${pinvEsc(grn.po_number||'')}')">حفظ التعديلات الكاملة</button>
+    </div>
+  </div></div>`;
+  document.body.insertAdjacentHTML('beforeend', html);
+  const tcm=document.getElementById('pfeTaxCalcMethod'); if(tcm) tcm.value = 'exclusive';
+  renderPinvFullEditLines();
+}
+window.openPinvFullEditDialog = openPinvFullEditDialog;
+
+function addPinvFullEditLine(){
+  lineCounter++;
+  pinvFullEditLines.push({id:lineCounter, itemCode:'', qty:1, cost:0, unit:''});
+  renderPinvFullEditLines();
+}
+window.addPinvFullEditLine = addPinvFullEditLine;
+
+function removePinvFullEditLine(id){
+  pinvFullEditLines = pinvFullEditLines.filter(l=>l.id!==id);
+  renderPinvFullEditLines();
+}
+window.removePinvFullEditLine = removePinvFullEditLine;
+
+function onPinvFullEditLineChange(id, field, value){
+  const line=pinvFullEditLines.find(l=>l.id===id);
+  if(!line) return;
+  if(field==='unit'){
+    const it=(items||[]).find(i=>i.code===line.itemCode);
+    if(it){
+      const oldFactor=getItemUnitFactor(it, line.unit)||1;
+      const newFactor=getItemUnitFactor(it, value)||1;
+      if(oldFactor!==newFactor) line.cost=(line.cost/oldFactor)*newFactor;
+    }
+    line.unit=value;
+    renderPinvFullEditLines();
+    return;
+  }
+  if(field==='qty'||field==='cost') line[field]=parseFloat(value)||0;
+  else line[field]=value;
+  if(field==='itemCode'){
+    const it=(items||[]).find(i=>i.code===value);
+    line.unit = it ? it.unit : '';
+  }
+  renderPinvFullEditLines();
+}
+window.onPinvFullEditLineChange = onPinvFullEditLineChange;
+
+function renderPinvFullEditLines(){
+  const body=document.getElementById('pfeLinesBody');
+  if(!body) return;
+  const itemOpts='<option value="">— اختر صنف —</option>'+(items||[]).map(i=>`<option value="${i.code}">${i.code} — ${i.name}</option>`).join('');
+  body.innerHTML=pinvFullEditLines.map(l=>{
+    const it=(items||[]).find(i=>i.code===l.itemCode);
+    const unitOpts = it
+      ? getTemplateUnitsForItem(it).map(u=>`<option value="${String(u.value).replace(/"/g,'&quot;')}" ${String(u.value)===String(l.unit)?'selected':''}>${u.label}</option>`).join('')
+      : '<option value="">-</option>';
+    return `<tr>
+      <td><select onchange="onPinvFullEditLineChange(${l.id},'itemCode',this.value)">${itemOpts.replace(`value="${l.itemCode}"`,`value="${l.itemCode}" selected`)}</select></td>
+      <td><input type="number" step="0.01" min="0" value="${l.qty}" onchange="onPinvFullEditLineChange(${l.id},'qty',this.value)"></td>
+      <td><select class="unit-line-select" onchange="onPinvFullEditLineChange(${l.id},'unit',this.value)" ${it?'':'disabled'}>${unitOpts}</select></td>
+      <td><input type="number" step="0.01" min="0" value="${l.cost}" onchange="onPinvFullEditLineChange(${l.id},'cost',this.value)"></td>
+      <td class="linetotal">${fmt(l.qty*l.cost)}</td>
+      <td><button class="rm-line" onclick="removePinvFullEditLine(${l.id})">✕</button></td>
+    </tr>`;
+  }).join('');
+  recalcPinvFullEditTotals();
+}
+window.renderPinvFullEditLines = renderPinvFullEditLines;
+
+function recalcPinvFullEditTotals(){
+  const linesTotal = pinvFullEditLines.reduce((s,l)=>s+l.qty*l.cost,0);
+  const taxTypeCode = document.getElementById('pfeTaxType')?.value || '';
+  const calcMethod = document.getElementById('pfeTaxCalcMethod')?.value || 'exclusive';
+  const r = pinvTaxPreview(linesTotal, taxTypeCode, calcMethod);
+  const subEl=document.getElementById('pfeSubtotal'); if(subEl) subEl.textContent=fmt(r.subtotal);
+  const taxEl=document.getElementById('pfeTaxAmount'); if(taxEl) taxEl.textContent=fmt(r.tax);
+  const taxLabel=document.getElementById('pfeTaxLabel'); if(taxLabel) taxLabel.textContent = r.taxType ? `الضريبة (${r.taxType.name_ar||r.taxType.code} ${fmt(r.taxType.rate)}%)` : 'الضريبة';
+  const totalEl=document.getElementById('pfeTotal'); if(totalEl) totalEl.textContent=fmt(r.total);
+}
+window.recalcPinvFullEditTotals = recalcPinvFullEditTotals;
+
+async function submitPinvFullEdit(invNumber, grnNumber, poNumber){
+  const err=document.getElementById('pfeErr');
+  const submitBtn=document.getElementById('pfeSubmitBtn');
+  const supplier_code=document.getElementById('pfeSupplier').value;
+  const grn_date=document.getElementById('pfeDate').value;
+  const supplier_inv_number=document.getElementById('pfeSupNum').value.trim()||null;
+  const payment_terms_days=parseInt(document.getElementById('pfeTerms').value)||0;
+  const cost_center_code=document.getElementById('pfeCostCenter').value||null;
+  const tax_type_code=document.getElementById('pfeTaxType').value||null;
+  const tax_calc_method=document.getElementById('pfeTaxCalcMethod').value||'exclusive';
+  const valid=pinvFullEditLines.filter(l=>l.itemCode && l.qty>0);
+
+  if(!supplier_code){ err.textContent='يرجى اختيار المورد'; return; }
+  if(!grn_date){ err.textContent='يرجى إدخال التاريخ'; return; }
+  if(!valid.length){ err.textContent='يرجى إضافة صنف واحد على الأقل'; return; }
+  err.textContent='';
+  if(submitBtn){ submitBtn.disabled=true; submitBtn.textContent='جارٍ الحفظ...'; }
+
+  try{
+    // 1) إلغاء الفاتورة الحالية (يعكس قيدها المحاسبي ويعيد فتح الاستلام للتعديل)
+    await api('POST', `/api/purchase-invoices/${encodeURIComponent(invNumber)}/cancel`, {});
+
+    // 2) تعديل إذن الاستلام (يعكس الكمية/التكلفة القديمة بأمان ويطبّق الجديدة)
+    await api('PUT', `/api/grn/${encodeURIComponent(grnNumber)}`, {
+      grn_date, supplier_code, po_number: poNumber||null, reference: 'تعديل فاتورة',
+      lines: valid.map(l=>{
+        const it=(items||[]).find(i=>i.code===l.itemCode);
+        const factor = it ? (getItemUnitFactor(it, l.unit)||1) : 1;
+        return {item_code:l.itemCode, qty: l.qty*factor, unit_cost: factor ? l.cost/factor : l.cost};
+      })
+    });
+
+    // 3) ترحيل فاتورة جديدة على نفس الاستلام بالبيانات المعدَّلة
+    await api('POST', '/api/purchase-invoices', {
+      grn_number: grnNumber, inv_date: grn_date, supplier_inv_number, payment_terms_days,
+      cost_center_code, tax_type_code, tax_calc_method,
+    });
+
+    document.getElementById('pinvFullEditDialog')?.remove();
+    await loadAll();
+  }catch(e){
+    err.textContent = e.message;
+  }finally{
+    if(submitBtn){ submitBtn.disabled=false; submitBtn.textContent='حفظ التعديلات الكاملة'; }
+  }
+}
+window.submitPinvFullEdit = submitPinvFullEdit;
 
 // نسخ الفاتورة: تعبئة نموذج الفاتورة المباشرة بنفس البيانات والأصناف كمسودة جاهزة للحفظ
 function copyPinvToNewInvoice(invNumber){
