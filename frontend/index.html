@@ -701,11 +701,13 @@ table.grid td.muted{color:var(--muted);font-size:12px;}
 }
 .pinv-actions-btn:hover{background:var(--accent-light);border-color:var(--accent);color:var(--accent);box-shadow:0 2px 8px rgba(21,101,192,.18);}
 .pinv-actions-menu{
-  position:fixed;min-width:210px;background:var(--bg-card);
+  position:fixed;min-width:210px;max-height:80vh;overflow-y:auto;background:var(--bg-card);
   border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow-lg);
   padding:6px;z-index:9999;display:none;
 }
 .pinv-actions-menu.show{display:block;}
+.pinv-num-link{color:var(--accent);font-weight:700;text-decoration:none;cursor:pointer;}
+.pinv-num-link:hover{text-decoration:underline;}
 .pinv-actions-menu button{
   width:100%;text-align:right;padding:9px 12px;border:none;background:none;
   border-radius:7px;font-size:13px;color:var(--ink);cursor:pointer;

@@ -3403,7 +3403,7 @@ function renderInvoices(){
   body.innerHTML=data.map(inv=>{
     const sup=(suppliers||[]).find(s=>s.code===inv.supplier_code);
     return `<tr class="po-link" onclick="openPurchaseInvoiceView('${inv.inv_number}')">
-      <td>${pinvEsc(inv.inv_number)}</td>
+      <td><a href="javascript:void(0)" class="pinv-num-link" onclick="event.stopPropagation(); openPinvPrintTab('${pinvEsc(inv.inv_number)}',{autoPrint:false})" title="فتح الفاتورة كاملة في تبويب جديد">${pinvEsc(inv.inv_number)}</a></td>
       <td>${pinvEsc(inv.inv_date)}</td>
       <td>${pinvEsc(sup?sup.name:inv.supplier_code)}</td>
       <td>${pinvEsc(inv.grn_number)}</td>
@@ -3507,11 +3507,30 @@ function togglePinvActionsMenu(e, invNumber){
   const wasOpenForThis = menu.classList.contains('show') && pinvMenuCurrentInv === invNumber;
   closePinvActionsMenu();
   if (wasOpenForThis) return;
-  const rect = e.currentTarget.getBoundingClientRect();
-  menu.style.top = (rect.bottom + 6) + 'px';
-  menu.style.left = Math.max(8, rect.left - 190) + 'px';
+
+  const btn = e.currentTarget;
+  const rect = btn.getBoundingClientRect();
   menu.classList.add('show');
   pinvMenuCurrentInv = invNumber;
+
+  // نقيس أبعاد القائمة الفعلية بعد إظهارها لضمان بقائها داخل حدود الشاشة
+  // (تُفتح لأعلى بدل لأسفل تلقائياً لو مفيش مساحة كافية تحت الزر، وتُحاذى
+  // أفقياً بحيث لا تخرج من يمين أو يسار الشاشة)
+  const menuRect = menu.getBoundingClientRect();
+  const menuW = menuRect.width || 210;
+  const menuH = menuRect.height || 340;
+  const margin = 8;
+
+  let top = rect.bottom + 6;
+  if (top + menuH > window.innerHeight - margin) {
+    top = Math.max(margin, rect.top - menuH - 6);
+  }
+
+  let left = rect.left - menuW + rect.width;
+  left = Math.min(Math.max(margin, left), window.innerWidth - menuW - margin);
+
+  menu.style.top = top + 'px';
+  menu.style.left = left + 'px';
 }
 window.togglePinvActionsMenu = togglePinvActionsMenu;
 
@@ -3639,9 +3658,10 @@ function openPinvEditDialog(invNumber){
   ).join('');
   const html=`<div class="po-decision-dialog" id="pinvEditDialog"><div class="box">
     <div class="rfq-section-head">
-      <h3>تعديل فاتورة ${pinvEsc(inv.inv_number)}</h3>
+      <h3>تعديل بيانات فاتورة ${pinvEsc(inv.inv_number)}</h3>
       <button class="btn secondary" onclick="document.getElementById('pinvEditDialog').remove()">إغلاق</button>
     </div>
+    <div class="hint" style="margin-bottom:12px">تُعرض هنا فقط بيانات المورد المرتبطة بالفاتورة (التاريخ، رقم فاتورة المورد، فترة السماح، مركز التكلفة). لا يمكن تعديل الأصناف أو الكميات أو التكلفة أو الضريبة بعد الترحيل، حفاظاً على سلامة القيد المحاسبي.</div>
     <div class="po-info-grid" style="margin-bottom:14px">
       <div class="field"><label>تاريخ الفاتورة</label><input type="date" id="pinvEditDate" value="${pinvEsc(inv.inv_date)}"></div>
       <div class="field"><label>رقم فاتورة المورد</label><input id="pinvEditSupNum" value="${pinvEsc(inv.supplier_inv_number||'')}"></div>
