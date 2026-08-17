@@ -6113,7 +6113,7 @@ function openSubModule(name){
     'مراكز التكلفة':'cost',
     'إعدادات الحسابات':'settings',
     'إعدادات الضرائب':'tax_settings',
-    'التقارير المالية':'financial_reports',
+    'التقارير المالية':'gl_reports',
 
     // المخزون
     'المنتجات':'items',
@@ -7406,8 +7406,8 @@ window.suppliers = window.suppliers || [];
 function frEsc(s){ return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
 function showFReportSection(section){
-  document.querySelectorAll('#panel-financial_reports .pset-nav-btn').forEach(b=> b.classList.toggle('active', b.dataset.freport===section));
-  document.querySelectorAll('#panel-financial_reports .pset-section').forEach(s=> s.classList.toggle('active', s.dataset.freport===section));
+  document.querySelectorAll('#panel-gl_reports .pset-nav-btn').forEach(b=> b.classList.toggle('active', b.dataset.freport===section));
+  document.querySelectorAll('#panel-gl_reports .pset-section').forEach(s=> s.classList.toggle('active', s.dataset.freport===section));
 }
 window.showFReportSection = showFReportSection;
 
