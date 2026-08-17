@@ -140,7 +140,8 @@ def calc_payable(db: Session, supplier_code: str) -> float:
         PurchaseInvoice.status != "cancelled",
     ).scalar()
     returned = db.query(func.coalesce(func.sum(PurchaseReturn.total), 0)).filter(
-        PurchaseReturn.supplier_code == supplier_code
+        PurchaseReturn.supplier_code == supplier_code,
+        PurchaseReturn.status != "cancelled",
     ).scalar()
     return float(invoiced or 0) - float(returned or 0)
 
@@ -225,7 +226,9 @@ def get_supplier_statement(code: str, db: Session = Depends(get_db)):
             "journal_entry_id": inv.journal_entry_id,
         })
 
-    returns = db.query(PurchaseReturn).filter(PurchaseReturn.supplier_code == code).all()
+    returns = db.query(PurchaseReturn).filter(
+        PurchaseReturn.supplier_code == code, PurchaseReturn.status != "cancelled"
+    ).all()
     for rt in returns:
         movements.append({
             "date": rt.rt_date, "doc_type": "purchase_return", "doc_number": rt.rt_number,

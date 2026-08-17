@@ -4477,18 +4477,77 @@ async function submitDirectPinv(){
 window.submitDirectPinv = submitDirectPinv;
 
 // ============================================================
-// مرتجع المشتريات
+// مرتجعات المشتريات — مواكبة لشاشة فواتير المشتريات: قائمة أولاً،
+// نموذج إنشاء مطوي (المورد أولاً ثم فواتيره)، قائمة إجراءات لكل صف،
+// وربط كامل بالضريبة التناسبية والقيد المحاسبي التلقائي.
 // ============================================================
-function onPrtInvChange(){
-  const inv=invoices.find(i=>i.inv_number===document.getElementById('prtInv').value);
+function prtEsc(s){ return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+function togglePrtNewForm(forceOpen){
+  const box=document.getElementById('prtNewFormBox');
+  if(!box) return;
+  const isHidden = box.style.display==='none' || !box.style.display;
+  const open = forceOpen===true ? true : (forceOpen===false ? false : isHidden);
+  box.style.display = open ? 'block' : 'none';
+  if(open){
+    const supSel=document.getElementById('prtSupplier');
+    if(supSel){
+      const current=supSel.value;
+      supSel.innerHTML='<option value="">— اختر مورداً —</option>'+
+        (suppliers||[]).map(s=>`<option value="${prtEsc(s.code)}">${prtEsc(s.name)} (${prtEsc(s.code)})</option>`).join('');
+      supSel.value=current;
+    }
+    const dt=document.getElementById('prtDate');
+    if(dt && !dt.value) dt.value = new Date().toISOString().slice(0,10);
+    box.scrollIntoView({behavior:'smooth', block:'nearest'});
+  }
+}
+window.togglePrtNewForm = togglePrtNewForm;
+
+// تعبئة فواتير المورد المختار فقط (غير الملغاة) — هذا هو رابط المورد
+// الأساسي بالشاشة: يبدأ المستخدم من المورد، مش من رقم فاتورة يكتبه
+function onPrtSupplierChange(){
+  const supplierCode=document.getElementById('prtSupplier').value;
+  const invSel=document.getElementById('prtInvoice');
+  const supplierInvoices=(invoices||[]).filter(i=>i.supplier_code===supplierCode && i.status!=='cancelled');
+  invSel.innerHTML = supplierCode
+    ? ('<option value="">— اختر فاتورة —</option>' + supplierInvoices.map(i=>
+        `<option value="${prtEsc(i.inv_number)}">${prtEsc(i.inv_number)} — ${prtEsc(i.inv_date)} — إجمالي ${fmt(i.total)}</option>`
+      ).join(''))
+    : '<option value="">— اختر مورداً أولاً —</option>';
+  if(!supplierInvoices.length && supplierCode){
+    invSel.innerHTML = '<option value="">— لا توجد فواتير مرحّلة لهذا المورد —</option>';
+  }
+  prtCurrentLines=[];
+  document.getElementById('prtLinesWrap').innerHTML='';
+  recalcPrtTotals();
+}
+window.onPrtSupplierChange = onPrtSupplierChange;
+
+// عدد الوحدات المُرجَعة سابقاً على هذه الفاتورة لنفس الصنف (من مرتجعات
+// غير ملغاة) — لعرض السقف المتبقي الفعلي للمستخدم قبل الإرسال، مع
+// إبقاء التحقق النهائي والملزم بالخادم
+function prtAlreadyReturnedQty(invNumber, itemId){
+  return (returns_||[])
+    .filter(r=>r.inv_number===invNumber && r.status!=='cancelled')
+    .flatMap(r=>r.lines||[])
+    .filter(l=>l.item_id===itemId)
+    .reduce((s,l)=>s+(Number(l.qty)||0),0);
+}
+
+function onPrtInvoiceChange(){
+  const inv=(invoices||[]).find(i=>i.inv_number===document.getElementById('prtInvoice').value);
   const wrap=document.getElementById('prtLinesWrap');
-  if(!inv){wrap.innerHTML=''; prtCurrentLines=[]; document.getElementById('prtTotal').textContent='0.00'; return;}
+  if(!inv){ wrap.innerHTML=''; prtCurrentLines=[]; recalcPrtTotals(); return; }
   prtCurrentLines=(inv.lines||[]).map(l=>{
     const it=(items||[]).find(i=>i.id===l.item_id);
-    return {item_code:it?it.code:'',unit_cost:l.unit_cost,max_qty:l.qty,qty:0};
+    const alreadyReturned=prtAlreadyReturnedQty(inv.inv_number, l.item_id);
+    const maxQty=Math.max(0, (Number(l.qty)||0) - alreadyReturned);
+    return {item_code:it?it.code:'', item_name:it?it.name:String(l.item_id), unit_cost:Number(l.unit_cost)||0, max_qty:maxQty, qty:0};
   });
   renderPrtLines();
 }
+window.onPrtInvoiceChange = onPrtInvoiceChange;
 
 function onPrtQtyChange(item_code,v){
   const l=prtCurrentLines.find(x=>x.item_code===item_code);
@@ -4498,44 +4557,337 @@ function onPrtQtyChange(item_code,v){
   l.qty=q;
   renderPrtLines();
 }
+window.onPrtQtyChange = onPrtQtyChange;
 
 function renderPrtLines(){
   const wrap=document.getElementById('prtLinesWrap');
-  const rows=prtCurrentLines.map(l=>{
-    const it=items.find(i=>i.code===l.item_code);
-    return `<tr>
-      <td>${it?it.code+' — '+it.name:l.item_code}</td>
-      <td class="muted">حد: ${fmt(l.max_qty)}</td>
-      <td><input type="number" step="0.01" min="0" max="${l.max_qty}" value="${l.qty}" onchange="onPrtQtyChange('${l.item_code}',this.value)"></td>
+  if(!wrap) return;
+  const rows=prtCurrentLines.map(l=>`<tr>
+      <td>${prtEsc(l.item_code)} — ${prtEsc(l.item_name)}</td>
+      <td class="num" style="color:#7c8ba3">المتبقي القابل للإرجاع: ${fmt(l.max_qty)}</td>
+      <td><input type="number" step="0.01" min="0" max="${l.max_qty}" value="${l.qty}" onchange="onPrtQtyChange('${l.item_code}',this.value)" ${l.max_qty<=0?'disabled':''}></td>
       <td class="num">${fmt(l.unit_cost)}</td>
       <td class="linetotal">${fmt(l.qty*l.unit_cost)}</td>
-    </tr>`;
-  }).join('');
-  wrap.innerHTML=`<table class="line-items"><thead><tr><th>الصنف</th><th>المتاح للإرجاع</th><th>كمية المرتجع</th><th>التكلفة</th><th>الإجمالي</th></tr></thead><tbody>${rows}</tbody></table>`;
-  document.getElementById('prtTotal').textContent=fmt(prtCurrentLines.reduce((s,l)=>s+l.qty*l.unit_cost,0));
+    </tr>`).join('');
+  wrap.innerHTML=`<table class="line-items"><thead><tr><th>الصنف</th><th>الحد المتاح</th><th>كمية المرتجع</th><th>التكلفة</th><th>الإجمالي</th></tr></thead><tbody>${rows}</tbody></table>`;
+  recalcPrtTotals();
 }
 
-async function submitPrt(){
-  const inv_number=document.getElementById('prtInv').value;
+// معاينة الضريبة التناسبية بالفرونت إند (نفس منطق الباك إند: نصيب
+// المرتجع = صافي المرتجع × (ضريبة الفاتورة الأصلية ÷ صافي الفاتورة الأصلية))
+function recalcPrtTotals(){
+  const subtotal = prtCurrentLines.reduce((s,l)=>s+l.qty*l.unit_cost,0);
+  const inv=(invoices||[]).find(i=>i.inv_number===document.getElementById('prtInvoice')?.value);
+  let tax=0, taxLabel='الضريبة (نصيب تناسبي)';
+  if(inv && inv.tax_type_code && Number(inv.subtotal)>0){
+    const effectiveRate = Number(inv.tax_amount||0) / Number(inv.subtotal);
+    tax = subtotal * effectiveRate;
+    const tt=(taxTypes||[]).find(t=>t.code===inv.tax_type_code);
+    if(tt) taxLabel = `الضريبة (نصيب تناسبي من ${tt.name_ar||tt.code} ${fmt(tt.rate)}%)`;
+  }
+  const subEl=document.getElementById('prtSubtotal'); if(subEl) subEl.textContent=fmt(subtotal);
+  const taxEl=document.getElementById('prtTaxAmount'); if(taxEl) taxEl.textContent=fmt(tax);
+  const taxLabelEl=document.getElementById('prtTaxLabel'); if(taxLabelEl) taxLabelEl.textContent=taxLabel;
+  const totalEl=document.getElementById('prtTotal'); if(totalEl) totalEl.textContent=fmt(subtotal+tax);
+}
+window.recalcPrtTotals = recalcPrtTotals;
+
+async function submitPurchaseReturn(){
+  const inv_number=document.getElementById('prtInvoice').value;
   const rt_date=document.getElementById('prtDate').value;
   const err=document.getElementById('prtErr');
   const valid=prtCurrentLines.filter(l=>l.qty>0);
+  if(!document.getElementById('prtSupplier').value){err.textContent='يرجى اختيار المورد'; return;}
   if(!inv_number){err.textContent='يرجى اختيار الفاتورة'; return;}
   if(!rt_date){err.textContent='يرجى إدخال التاريخ'; return;}
   if(!valid.length){err.textContent='يرجى إدخال كمية مرتجع لصنف واحد على الأقل'; return;}
   err.textContent='';
   try{
     await api('POST','/api/purchase-returns',{
-      rt_date,inv_number,
-      lines:valid.map(l=>({item_code:l.item_code,qty:l.qty}))
+      rt_date, inv_number,
+      lines: valid.map(l=>({item_code:l.item_code, qty:l.qty}))
     });
-    document.getElementById('prtInv').value='';
+    document.getElementById('prtSupplier').value='';
+    document.getElementById('prtInvoice').innerHTML='<option value="">— اختر مورداً أولاً —</option>';
     document.getElementById('prtLinesWrap').innerHTML='';
-    document.getElementById('prtTotal').textContent='0.00';
     prtCurrentLines=[];
+    recalcPrtTotals();
+    togglePrtNewForm(false);
     await loadAll();
-  }catch(e){err.textContent=e.message;}
+  }catch(e){ err.textContent=e.message; }
 }
+window.submitPurchaseReturn = submitPurchaseReturn;
+
+// شارة حالة المرتجع
+function getPrtBadge(prt){
+  if(prt.status==='cancelled') return '<span class="badge returned">ملغى</span>';
+  return '<span class="badge posted">مرحّل</span>';
+}
+
+// عرض قائمة المرتجعات المسجّلة مع البحث
+function renderPurchaseReturns(){
+  const body=document.getElementById('prtBody');
+  if(!body) return;
+
+  const searchEl=document.getElementById('prtSearch');
+  const q=(searchEl?.value||'').trim().toLowerCase();
+  let data=Array.isArray(returns_)?[...returns_]:[];
+
+  if(q){
+    data=data.filter(r=>{
+      const sup=(suppliers||[]).find(s=>s.code===r.supplier_code);
+      return (r.rt_number||'').toLowerCase().includes(q) ||
+        (r.inv_number||'').toLowerCase().includes(q) ||
+        (sup?.name||'').toLowerCase().includes(q);
+    });
+  }
+
+  data.sort((a,b)=> new Date(b.rt_date||0)-new Date(a.rt_date||0) || String(b.rt_number||'').localeCompare(String(a.rt_number||'')));
+
+  body.innerHTML=data.map(r=>{
+    const sup=(suppliers||[]).find(s=>s.code===r.supplier_code);
+    return `<tr>
+      <td><a href="javascript:void(0)" class="pinv-num-link" onclick="event.stopPropagation(); openPrtPrintTab('${prtEsc(r.rt_number)}')">${prtEsc(r.rt_number)}</a></td>
+      <td>${prtEsc(r.rt_date)}</td>
+      <td>${prtEsc(sup?sup.name:r.supplier_code)}</td>
+      <td>${prtEsc(r.inv_number)}</td>
+      <td>${fmt(r.total)}${(r.tax_amount && Number(r.tax_amount)>0) ? `<div style="font-size:10.5px;color:#0b67c2;margin-top:2px">شامل ضريبة ${fmt(r.tax_amount)}</div>` : ''}</td>
+      <td>${getPrtBadge(r)}</td>
+      <td style="text-align:center" onclick="event.stopPropagation()">
+        <button type="button" class="pinv-actions-btn" onclick="togglePrtActionsMenu(event,'${prtEsc(r.rt_number)}')" title="الإجراءات">⋮</button>
+      </td>
+    </tr>`;
+  }).join('');
+
+  const empty=document.getElementById('prtEmpty');
+  if(empty) empty.style.display = data.length ? 'none' : 'block';
+
+  const countEl=document.getElementById('prtSavedCount');
+  if(countEl) countEl.textContent = (returns_||[]).length + ' مرتجع';
+}
+window.renderPurchaseReturns = renderPurchaseReturns;
+window.renderReturns = renderPurchaseReturns; // اسم الاستدعاء المستخدم أصلاً بحلقة loadAll()
+
+// ---------- قائمة إجراءات المرتجع (⋮) ----------
+let prtMenuCurrentRt = null;
+
+function ensurePrtActionsMenu(){
+  let menu = document.getElementById('prtActionsMenu');
+  if(!menu){
+    menu = document.createElement('div');
+    menu.id = 'prtActionsMenu';
+    menu.className = 'pinv-actions-menu';
+    menu.innerHTML = `
+      <button onclick="prtMenuRun('view')">👁️ عرض</button>
+      <button onclick="prtMenuRun('print')">🖨️ طباعة / PDF</button>
+      <button onclick="prtMenuRun('email')">✉️ إرسال عبر البريد</button>
+      <button onclick="prtMenuRun('whatsapp')">💬 إرسال عبر واتساب</button>
+      <hr>
+      <button class="danger" onclick="prtMenuRun('cancel')">🗑️ إلغاء المرتجع</button>
+    `;
+    document.body.appendChild(menu);
+  }
+  return menu;
+}
+
+function togglePrtActionsMenu(e, rtNumber){
+  e.stopPropagation();
+  const menu = ensurePrtActionsMenu();
+  const wasOpenForThis = menu.classList.contains('show') && prtMenuCurrentRt === rtNumber;
+  closePrtActionsMenu();
+  if (wasOpenForThis) return;
+
+  const btn = e.currentTarget;
+  const rect = btn.getBoundingClientRect();
+  menu.classList.add('show');
+  prtMenuCurrentRt = rtNumber;
+
+  const menuRect = menu.getBoundingClientRect();
+  const menuW = menuRect.width || 210;
+  const menuH = menuRect.height || 260;
+  const margin = 8;
+  let top = rect.bottom + 6;
+  if (top + menuH > window.innerHeight - margin) top = Math.max(margin, rect.top - menuH - 6);
+  let left = rect.left - menuW + rect.width;
+  left = Math.min(Math.max(margin, left), window.innerWidth - menuW - margin);
+  menu.style.top = top + 'px';
+  menu.style.left = left + 'px';
+}
+window.togglePrtActionsMenu = togglePrtActionsMenu;
+
+function closePrtActionsMenu(){
+  const menu = document.getElementById('prtActionsMenu');
+  if (menu) menu.classList.remove('show');
+  prtMenuCurrentRt = null;
+}
+document.addEventListener('click', closePrtActionsMenu);
+
+function prtMenuRun(action){
+  const rtNumber = prtMenuCurrentRt;
+  closePrtActionsMenu();
+  if(!rtNumber) return;
+  if(action==='view') openPurchaseReturnView(rtNumber);
+  else if(action==='print') openPrtPrintTab(rtNumber);
+  else if(action==='email') sendPrtByEmail(rtNumber);
+  else if(action==='whatsapp') sendPrtByWhatsapp(rtNumber);
+  else if(action==='cancel') cancelPurchaseReturnAction(rtNumber);
+}
+window.prtMenuRun = prtMenuRun;
+
+// عرض تفاصيل مرتجع في نافذة منبثقة، مع رابط مباشر للقيد المحاسبي المرتبط
+function openPurchaseReturnView(rtNumber){
+  const prt=(returns_||[]).find(r=>r.rt_number===rtNumber);
+  if(!prt) return;
+  const sup=(suppliers||[]).find(s=>s.code===prt.supplier_code);
+  const taxType=(taxTypes||[]).find(t=>t.code===prt.tax_type_code);
+  const rows=(prt.lines||[]).map(l=>{
+    const it=(items||[]).find(i=>i.id===l.item_id);
+    return `<tr>
+      <td>${prtEsc(it?it.code+' — '+it.name:l.item_id)}</td>
+      <td class="num">${fmt(l.qty)}</td>
+      <td class="num">${fmt(l.unit_cost)}</td>
+      <td class="num">${fmt(l.qty*l.unit_cost)}</td>
+    </tr>`;
+  }).join('');
+  const taxRowsHtml = (prt.tax_amount && Number(prt.tax_amount)>0)
+    ? `<div class="row"><span>الصافي</span><span>${fmt(prt.subtotal)}</span></div>
+       <div class="row"><span>الضريبة${taxType?` (نصيب من ${prtEsc(taxType.name_ar||taxType.code)} ${fmt(taxType.rate)}%)`:''}</span><span>${fmt(prt.tax_amount)}</span></div>`
+    : '';
+  const html=`<div class="po-decision-dialog" id="prtViewDialog"><div class="box">
+    <div class="rfq-section-head">
+      <h3>مرتجع مشتريات ${prtEsc(prt.rt_number)}</h3>
+      <button class="btn secondary" onclick="document.getElementById('prtViewDialog').remove()">إغلاق</button>
+    </div>
+    <div class="po-info-grid" style="margin-bottom:14px">
+      <div class="field"><label>المورد</label><input disabled value="${prtEsc(sup?sup.name:prt.supplier_code)}"></div>
+      <div class="field"><label>تاريخ المرتجع</label><input disabled value="${prtEsc(prt.rt_date)}"></div>
+      <div class="field"><label>الفاتورة الأصلية</label><input disabled value="${prtEsc(prt.inv_number)}"></div>
+    </div>
+    <table class="grid po-list-table"><thead><tr><th>الصنف</th><th>الكمية</th><th>التكلفة</th><th>الإجمالي</th></tr></thead><tbody>${rows}</tbody></table>
+    <div class="totals-box" style="margin-top:12px">
+      ${taxRowsHtml}
+      <div class="row grand"><span>الإجمالي (خصم من رصيد المورد)</span><span>${fmt(prt.total)}</span></div>
+    </div>
+    ${prt.journal_entry_id ? `<div class="hint pinv-journal-link" style="margin-top:10px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
+      <span>✅ تم ترحيل القيد المحاسبي رقم <b>#${prt.journal_entry_id}</b> تلقائياً (مدين حساب المورد / دائن المخزون${prt.tax_amount>0?' وضريبة المشتريات':''}).</span>
+      <button class="btn secondary" onclick="document.getElementById('prtViewDialog')?.remove(); openEntryDetail(${prt.journal_entry_id})">📒 فتح القيد المحاسبي</button>
+    </div>` : ''}
+  </div></div>`;
+  document.body.insertAdjacentHTML('beforeend', html);
+}
+window.openPurchaseReturnView = openPurchaseReturnView;
+
+// بناء صفحة طباعة/عرض للمرتجع في تبويب جديد
+function buildPrtPrintHtml(prt){
+  const sup=(suppliers||[]).find(s=>s.code===prt.supplier_code);
+  const rows=(prt.lines||[]).map((l,idx)=>{
+    const it=(items||[]).find(i=>i.id===l.item_id);
+    return `<tr>
+      <td>${idx+1}</td>
+      <td>${prtEsc(it?it.code+' — '+it.name:l.item_id)}</td>
+      <td class="num">${fmt(l.qty)}</td>
+      <td class="num">${fmt(l.unit_cost)}</td>
+      <td class="num">${fmt(l.qty*l.unit_cost)}</td>
+    </tr>`;
+  }).join('');
+  const badge = prt.status==='cancelled' ? '<span class="pinv-badge cancelled">ملغى</span>' : '<span class="pinv-badge">مرحّل</span>';
+  const hasTax = prt.tax_amount && Number(prt.tax_amount) > 0;
+  const taxSummaryRows = hasTax
+    ? `<div class="row"><span>الصافي</span><span>${fmt(prt.subtotal)}</span></div>
+       <div class="row"><span>الضريبة (نصيب تناسبي)</span><span>${fmt(prt.tax_amount)}</span></div>`
+    : '';
+  return `<!DOCTYPE html>
+<html lang="ar" dir="rtl"><head><meta charset="UTF-8">
+<title>مرتجع مشتريات ${prtEsc(prt.rt_number)}</title>
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;900&display=swap" rel="stylesheet">
+<style>
+  *{box-sizing:border-box;}
+  body{font-family:'Cairo',sans-serif;margin:0;padding:32px;color:#1c2430;background:#fff;}
+  .pinv-print-head{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #1c2430;padding-bottom:16px;margin-bottom:22px;}
+  .pinv-print-head h1{font-size:21px;margin:0 0 6px;}
+  .pinv-print-head .muted{color:#666;font-size:13px;}
+  .pinv-badge{display:inline-block;padding:4px 12px;border-radius:14px;font-size:12px;font-weight:700;background:#2e7d3222;color:#2e7d32;border:1px solid #2e7d3255;}
+  .pinv-badge.cancelled{background:#c6282822;color:#c62828;border-color:#c6282855;}
+  .pinv-info-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px 24px;margin-bottom:26px;}
+  .pinv-info-grid div{font-size:13px;}
+  .pinv-info-grid label{display:block;color:#888;font-size:11px;margin-bottom:3px;}
+  table{width:100%;border-collapse:collapse;font-size:13px;}
+  th,td{border:1px solid #ddd;padding:8px 10px;text-align:right;}
+  th{background:#f4f5f7;font-weight:700;}
+  td.num,th.num{text-align:left;font-family:monospace,'Cairo';}
+  .pinv-total-row{margin-top:16px;display:flex;justify-content:flex-end;}
+  .pinv-total-row .box{min-width:280px;display:flex;flex-direction:column;gap:6px;font-size:13px;border-top:2px solid #1c2430;padding-top:10px;}
+  .pinv-total-row .box .row{display:flex;justify-content:space-between;color:#555;}
+  .pinv-total-row .box .grand{display:flex;justify-content:space-between;font-size:16px;font-weight:800;color:#1c2430;margin-top:4px;}
+  .pinv-print-toolbar{margin-bottom:20px;}
+  .pinv-print-toolbar button{font-family:'Cairo',sans-serif;padding:9px 18px;border-radius:8px;border:1px solid #1c2430;background:#1c2430;color:#fff;cursor:pointer;font-size:13px;font-weight:600;}
+  @media print{ .pinv-print-toolbar{display:none;} body{padding:0;} }
+</style></head>
+<body>
+  <div class="pinv-print-toolbar"><button onclick="window.print()">🖨️ طباعة</button></div>
+  <div class="pinv-print-head">
+    <div>
+      <h1>LEGEND D — مرتجع مشتريات</h1>
+      <div class="muted">رقم المرتجع: ${prtEsc(prt.rt_number)}</div>
+    </div>
+    <div>${badge}</div>
+  </div>
+  <div class="pinv-info-grid">
+    <div><label>المورد</label>${prtEsc(sup?sup.name:prt.supplier_code)}</div>
+    <div><label>تاريخ المرتجع</label>${prtEsc(prt.rt_date)}</div>
+    <div><label>الفاتورة الأصلية</label>${prtEsc(prt.inv_number)}</div>
+  </div>
+  <table><thead><tr><th>#</th><th>الصنف</th><th class="num">الكمية</th><th class="num">التكلفة</th><th class="num">الإجمالي</th></tr></thead>
+  <tbody>${rows}</tbody></table>
+  <div class="pinv-total-row"><div class="box">
+    ${taxSummaryRows}
+    <div class="grand"><span>الإجمالي الكلي</span><span>${fmt(prt.total)}</span></div>
+  </div></div>
+</body></html>`;
+}
+
+function openPrtPrintTab(rtNumber){
+  const prt=(returns_||[]).find(r=>r.rt_number===rtNumber);
+  if(!prt){ alert('تعذر العثور على المرتجع'); return; }
+  const w=window.open('', '_blank');
+  if(!w){ alert('يرجى السماح بفتح النوافذ المنبثقة لعرض المرتجع'); return; }
+  w.document.open();
+  w.document.write(buildPrtPrintHtml(prt));
+  w.document.close();
+}
+window.openPrtPrintTab = openPrtPrintTab;
+
+function buildPrtShareText(prt){
+  const sup=(suppliers||[]).find(s=>s.code===prt.supplier_code);
+  return `مرتجع مشتريات رقم ${prt.rt_number}\nالمورد: ${sup?sup.name:prt.supplier_code}\nالتاريخ: ${prt.rt_date}\nالفاتورة الأصلية: ${prt.inv_number}\nالإجمالي: ${fmt(prt.total)}`;
+}
+
+function sendPrtByEmail(rtNumber){
+  const prt=(returns_||[]).find(r=>r.rt_number===rtNumber);
+  if(!prt) return;
+  const subject=encodeURIComponent(`مرتجع مشتريات ${prt.rt_number}`);
+  const body=encodeURIComponent(buildPrtShareText(prt));
+  window.open(`mailto:?subject=${subject}&body=${body}`, '_blank');
+}
+window.sendPrtByEmail = sendPrtByEmail;
+
+function sendPrtByWhatsapp(rtNumber){
+  const prt=(returns_||[]).find(r=>r.rt_number===rtNumber);
+  if(!prt) return;
+  const text=encodeURIComponent(buildPrtShareText(prt));
+  window.open(`https://wa.me/?text=${text}`, '_blank');
+}
+window.sendPrtByWhatsapp = sendPrtByWhatsapp;
+
+async function cancelPurchaseReturnAction(rtNumber){
+  if(!confirm(`سيتم إلغاء المرتجع ${rtNumber} — سترجع الكمية المرتجعة للمخزون ويُلغى قيده المحاسبي، ويعود رصيد المورد كما كان قبل هذا المرتجع. هل تريد المتابعة؟`)) return;
+  try{
+    await api('POST', `/api/purchase-returns/${encodeURIComponent(rtNumber)}/cancel`, {});
+    await loadAll();
+  }catch(e){ alert(e.message); }
+}
+window.cancelPurchaseReturnAction = cancelPurchaseReturnAction;
+
 
 // ============================================================
 // التنقل — القائمة الأفقية والشريط الجانبي

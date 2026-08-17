@@ -29,6 +29,16 @@ class Warehouse(Base):
         default=True
     )
 
+    # يُستخدم كمستودع افتراضي عند عدم تحديد مستودع صراحةً بعملية شراء
+    # (العمود مُضاف بقاعدة البيانات عبر Migration 002/023؛ مُعرَّف هنا
+    # بالنموذج حتى يعمل ORM بشكل صحيح)
+    is_default = Column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default="false",
+    )
+
     created_at = Column(
         DateTime,
         server_default=func.now()

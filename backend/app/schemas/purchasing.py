@@ -180,7 +180,12 @@ class PurchaseReturnOut(BaseModel):
     rt_date: date
     supplier_code: str
     inv_number: str
+    subtotal: float = 0
+    tax_type_code: Optional[str] = None
+    tax_amount: float = 0
     total: float
+    status: str = "posted"
+    journal_entry_id: Optional[int] = None
     lines: List[PRTLineOut] = []
 
     class Config:

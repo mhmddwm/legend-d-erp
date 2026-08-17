@@ -1393,6 +1393,89 @@ def cancel_purchase_invoice(
 # =========================================================
 # PURCHASE RETURN
 # =========================================================
+def _post_purchase_return_journal(
+    db: Session,
+    purchase_return: PurchaseReturn,
+    subtotal: float,
+    tax_amount: float,
+    total: float,
+    tax_type,
+):
+    """يرحّل القيد المحاسبي التلقائي لمرتجع المشتريات — عكس تناسبي لقيد
+    الفاتورة الأصلية: مدين حساب المورد (تخفيض ما هو مستحق له) / دائن
+    المخزون (123) [+ دائن حساب ضريبة المشتريات بنصيب المرتجع التناسبي
+    إن كان نوع الضريبة مرتبطاً بحساب]."""
+    inventory_account = db.query(Account).filter(Account.code == "123").first()
+    if not inventory_account:
+        raise HTTPException(
+            status_code=400,
+            detail="حساب المخزون (123) غير موجود بدليل الحسابات — لا يمكن ترحيل القيد المحاسبي للمرتجع.",
+        )
+
+    supplier = db.query(Supplier).filter(Supplier.code == purchase_return.supplier_code).first()
+    payable_account_code = (supplier.account_code if supplier and supplier.account_code else None) or "211"
+    payable_account = db.query(Account).filter(Account.code == payable_account_code).first()
+    if not payable_account:
+        raise HTTPException(
+            status_code=400,
+            detail=f"الحساب المحاسبي المرتبط بالمورد ({payable_account_code}) غير موجود بدليل الحسابات.",
+        )
+
+    tax_account = None
+    if tax_type and tax_type.account_code:
+        tax_account = db.query(Account).filter(Account.code == tax_type.account_code).first()
+
+    entry = JournalEntry(
+        entry_date=purchase_return.rt_date,
+        description=f"مرتجع مشتريات {purchase_return.rt_number} — المورد {purchase_return.supplier_code}",
+        source_type="purchase_return",
+        source_ref=purchase_return.rt_number,
+        supplier_code=purchase_return.supplier_code,
+        status="posted",
+        total_amount=total,
+    )
+    db.add(entry)
+    db.flush()
+
+    line_no = 1
+    db.add(JournalEntryLine(
+        entry_id=entry.id, line_no=line_no, account_code=payable_account.code,
+        debit=total, credit=0,
+        line_description=f"تخفيض مستحق للمورد {purchase_return.supplier_code} — مرتجع {purchase_return.rt_number}",
+    ))
+    line_no += 1
+
+    if tax_amount and tax_account:
+        db.add(JournalEntryLine(
+            entry_id=entry.id, line_no=line_no, account_code=inventory_account.code,
+            debit=0, credit=subtotal,
+            line_description=f"مخزون — مرتجع {purchase_return.rt_number}",
+        ))
+        line_no += 1
+        db.add(JournalEntryLine(
+            entry_id=entry.id, line_no=line_no, account_code=tax_account.code,
+            debit=0, credit=tax_amount,
+            line_description=f"ضريبة مشتريات (عكس نصيب المرتجع) — {purchase_return.rt_number}",
+            tax_type_code=tax_type.code, tax_rate=tax_type.rate, tax_amount=tax_amount,
+        ))
+        line_no += 1
+    else:
+        line_kwargs = dict(
+            entry_id=entry.id, line_no=line_no, account_code=inventory_account.code,
+            debit=0, credit=round(subtotal + (tax_amount or 0), 2),
+            line_description=f"مخزون — مرتجع {purchase_return.rt_number}",
+        )
+        if tax_type and tax_amount:
+            line_kwargs.update(
+                tax_type_code=tax_type.code, tax_rate=tax_type.rate, tax_amount=tax_amount,
+            )
+        db.add(JournalEntryLine(**line_kwargs))
+        line_no += 1
+
+    purchase_return.journal_entry_id = entry.id
+    return entry
+
+
 @prt_router.get("", response_model=list[PurchaseReturnOut])
 def list_purchase_returns(db: Session = Depends(get_db)):
     return (
@@ -1421,6 +1504,11 @@ def create_purchase_return(
         raise HTTPException(
             status_code=404,
             detail=f"فاتورة الشراء {payload.inv_number} غير موجودة",
+        )
+    if invoice.status == "cancelled":
+        raise HTTPException(
+            status_code=400,
+            detail="لا يمكن إنشاء مرتجع على فاتورة ملغاة",
         )
 
     prepared_lines = []
@@ -1465,6 +1553,7 @@ def create_purchase_return(
             .filter(
                 PurchaseReturn.inv_number == invoice.inv_number,
                 PurchaseReturnLine.item_id == item.id,
+                PurchaseReturn.status != "cancelled",
             )
             .scalar()
         )
@@ -1507,7 +1596,7 @@ def create_purchase_return(
 
         source_grn = db.query(GoodsReceipt).filter(GoodsReceipt.grn_number == invoice.grn_number).first()
 
-        total = 0.0
+        subtotal = 0.0
         for item, qty, unit_cost in prepared_lines:
             new_qty = _to_float(item.qty) - qty
 
@@ -1543,9 +1632,96 @@ def create_purchase_return(
                     -qty, _to_float(item.avg_cost),
                 )
 
-            total += qty * unit_cost
+            subtotal += qty * unit_cost
 
+        # نصيب المرتجع التناسبي من ضريبة الفاتورة الأصلية (إن وُجدت)،
+        # حتى يبقى رصيد المورد صحيحاً تماماً بعد المرتجع (كان يُخصَم
+        # الصافي فقط سابقاً رغم أن الفاتورة حُسبت شاملة الضريبة)
+        tax_type = None
+        tax_amount = 0.0
+        if invoice.tax_type_code and _to_float(invoice.subtotal) > 0:
+            tax_type = db.query(TaxType).filter(TaxType.code == invoice.tax_type_code).first()
+            effective_rate = _to_float(invoice.tax_amount) / _to_float(invoice.subtotal)
+            tax_amount = round(subtotal * effective_rate, 2)
+
+        total = round(subtotal + tax_amount, 2)
+        purchase_return.subtotal = round(subtotal, 2)
+        purchase_return.tax_type_code = tax_type.code if tax_type else None
+        purchase_return.tax_amount = tax_amount
         purchase_return.total = total
+
+        _post_purchase_return_journal(db, purchase_return, purchase_return.subtotal, tax_amount, total, tax_type)
+
+        db.commit()
+        db.refresh(purchase_return)
+        return purchase_return
+
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception:
+        db.rollback()
+        raise
+
+
+@prt_router.post("/{rt_number}/cancel", response_model=PurchaseReturnOut)
+def cancel_purchase_return(
+    rt_number: str,
+    db: Session = Depends(get_db),
+):
+    """إلغاء مرتجع مشتريات: يعيد الكمية المرتجعة إلى المخزون (بمزج
+    آمن ضمن التكلفة المتوسطة الحالية، تماماً كاستلام جديد — لا يتطلب
+    نفس ضمانات عكس WAC التي يتطلبها تعديل إذن الاستلام، لأن الإضافة
+    للمخزون لا تُخاطر أبداً برصيد سالب)، ويُلغي قيده المحاسبي."""
+    purchase_return = db.query(PurchaseReturn).filter(PurchaseReturn.rt_number == rt_number).first()
+    if not purchase_return:
+        raise HTTPException(status_code=404, detail="مرتجع المشتريات غير موجود")
+    if purchase_return.status == "cancelled":
+        raise HTTPException(status_code=400, detail="المرتجع ملغى بالفعل")
+
+    try:
+        source_grn = (
+            db.query(GoodsReceipt)
+            .join(PurchaseInvoice, PurchaseInvoice.grn_number == GoodsReceipt.grn_number)
+            .filter(PurchaseInvoice.inv_number == purchase_return.inv_number)
+            .first()
+        )
+        return_lines = (
+            db.query(PurchaseReturnLine)
+            .filter(PurchaseReturnLine.rt_number == purchase_return.rt_number)
+            .all()
+        )
+        for line in return_lines:
+            item = db.query(Item).filter(Item.id == line.item_id).first()
+            if not item:
+                continue
+            old_qty = _to_float(item.qty)
+            old_avg = _to_float(item.avg_cost)
+            line_qty = _to_float(line.qty)
+            line_cost = _to_float(line.unit_cost)
+            new_qty = old_qty + line_qty
+            new_avg = ((old_avg * old_qty) + (line_cost * line_qty)) / new_qty if new_qty > 0 else 0
+            item.qty = new_qty
+            item.avg_cost = new_avg
+
+            db.add(StockMove(
+                move_date=date.today(), item_id=item.id, move_type="إلغاء مرتجع مشتريات",
+                reference=f"PRT-{purchase_return.rt_number}-CANCEL",
+                warehouse_id=source_grn.warehouse_id if source_grn else None,
+                qty=line_qty, unit_cost=line_cost, balance_after=new_qty,
+            ))
+            if source_grn and source_grn.warehouse_id:
+                _adjust_warehouse_stock(
+                    db, item.id, source_grn.warehouse_id, source_grn.location_id,
+                    line_qty, new_avg,
+                )
+
+        if purchase_return.journal_entry_id:
+            entry = db.query(JournalEntry).filter(JournalEntry.id == purchase_return.journal_entry_id).first()
+            if entry and entry.status == "posted":
+                entry.status = "cancelled"
+
+        purchase_return.status = "cancelled"
 
         db.commit()
         db.refresh(purchase_return)

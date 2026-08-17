@@ -578,6 +578,20 @@ class PurchaseReturn(Base):
         default=0
     )
 
+    # الضريبة على مستوى المرتجع (نصيب تناسبي من ضريبة الفاتورة
+    # الأصلية) — subtotal = صافي قيمة الأصناف المرتجعة، tax_amount =
+    # نصيبها من الضريبة، total = الإجمالي (صافي + ضريبة) وهو المبلغ
+    # الذي يُخصَم فعلياً من رصيد المورد.
+    subtotal = Column(Numeric(18, 2), nullable=False, default=0)
+    tax_type_code = Column(String(20), ForeignKey("tax_types.code"), nullable=True)
+    tax_amount = Column(Numeric(18, 2), nullable=False, default=0)
+
+    status = Column(String(20), nullable=False, default="posted")
+
+    # القيد المحاسبي المُرحَّل تلقائياً عند إنشاء المرتجع (مدين حساب
+    # المورد / دائن المخزون [+ دائن حساب الضريبة])
+    journal_entry_id = Column(Integer, ForeignKey("journal_entries.id"), nullable=True)
+
     created_at = Column(
         DateTime(timezone=True),
         server_default=func.now()

@@ -1180,6 +1180,14 @@ html[dir="ltr"] .brand-center{direction:ltr;}
 #panel-purchase_invoices .po-trace{margin-bottom:12px}
 #panel-purchase_invoices .pinv-list-main{min-height:520px;display:flex;flex-direction:column}
 #panel-purchase_invoices .pinv-list-scroll{flex:1}
+
+#panel-purchase_returns .po-hero{padding:14px 18px}
+#panel-purchase_returns .po-hero h2{font-size:20px;margin:2px 0 4px}
+#panel-purchase_returns .po-hero p{font-size:12.5px;color:#4b5768}
+#panel-purchase_returns .po-trace{margin-bottom:12px}
+#panel-purchase_returns .prt-list-main{min-height:480px;display:flex;flex-direction:column}
+#panel-purchase_returns .prt-list-scroll{flex:1}
+#panel-purchase_returns .hint{color:#48566b}
 </style>
 </head>
 <body class="erp-body">
@@ -2318,29 +2326,6 @@ html[dir="ltr"] .brand-center{direction:ltr;}
   </div>
 
   <!-- ========== GRN ========== -->
-  <!-- ========== PURCHASE RETURNS ========== -->
-  <div class="panel" id="panel-preturn">
-    <div class="formcard">
-      <h3>مرتجع مشتريات</h3>
-      <div class="frow two">
-        <div class="field"><label>الفاتورة المرتبطة</label>
-          <select id="prtInv" onchange="onPrtInvChange()"><option value="">— اختر فاتورة —</option></select></div>
-        <div class="field"><label>تاريخ المرتجع</label><input id="prtDate" type="date"></div>
-      </div>
-      <div id="prtLinesWrap"></div>
-      <div class="totals-box"><div class="row grand"><span>إجمالي المرتجع</span><span id="prtTotal">0.00</span></div></div>
-      <div style="margin-top:14px"><button class="btn" onclick="submitPrt()">تأكيد المرتجع</button></div>
-      <div class="err" id="prtErr"></div>
-      <div class="hint">المرتجع ينقّص المخزون وينشئ قيداً عكسياً تلقائياً.</div>
-    </div>
-    <div class="gridcard"><div class="scrollx">
-      <table class="grid">
-        <thead><tr><th>الرقم</th><th>التاريخ</th><th>المورد</th><th>الفاتورة</th><th>الإجمالي</th></tr></thead>
-        <tbody id="prtBody"></tbody>
-      </table>
-      <div class="empty-msg" id="prtEmpty" style="display:none">لا توجد مرتجعات</div>
-    </div></div>
-  </div>
 
   <!-- باقي الشاشات الفارغة -->
   <div class="panel" id="panel-purchase_request">
@@ -2669,7 +2654,53 @@ html[dir="ltr"] .brand-center{direction:ltr;}
     </div>
   </div>
 </div>
-  <div class="panel" id="panel-purchase_returns"><div class="formcard"><h3>مرتجعات المشتريات</h3><div class="empty-msg">جاهزة للتطوير</div></div></div>
+  <div class="panel" id="panel-purchase_returns">
+  <div class="po-page erp-watermark-page">
+    <div class="po-watermark">LEGEND D ERP SYS<br><span>Purchase Return</span></div>
+    <div class="po-hero">
+      <div>
+        <span class="mini-label">المشتريات</span>
+        <h2>مرتجعات المشتريات Purchase Return</h2>
+        <p>إرجاع أصناف لمورد على فاتورة مرحّلة، مع تحديث المخزون فوراً وترحيل قيد محاسبي تلقائي يعكس نصيب الضريبة التناسبي من الفاتورة الأصلية (مدين حساب المورد / دائن المخزون وضريبة المشتريات).</p>
+      </div>
+      <div class="po-actions">
+        <button class="btn secondary" onclick="renderPurchaseReturns()">تحديث</button>
+        <button class="btn" onclick="window.togglePrtNewForm()">+ مرتجع جديد</button>
+      </div>
+    </div>
+    <div class="po-trace formcard rfq-timeline" id="prtTraceBar"><span onclick="window.goPoWorkflowStage('purchase_request')">طلب شراء</span><b>←</b><span onclick="window.goPoWorkflowStage('quotation_request')">طلب عرض سعر</span><b>←</b><span onclick="window.goPoWorkflowStage('compare')">مقارنة العروض</span><b>←</b><span onclick="window.goPoWorkflowStage('purchase_orders')">أمر شراء</span><b>←</b><span onclick="window.goPoWorkflowStage('goods_receipt')">استلام</span><b>←</b><span onclick="window.goPoWorkflowStage('purchase_invoices')">فاتورة</span><b>←</b><span class="active" onclick="window.goPoWorkflowStage('purchase_returns')">مرتجع</span></div>
+
+    <div class="formcard rfq-card prt-list-main" style="margin-top:14px">
+      <div class="rfq-saved-toolbar"><div><h3 style="margin:0">مرتجعات المشتريات المسجّلة</h3><small id="prtSavedCount">0 مرتجع</small></div><input id="prtSearch" placeholder="بحث برقم المرتجع أو المورد أو رقم الفاتورة" oninput="renderPurchaseReturns()"></div>
+      <div class="scrollx prt-list-scroll"><table class="grid po-list-table"><thead><tr><th>رقم المرتجع</th><th>التاريخ</th><th>المورد</th><th>الفاتورة</th><th>الإجمالي</th><th>الحالة</th><th style="text-align:center">الإجراءات</th></tr></thead><tbody id="prtBody"></tbody></table></div>
+      <div id="prtEmpty" class="pr-list-empty" style="display:none">لا توجد مرتجعات مشتريات مسجلة حتى الآن</div>
+    </div>
+
+    <div id="prtNewFormBox" class="formcard" style="display:none;margin-top:14px;border:1.5px dashed #93c5fd">
+      <div class="rfq-section-head">
+        <h3>مرتجع مشتريات جديد</h3>
+        <button class="btn secondary" onclick="togglePrtNewForm(false)">إلغاء</button>
+      </div>
+      <div class="frow two">
+        <div class="field"><label>المورد</label><select id="prtSupplier" onchange="onPrtSupplierChange()"><option value="">— اختر مورداً —</option></select></div>
+        <div class="field"><label>الفاتورة المرتبطة</label><select id="prtInvoice" onchange="onPrtInvoiceChange()"><option value="">— اختر مورداً أولاً —</option></select></div>
+      </div>
+      <div class="frow two">
+        <div class="field"><label>تاريخ المرتجع</label><input id="prtDate" type="date"></div>
+        <div></div>
+      </div>
+      <div id="prtLinesWrap"></div>
+      <div class="totals-box">
+        <div class="row"><span>الصافي قبل الضريبة</span><span id="prtSubtotal">0.00</span></div>
+        <div class="row"><span id="prtTaxLabel">الضريبة (نصيب تناسبي)</span><span id="prtTaxAmount">0.00</span></div>
+        <div class="row grand"><span>إجمالي المرتجع (يُخصَم من رصيد المورد)</span><span id="prtTotal">0.00</span></div>
+      </div>
+      <div style="margin-top:14px"><button class="btn" onclick="submitPurchaseReturn()">ترحيل المرتجع</button></div>
+      <div class="err" id="prtErr"></div>
+      <div class="hint">تظهر هنا فقط فواتير المورد المختار (غير الملغاة). تُحسب حصة المرتجع من الضريبة تلقائياً وتناسبياً من الفاتورة الأصلية — لا حاجة لإدخالها يدوياً.</div>
+    </div>
+  </div>
+</div>
   <div class="panel" id="panel-supplier_payments"><div class="formcard"><h3>مدفوعات الموردين</h3><div class="empty-msg">جاهزة للتطوير</div></div></div>
   <div class="panel" id="panel-purchase_settings">
   <div class="pset-page erp-watermark-page">
