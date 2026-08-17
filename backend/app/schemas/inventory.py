@@ -203,3 +203,34 @@ class UnitTemplateOut(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class PriceListIn(BaseModel):
+    code: str
+    name: str
+
+
+class PriceListUpdate(BaseModel):
+    name: Optional[str] = None
+    is_active: Optional[bool] = None
+
+
+class PriceListOut(BaseModel):
+    code: str
+    name: str
+    is_active: bool = True
+
+    class Config:
+        from_attributes = True
+
+
+class PriceListItemIn(BaseModel):
+    item_code: str
+    price: float
+
+
+class PriceListItemOut(BaseModel):
+    item_id: int
+    item_code: str
+    item_name: str
+    price: float

@@ -154,6 +154,10 @@ app.include_router(
     inventory.unit_template_router
 )
 
+app.include_router(
+    inventory.price_list_router
+)
+
 
 # Purchasing
 app.include_router(

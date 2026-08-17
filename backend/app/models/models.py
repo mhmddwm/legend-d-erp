@@ -2,7 +2,7 @@ from datetime import timedelta
 
 from sqlalchemy import (
     Column, String, Numeric, Boolean, Date, DateTime, Integer,
-    ForeignKey, CheckConstraint, Text, func
+    ForeignKey, CheckConstraint, UniqueConstraint, Text, func
 )
 from sqlalchemy.orm import relationship
 from app.database import Base
@@ -725,3 +725,29 @@ class UnitTemplate(Base):
     max_price = Column(Numeric(18, 4), nullable=True)
     is_active = Column(Boolean, nullable=False, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class PriceList(Base):
+    """قائمة أسعار مسمّاة (مثال: أسعار الجملة/التجزئة) تحمل سعراً
+    مخصَّصاً لكل صنف يتجاوز السعر الافتراضي بجدول الأصناف."""
+    __tablename__ = "price_lists"
+
+    code = Column(String(30), primary_key=True)
+    name = Column(String(200), nullable=False)
+    is_active = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    items = relationship("PriceListItem", backref="price_list", cascade="all, delete-orphan")
+
+
+class PriceListItem(Base):
+    __tablename__ = "price_list_items"
+
+    id = Column(Integer, primary_key=True)
+    price_list_code = Column(String(30), ForeignKey("price_lists.code"), nullable=False)
+    item_id = Column(Integer, ForeignKey("items.id"), nullable=False)
+    price = Column(Numeric(18, 4), nullable=False, default=0)
+
+    __table_args__ = (
+        UniqueConstraint("price_list_code", "item_id", name="uq_price_list_item"),
+    )

@@ -3,12 +3,13 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 from datetime import date as date_type
 from app.database import get_db
-from app.models.models import Item, StockMove, Supplier, PurchaseInvoice, PurchaseReturn, Account, SupplierPayment, SupplierPaymentAllocation, Category, Brand, UnitTemplate
+from app.models.models import Item, StockMove, Supplier, PurchaseInvoice, PurchaseReturn, Account, SupplierPayment, SupplierPaymentAllocation, Category, Brand, UnitTemplate, PriceList, PriceListItem
 from app.models.warehouse_stock import WarehouseStock
 from app.schemas.inventory import (
     ItemIn, ItemUpdate, ItemOut, StockMoveOut, SupplierIn, SupplierUpdate, SupplierOut,
     CategoryIn, CategoryUpdate, CategoryOut, BrandIn, BrandUpdate, BrandOut,
     UnitTemplateIn, UnitTemplateUpdate, UnitTemplateOut,
+    PriceListIn, PriceListUpdate, PriceListOut, PriceListItemIn, PriceListItemOut,
 )
 from app.schemas.purchasing import SupplierOpenInvoiceOut
 
@@ -18,6 +19,106 @@ supplier_router = APIRouter(prefix="/api/suppliers", tags=["Suppliers"])
 category_router = APIRouter(prefix="/api/categories", tags=["Categories"])
 brand_router = APIRouter(prefix="/api/brands", tags=["Brands"])
 unit_template_router = APIRouter(prefix="/api/unit-templates", tags=["UnitTemplates"])
+price_list_router = APIRouter(prefix="/api/price-lists", tags=["PriceLists"])
+
+
+# ============================================================
+# PRICE LISTS (قوائم الأسعار)
+# ============================================================
+
+@price_list_router.get("", response_model=list[PriceListOut])
+def list_price_lists(db: Session = Depends(get_db)):
+    return db.query(PriceList).order_by(PriceList.code.asc()).all()
+
+
+@price_list_router.post("", response_model=PriceListOut, status_code=201)
+def create_price_list(payload: PriceListIn, db: Session = Depends(get_db)):
+    if db.query(PriceList).filter(PriceList.code == payload.code).first():
+        raise HTTPException(400, "كود قائمة الأسعار مستخدم من قبل")
+    pl = PriceList(**payload.model_dump())
+    db.add(pl)
+    db.commit()
+    db.refresh(pl)
+    return pl
+
+
+@price_list_router.put("/{code}", response_model=PriceListOut)
+def update_price_list(code: str, payload: PriceListUpdate, db: Session = Depends(get_db)):
+    pl = db.query(PriceList).filter(PriceList.code == code).first()
+    if not pl:
+        raise HTTPException(404, "قائمة الأسعار غير موجودة")
+    for k, v in payload.model_dump(exclude_unset=True).items():
+        setattr(pl, k, v)
+    db.commit()
+    db.refresh(pl)
+    return pl
+
+
+@price_list_router.delete("/{code}", status_code=204)
+def delete_price_list(code: str, db: Session = Depends(get_db)):
+    pl = db.query(PriceList).filter(PriceList.code == code).first()
+    if not pl:
+        raise HTTPException(404, "قائمة الأسعار غير موجودة")
+    db.delete(pl)
+    db.commit()
+    return None
+
+
+@price_list_router.get("/{code}/items", response_model=list[PriceListItemOut])
+def list_price_list_items(code: str, db: Session = Depends(get_db)):
+    pl = db.query(PriceList).filter(PriceList.code == code).first()
+    if not pl:
+        raise HTTPException(404, "قائمة الأسعار غير موجودة")
+    rows = (
+        db.query(PriceListItem, Item)
+        .join(Item, Item.id == PriceListItem.item_id)
+        .filter(PriceListItem.price_list_code == code)
+        .order_by(Item.code.asc())
+        .all()
+    )
+    return [
+        PriceListItemOut(item_id=item.id, item_code=item.code, item_name=item.name, price=float(pli.price or 0))
+        for pli, item in rows
+    ]
+
+
+@price_list_router.post("/{code}/items", response_model=PriceListItemOut, status_code=201)
+def upsert_price_list_item(code: str, payload: PriceListItemIn, db: Session = Depends(get_db)):
+    """إضافة سعر صنف لقائمة الأسعار، أو تحديثه إن كان موجوداً بالفعل
+    (Upsert) — حتى لا يُضطر المستخدم لمعرفة هل الصنف مُدرَج مسبقاً."""
+    pl = db.query(PriceList).filter(PriceList.code == code).first()
+    if not pl:
+        raise HTTPException(404, "قائمة الأسعار غير موجودة")
+    item = db.query(Item).filter(Item.code == payload.item_code).first()
+    if not item:
+        raise HTTPException(404, "الصنف غير موجود")
+
+    row = (
+        db.query(PriceListItem)
+        .filter(PriceListItem.price_list_code == code, PriceListItem.item_id == item.id)
+        .first()
+    )
+    if row:
+        row.price = payload.price
+    else:
+        row = PriceListItem(price_list_code=code, item_id=item.id, price=payload.price)
+        db.add(row)
+    db.commit()
+    return PriceListItemOut(item_id=item.id, item_code=item.code, item_name=item.name, price=float(payload.price or 0))
+
+
+@price_list_router.delete("/{code}/items/{item_id}", status_code=204)
+def delete_price_list_item(code: str, item_id: int, db: Session = Depends(get_db)):
+    row = (
+        db.query(PriceListItem)
+        .filter(PriceListItem.price_list_code == code, PriceListItem.item_id == item_id)
+        .first()
+    )
+    if not row:
+        raise HTTPException(404, "لا يوجد سعر مسجَّل لهذا الصنف بهذه القائمة")
+    db.delete(row)
+    db.commit()
+    return None
 
 
 # ============================================================
