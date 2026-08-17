@@ -2165,7 +2165,7 @@ html[dir="ltr"] .brand-center{direction:ltr;}
     <div class="formcard supplier-search-card">
       <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap">
         <h3>البحث عن الموردين</h3>
-        <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn secondary" onclick="openSupplierImport()">استيراد</button><button class="btn" onclick="startSupplierAdd()">+ إضافة المورد</button></div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn secondary" onclick="openSupplierAgingReport()">📊 أعمار الديون</button><button class="btn secondary" onclick="openSupplierImport()">استيراد</button><button class="btn" onclick="startSupplierAdd()">+ إضافة المورد</button></div>
       </div>
       <div class="frow">
         <div class="field"><label>الاسم</label><input id="supSearchName" list="supNamesList" placeholder="اكتب الاسم لاقتراح المورد"><datalist id="supNamesList"></datalist></div>
@@ -4712,6 +4712,74 @@ table.uz-matrix input[type=checkbox]{width:16px;height:16px;cursor:pointer;accen
     </div></div>`;
     document.body.insertAdjacentHTML('beforeend', html);
   };
+
+  // تقرير أعمار الديون — عبر كل الموردين: أي فواتير مرحّلة لسه عليها
+  // رصيد قائم، مصنّفة حسب عدد أيام تجاوز تاريخ الاستحقاق
+  window.openSupplierAgingReport=async function(){
+    let data;
+    try{
+      data = await api('GET', '/api/purchase-invoices/aging-report');
+    }catch(e){
+      alert('تعذر تحميل تقرير أعمار الديون: '+(e.message||e));
+      return;
+    }
+    document.getElementById('agingReportDialog')?.remove();
+
+    const bucketLabels = {'current':'لم يحن الاستحقاق','1-30':'1–30 يوم','31-60':'31–60 يوم','61-90':'61–90 يوم','90+':'أكثر من 90 يوم'};
+    const bucketColors = {'current':'#0b5db8','1-30':'#b45309','31-60':'#c2410c','61-90':'#c62828','90+':'#7f1d1d'};
+
+    const summaryCards = ['current','1-30','31-60','61-90','90+'].map(b=>
+      `<div class="pset-readonly-badge" style="background:${bucketColors[b]}14;color:${bucketColors[b]};border-color:${bucketColors[b]}44;padding:10px 14px;text-align:center">
+        <div style="font-size:11px;font-weight:700;opacity:.85">${bucketLabels[b]}</div>
+        <div style="font-size:15px;font-weight:900;margin-top:3px">${fmt((data.totals_by_bucket||{})[b]||0)}</div>
+      </div>`
+    ).join('');
+
+    const supplierRows = (data.supplier_summary||[]).map(s=>`<tr>
+        <td>${esc(s.supplier_name)}</td>
+        <td class="num">${s.invoice_count}</td>
+        <td class="num">${fmt(s.current)}</td>
+        <td class="num">${fmt(s['1-30'])}</td>
+        <td class="num">${fmt(s['31-60'])}</td>
+        <td class="num">${fmt(s['61-90'])}</td>
+        <td class="num" style="color:#7f1d1d;font-weight:700">${fmt(s['90+'])}</td>
+        <td class="num" style="font-weight:800">${fmt(s.total_outstanding)}</td>
+      </tr>`).join('');
+
+    const invoiceRows = (data.invoices||[]).map(r=>`<tr>
+        <td>${esc(r.inv_number)}</td>
+        <td>${esc(r.supplier_name)}</td>
+        <td>${esc(r.inv_date)}</td>
+        <td>${esc(r.due_date||'-')}</td>
+        <td class="num" style="color:${bucketColors[r.bucket]};font-weight:700">${r.days_overdue>0?r.days_overdue+' يوم':'—'}</td>
+        <td>${bucketLabels[r.bucket]}</td>
+        <td class="num" style="font-weight:700">${fmt(r.outstanding)}</td>
+      </tr>`).join('');
+
+    const html=`<div class="po-decision-dialog" id="agingReportDialog"><div class="box" style="max-width:1040px">
+      <div class="rfq-section-head">
+        <h3>📊 تقرير أعمار الديون — كما بتاريخ ${esc(data.as_of)}</h3>
+        <button class="btn secondary" onclick="document.getElementById('agingReportDialog').remove()">إغلاق</button>
+      </div>
+      <div class="hint" style="margin-bottom:14px">الأرصدة هنا قبل احتساب أي مدفوعات (شاشة مدفوعات الموردين لسه غير مفعّلة بالنظام) — تعكس فواتير الشراء المرحّلة ناقص المرتجعات فقط.</div>
+      <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:18px">${summaryCards}</div>
+      <div style="font-weight:800;color:#0f2744;margin-bottom:8px">الإجمالي المستحق على كل الموردين: <span style="color:#0b5db8">${fmt(data.grand_total_outstanding)}</span></div>
+
+      <div class="section-title" style="font-weight:800;font-size:13.5px;margin:16px 0 8px">حسب المورد</div>
+      <div class="scrollx"><table class="grid po-list-table">
+        <thead><tr><th>المورد</th><th>عدد الفواتير</th><th>لم يحن الاستحقاق</th><th>1–30 يوم</th><th>31–60 يوم</th><th>61–90 يوم</th><th>أكثر من 90</th><th>الإجمالي</th></tr></thead>
+        <tbody>${supplierRows || '<tr><td colspan="8" style="text-align:center;color:#94a3b8;padding:16px">لا توجد أرصدة قائمة حالياً</td></tr>'}</tbody>
+      </table></div>
+
+      <div class="section-title" style="font-weight:800;font-size:13.5px;margin:18px 0 8px">تفصيل الفواتير</div>
+      <div class="scrollx"><table class="grid po-list-table">
+        <thead><tr><th>رقم الفاتورة</th><th>المورد</th><th>تاريخ الفاتورة</th><th>تاريخ الاستحقاق</th><th>التأخر</th><th>الفئة</th><th>المتبقي</th></tr></thead>
+        <tbody>${invoiceRows || '<tr><td colspan="7" style="text-align:center;color:#94a3b8;padding:16px">لا توجد فواتير عليها رصيد قائم</td></tr>'}</tbody>
+      </table></div>
+    </div></div>`;
+    document.body.insertAdjacentHTML('beforeend', html);
+  };
+
   window.hasSupplierTransactions=function(code){
     code=String(code);
     return (purchaseOrders||[]).some(x=>String(x.supplier_code||x.supplier)==code) || (grns||[]).some(x=>String(x.supplier_code||x.supplier)==code) || (invoices||[]).some(x=>String(x.supplier_code||x.supplier)==code) || (returns_||[]).some(x=>String(x.supplier_code||x.supplier)==code);

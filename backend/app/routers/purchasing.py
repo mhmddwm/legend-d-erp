@@ -1159,6 +1159,93 @@ def list_purchase_invoices(db: Session = Depends(get_db)):
     )
 
 
+@pinv_router.get("/aging-report")
+def get_purchase_invoices_aging_report(db: Session = Depends(get_db)):
+    """تقرير أعمار الديون: كل فاتورة مشتريات مرحّلة لسه عليها رصيد قائم
+    (الإجمالي - المرتجعات المرتبطة بها)، مصنَّفة حسب عدد أيام تجاوز
+    تاريخ الاستحقاق. لا يشمل هذا التقرير أثر المدفوعات لعدم وجود شاشة
+    مدفوعات موردين مفعّلة بالنظام بعد — الرصيد هنا "قبل أي سداد"."""
+    today = date.today()
+    buckets_order = ["current", "1-30", "31-60", "61-90", "90+"]
+    totals_by_bucket = {b: 0.0 for b in buckets_order}
+    by_supplier = {}
+    rows = []
+
+    invoices = (
+        db.query(PurchaseInvoice)
+        .filter(PurchaseInvoice.status == "posted")
+        .order_by(PurchaseInvoice.inv_date.asc())
+        .all()
+    )
+
+    for inv in invoices:
+        returned = (
+            db.query(func.coalesce(func.sum(PurchaseReturn.total), 0))
+            .filter(
+                PurchaseReturn.inv_number == inv.inv_number,
+                PurchaseReturn.status != "cancelled",
+            )
+            .scalar()
+        )
+        outstanding = round(_to_float(inv.total) - _to_float(returned), 2)
+        if outstanding <= 0.005:
+            continue
+
+        due = inv.due_date
+        days_overdue = (today - due).days if due else 0
+
+        if days_overdue <= 0:
+            bucket = "current"
+        elif days_overdue <= 30:
+            bucket = "1-30"
+        elif days_overdue <= 60:
+            bucket = "31-60"
+        elif days_overdue <= 90:
+            bucket = "61-90"
+        else:
+            bucket = "90+"
+
+        supplier = db.query(Supplier).filter(Supplier.code == inv.supplier_code).first()
+        supplier_name = supplier.name if supplier else inv.supplier_code
+
+        rows.append({
+            "supplier_code": inv.supplier_code,
+            "supplier_name": supplier_name,
+            "inv_number": inv.inv_number,
+            "inv_date": inv.inv_date,
+            "due_date": due,
+            "total": _to_float(inv.total),
+            "returned": _to_float(returned),
+            "outstanding": outstanding,
+            "days_overdue": max(days_overdue, 0),
+            "bucket": bucket,
+        })
+
+        totals_by_bucket[bucket] = round(totals_by_bucket[bucket] + outstanding, 2)
+
+        sup_agg = by_supplier.setdefault(inv.supplier_code, {
+            "supplier_code": inv.supplier_code,
+            "supplier_name": supplier_name,
+            "total_outstanding": 0.0,
+            "invoice_count": 0,
+            **{b: 0.0 for b in buckets_order},
+        })
+        sup_agg["total_outstanding"] = round(sup_agg["total_outstanding"] + outstanding, 2)
+        sup_agg["invoice_count"] += 1
+        sup_agg[bucket] = round(sup_agg[bucket] + outstanding, 2)
+
+    supplier_summary = sorted(by_supplier.values(), key=lambda s: -s["total_outstanding"])
+    rows.sort(key=lambda r: (-r["days_overdue"], r["supplier_name"]))
+
+    return {
+        "as_of": today,
+        "invoices": rows,
+        "totals_by_bucket": totals_by_bucket,
+        "grand_total_outstanding": round(sum(totals_by_bucket.values()), 2),
+        "supplier_summary": supplier_summary,
+    }
+
+
 @pinv_router.post("", response_model=PurchaseInvoiceOut, status_code=201)
 def create_purchase_invoice(
     payload: PurchaseInvoiceIn,
