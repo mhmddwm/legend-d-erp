@@ -21,6 +21,7 @@ from app.routers import (
     warehouse_locations,
     branches,
     reports,
+    system,
 )
 
 
@@ -120,6 +121,11 @@ app.include_router(
 # Financial Reports
 app.include_router(
     reports.router
+)
+
+# System utilities
+app.include_router(
+    system.router
 )
 
 

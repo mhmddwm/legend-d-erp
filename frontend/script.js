@@ -7515,3 +7515,56 @@ async function runBalanceSheetReport(){
   }
 }
 window.runBalanceSheetReport = runBalanceSheetReport;
+
+// ============================================================
+// تصفير كل الحركات التشغيلية والمحاسبية — يبقي دليل الحسابات والبيانات
+// الأساسية (موردين/أصناف/مستودعات/مراكز تكلفة/ضرائب) سليمة تماماً.
+// عملية غير قابلة للتراجع — تتطلب كتابة عبارة التأكيد حرفياً.
+// ============================================================
+const RESET_CONFIRM_PHRASE = 'تصفير الحركات';
+
+function openResetTransactionsDialog(){
+  document.getElementById('resetTxnDialog')?.remove();
+  const html=`<div class="po-decision-dialog" id="resetTxnDialog"><div class="box" style="max-width:560px">
+    <div class="rfq-section-head">
+      <h3 style="color:#c62828">⚠️ تصفير كل الحركات التشغيلية والمحاسبية</h3>
+      <button class="btn secondary" onclick="document.getElementById('resetTxnDialog').remove()">إغلاق</button>
+    </div>
+    <div class="hint" style="background:#fff5f5;border-color:#f3caca;color:#7a2020;margin-bottom:14px">
+      <b>عملية غير قابلة للتراجع عنها.</b> سيتم حذف نهائي لكل: القيود المحاسبية (يدوية وتلقائية)، فواتير ومرتجعات ومدفوعات المشتريات، أوامر الشراء وأذون الاستلام، حركات وأرصدة المخزون، وسجل النشاط — وستُصفَّر كمية وتكلفة كل الأصناف إلى صفر.
+      <br><br>
+      <b>سيبقى كما هو تماماً:</b> دليل الحسابات، الموردون، تعريفات الأصناف، المستودعات، مراكز التكلفة، أنواع الضرائب، والفروع.
+    </div>
+    <div class="field" style="margin-bottom:14px">
+      <label>للتأكيد، اكتب العبارة التالية بالضبط: <b>${RESET_CONFIRM_PHRASE}</b></label>
+      <input id="resetTxnConfirmInput" placeholder="${RESET_CONFIRM_PHRASE}" oninput="document.getElementById('resetTxnConfirmBtn').disabled = this.value.trim() !== '${RESET_CONFIRM_PHRASE}'">
+    </div>
+    <div id="resetTxnErr" style="color:#c62828;font-size:13px;margin-bottom:10px"></div>
+    <div style="display:flex;gap:10px;justify-content:flex-end">
+      <button class="btn secondary" onclick="document.getElementById('resetTxnDialog').remove()">إلغاء</button>
+      <button class="btn" id="resetTxnConfirmBtn" disabled style="background:#c62828;border-color:#c62828" onclick="submitResetTransactions()">تصفير الحركات نهائياً</button>
+    </div>
+  </div></div>`;
+  document.body.insertAdjacentHTML('beforeend', html);
+}
+window.openResetTransactionsDialog = openResetTransactionsDialog;
+
+async function submitResetTransactions(){
+  const err=document.getElementById('resetTxnErr');
+  const btn=document.getElementById('resetTxnConfirmBtn');
+  const confirmVal=document.getElementById('resetTxnConfirmInput').value.trim();
+  if(confirmVal !== RESET_CONFIRM_PHRASE){ err.textContent='عبارة التأكيد غير مطابقة'; return; }
+  err.textContent='';
+  btn.disabled=true; btn.textContent='جارٍ التصفير...';
+  try{
+    await api('POST', '/api/system/reset-transactions', {confirm: confirmVal});
+    document.getElementById('resetTxnDialog')?.remove();
+    alert('تم تصفير كل الحركات بنجاح. دليل الحسابات والبيانات الأساسية سليمة.');
+    await loadAll();
+    if(typeof runTrialBalanceReport === 'function') runTrialBalanceReport();
+  }catch(e){
+    err.textContent=e.message;
+    btn.disabled=false; btn.textContent='تصفير الحركات نهائياً';
+  }
+}
+window.submitResetTransactions = submitResetTransactions;
