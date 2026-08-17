@@ -148,6 +148,10 @@ app.include_router(
     purchasing.prt_router
 )
 
+app.include_router(
+    purchasing.spay_router
+)
+
 
 # Users / Roles / Permissions
 app.include_router(

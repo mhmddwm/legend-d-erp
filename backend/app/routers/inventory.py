@@ -3,8 +3,9 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 from datetime import date as date_type
 from app.database import get_db
-from app.models.models import Item, StockMove, Supplier, PurchaseInvoice, PurchaseReturn, Account
+from app.models.models import Item, StockMove, Supplier, PurchaseInvoice, PurchaseReturn, Account, SupplierPayment, SupplierPaymentAllocation
 from app.schemas.inventory import ItemIn, ItemUpdate, ItemOut, StockMoveOut, SupplierIn, SupplierUpdate, SupplierOut
+from app.schemas.purchasing import SupplierOpenInvoiceOut
 
 router = APIRouter(prefix="/api/items", tags=["Items"])
 stock_router = APIRouter(prefix="/api/stock-moves", tags=["StockMoves"])
@@ -143,7 +144,11 @@ def calc_payable(db: Session, supplier_code: str) -> float:
         PurchaseReturn.supplier_code == supplier_code,
         PurchaseReturn.status != "cancelled",
     ).scalar()
-    return float(invoiced or 0) - float(returned or 0)
+    paid = db.query(func.coalesce(func.sum(SupplierPayment.amount), 0)).filter(
+        SupplierPayment.supplier_code == supplier_code,
+        SupplierPayment.status != "cancelled",
+    ).scalar()
+    return float(invoiced or 0) - float(returned or 0) - float(paid or 0)
 
 
 @supplier_router.get("", response_model=list[SupplierOut])
@@ -236,6 +241,18 @@ def get_supplier_statement(code: str, db: Session = Depends(get_db)):
             "debit": float(rt.total or 0), "credit": 0.0, "journal_entry_id": None,
         })
 
+    payments = db.query(SupplierPayment).filter(
+        SupplierPayment.supplier_code == code, SupplierPayment.status != "cancelled"
+    ).all()
+    for pay in payments:
+        allocs_desc = "، ".join(f"{a.inv_number} ({float(a.amount or 0)})" for a in pay.allocations)
+        desc = f"سداد {pay.payment_number}" + (f" — {allocs_desc}" if allocs_desc else "")
+        movements.append({
+            "date": pay.payment_date, "doc_type": "supplier_payment", "doc_number": pay.payment_number,
+            "description": desc, "debit": float(pay.amount or 0), "credit": 0.0,
+            "journal_entry_id": pay.journal_entry_id,
+        })
+
     movements.sort(key=lambda m: (m["date"], m["doc_number"]))
 
     running = 0.0
@@ -249,6 +266,44 @@ def get_supplier_statement(code: str, db: Session = Depends(get_db)):
         "account_code": supplier.account_code, "opening_balance": 0.0,
         "closing_balance": running, "entries": entries,
     }
+
+
+@supplier_router.get("/{code}/open-invoices", response_model=list[SupplierOpenInvoiceOut])
+def get_supplier_open_invoices(code: str, db: Session = Depends(get_db)):
+    """فواتير المورد المرحّلة التي لسه عليها رصيد متبقٍ فعلياً (بعد
+    خصم المرتجعات والمدفوعات السابقة) — تُستخدم لتعبئة نموذج تسجيل
+    سداد جديد بحيث لا يُسمح بتخصيص مبلغ أكبر من المتبقي الحقيقي."""
+    supplier = db.query(Supplier).filter(Supplier.code == code).first()
+    if not supplier:
+        raise HTTPException(status_code=404, detail="المورد غير موجود")
+
+    invoices = (
+        db.query(PurchaseInvoice)
+        .filter(PurchaseInvoice.supplier_code == code, PurchaseInvoice.status == "posted")
+        .order_by(PurchaseInvoice.inv_date.asc())
+        .all()
+    )
+
+    result = []
+    for inv in invoices:
+        returned = db.query(func.coalesce(func.sum(PurchaseReturn.total), 0)).filter(
+            PurchaseReturn.inv_number == inv.inv_number, PurchaseReturn.status != "cancelled",
+        ).scalar()
+        paid = (
+            db.query(func.coalesce(func.sum(SupplierPaymentAllocation.amount), 0))
+            .join(SupplierPayment, SupplierPayment.payment_number == SupplierPaymentAllocation.payment_number)
+            .filter(SupplierPaymentAllocation.inv_number == inv.inv_number, SupplierPayment.status != "cancelled")
+            .scalar()
+        )
+        outstanding = round(float(inv.total or 0) - float(returned or 0) - float(paid or 0), 2)
+        if outstanding <= 0.01:
+            continue
+        result.append(SupplierOpenInvoiceOut(
+            inv_number=inv.inv_number, inv_date=inv.inv_date, due_date=inv.due_date,
+            total=float(inv.total or 0), returned=float(returned or 0), paid=float(paid or 0),
+            outstanding=outstanding,
+        ))
+    return result
 
 
 @supplier_router.delete("/{code}", status_code=204)

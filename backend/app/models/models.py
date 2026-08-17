@@ -632,3 +632,37 @@ class PurchaseReturnLine(Base):
         Numeric(18,4),
         nullable=False
     )
+
+class SupplierPayment(Base):
+    """سداد لمورد — يُخصَّص صراحةً على فاتورة أو أكثر (لا خصم عام من
+    الرصيد بدون تحديد الفاتورة المسدَّدة)، ويُرحَّل قيده تلقائياً
+    (مدين حساب المورد / دائن حساب النقدية أو البنك)."""
+    __tablename__ = "supplier_payments"
+
+    payment_number = Column(String(30), primary_key=True)
+    payment_date = Column(Date, nullable=False)
+    supplier_code = Column(String(30), ForeignKey("suppliers.code"), nullable=False)
+    payment_method = Column(String(20), nullable=False, default="bank_transfer")
+    account_code = Column(String(20), ForeignKey("accounts.code"), nullable=False)
+    reference = Column(String(120), nullable=True)
+    notes = Column(Text, nullable=True)
+    amount = Column(Numeric(18, 2), nullable=False, default=0)
+    status = Column(String(20), nullable=False, default="posted")
+    journal_entry_id = Column(Integer, ForeignKey("journal_entries.id"), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    allocations = relationship(
+        "SupplierPaymentAllocation",
+        backref="payment",
+        cascade="all, delete-orphan",
+    )
+
+
+class SupplierPaymentAllocation(Base):
+    """تخصيص جزء (أو كل) دفعة على فاتورة مشتريات محدَّدة."""
+    __tablename__ = "supplier_payment_allocations"
+
+    id = Column(Integer, primary_key=True)
+    payment_number = Column(String(30), ForeignKey("supplier_payments.payment_number"), nullable=False)
+    inv_number = Column(String(30), ForeignKey("purchase_invoices.inv_number"), nullable=False)
+    amount = Column(Numeric(18, 2), nullable=False, default=0)

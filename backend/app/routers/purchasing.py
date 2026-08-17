@@ -22,6 +22,8 @@ from app.models.models import (
     PurchaseReturnLine,
     StockMove,
     Supplier,
+    SupplierPayment,
+    SupplierPaymentAllocation,
     TaxType,
 )
 from app.models.warehouse import Warehouse
@@ -49,6 +51,8 @@ from app.schemas.purchasing import (
     PurchaseOrderOut,
     PurchaseReturnIn,
     PurchaseReturnOut,
+    SupplierPaymentIn,
+    SupplierPaymentOut,
 )
 
 
@@ -64,6 +68,10 @@ pinv_router = APIRouter(
 prt_router = APIRouter(
     prefix="/api/purchase-returns",
     tags=["PurchaseReturns"],
+)
+spay_router = APIRouter(
+    prefix="/api/supplier-payments",
+    tags=["SupplierPayments"],
 )
 
 
@@ -1162,9 +1170,8 @@ def list_purchase_invoices(db: Session = Depends(get_db)):
 @pinv_router.get("/aging-report")
 def get_purchase_invoices_aging_report(db: Session = Depends(get_db)):
     """تقرير أعمار الديون: كل فاتورة مشتريات مرحّلة لسه عليها رصيد قائم
-    (الإجمالي - المرتجعات المرتبطة بها)، مصنَّفة حسب عدد أيام تجاوز
-    تاريخ الاستحقاق. لا يشمل هذا التقرير أثر المدفوعات لعدم وجود شاشة
-    مدفوعات موردين مفعّلة بالنظام بعد — الرصيد هنا "قبل أي سداد"."""
+    (الإجمالي - المرتجعات - المدفوعات المرتبطة بها)، مصنَّفة حسب عدد
+    أيام تجاوز تاريخ الاستحقاق."""
     today = date.today()
     buckets_order = ["current", "1-30", "31-60", "61-90", "90+"]
     totals_by_bucket = {b: 0.0 for b in buckets_order}
@@ -1187,7 +1194,8 @@ def get_purchase_invoices_aging_report(db: Session = Depends(get_db)):
             )
             .scalar()
         )
-        outstanding = round(_to_float(inv.total) - _to_float(returned), 2)
+        paid = _invoice_paid_amount(db, inv.inv_number)
+        outstanding = round(_to_float(inv.total) - _to_float(returned) - paid, 2)
         if outstanding <= 0.005:
             continue
 
@@ -1893,3 +1901,195 @@ def cancel_purchase_return(
     except Exception:
         db.rollback()
         raise
+
+
+# =========================================================
+# SUPPLIER PAYMENTS
+# =========================================================
+def _invoice_paid_amount(db: Session, inv_number: str) -> float:
+    """إجمالي ما سُدِّد فعلياً على فاتورة معيّنة (مجموع تخصيصات
+    المدفوعات غير الملغاة المرتبطة بها)."""
+    paid = (
+        db.query(func.coalesce(func.sum(SupplierPaymentAllocation.amount), 0))
+        .join(SupplierPayment, SupplierPayment.payment_number == SupplierPaymentAllocation.payment_number)
+        .filter(
+            SupplierPaymentAllocation.inv_number == inv_number,
+            SupplierPayment.status != "cancelled",
+        )
+        .scalar()
+    )
+    return _to_float(paid)
+
+
+def _post_supplier_payment_journal(db: Session, payment: SupplierPayment):
+    """يرحّل قيد السداد: مدين حساب المورد (يُخفِّض المستحق) / دائن
+    حساب النقدية أو البنك المُحدَّد للدفعة."""
+    supplier = db.query(Supplier).filter(Supplier.code == payment.supplier_code).first()
+    payable_account_code = (supplier.account_code if supplier and supplier.account_code else None) or "211"
+    payable_account = db.query(Account).filter(Account.code == payable_account_code).first()
+    if not payable_account:
+        raise HTTPException(
+            status_code=400,
+            detail=f"الحساب المحاسبي المرتبط بالمورد ({payable_account_code}) غير موجود بدليل الحسابات.",
+        )
+
+    cash_account = db.query(Account).filter(Account.code == payment.account_code).first()
+    if not cash_account:
+        raise HTTPException(
+            status_code=404,
+            detail=f"حساب السداد ({payment.account_code}) غير موجود بدليل الحسابات.",
+        )
+
+    entry = JournalEntry(
+        entry_date=payment.payment_date,
+        description=f"سداد للمورد {payment.supplier_code} — {payment.payment_number}",
+        source_type="supplier_payment",
+        source_ref=payment.payment_number,
+        supplier_code=payment.supplier_code,
+        status="posted",
+        total_amount=payment.amount,
+    )
+    db.add(entry)
+    db.flush()
+
+    db.add(JournalEntryLine(
+        entry_id=entry.id, line_no=1, account_code=payable_account.code,
+        debit=payment.amount, credit=0,
+        line_description=f"سداد مستحق للمورد {payment.supplier_code} — {payment.payment_number}",
+    ))
+    db.add(JournalEntryLine(
+        entry_id=entry.id, line_no=2, account_code=cash_account.code,
+        debit=0, credit=payment.amount,
+        line_description=f"سداد للمورد {payment.supplier_code} — {payment.payment_number}",
+    ))
+
+    payment.journal_entry_id = entry.id
+    return entry
+
+
+@spay_router.get("", response_model=list[SupplierPaymentOut])
+def list_supplier_payments(db: Session = Depends(get_db)):
+    return (
+        db.query(SupplierPayment)
+        .order_by(
+            SupplierPayment.payment_date.desc(),
+            SupplierPayment.payment_number.desc(),
+        )
+        .all()
+    )
+
+
+@spay_router.post("", response_model=SupplierPaymentOut, status_code=201)
+def create_supplier_payment(
+    payload: SupplierPaymentIn,
+    db: Session = Depends(get_db),
+    actor: Optional[str] = Query(None, description="اسم مستخدم النظام الذي نفّذ العملية (لسجل النشاط)"),
+):
+    """تسجيل سداد لمورد، مع تخصيص صريح إلزامي على فاتورة أو أكثر
+    (مجموع التخصيصات يجب أن يساوي مبلغ الدفعة بالضبط — لا يوجد "سداد
+    عام" غير مرتبط بفاتورة محدَّدة). يرفض السداد لو المبلغ المخصَّص
+    لأي فاتورة يتجاوز رصيدها المتبقي فعلياً (بعد المرتجعات والمدفوعات
+    السابقة)."""
+    if not payload.allocations:
+        raise HTTPException(status_code=400, detail="يجب تخصيص الدفعة على فاتورة واحدة على الأقل")
+
+    supplier = db.query(Supplier).filter(Supplier.code == payload.supplier_code, Supplier.is_active.is_(True)).first()
+    if not supplier:
+        raise HTTPException(status_code=404, detail="المورد غير موجود أو غير نشط")
+
+    total_amount = round(sum(_to_float(a.amount) for a in payload.allocations), 2)
+    if total_amount <= 0:
+        raise HTTPException(status_code=400, detail="مبلغ الدفعة يجب أن يكون أكبر من صفر")
+
+    validated_allocations = []
+    for alloc in payload.allocations:
+        invoice = db.query(PurchaseInvoice).filter(PurchaseInvoice.inv_number == alloc.inv_number).first()
+        if not invoice:
+            raise HTTPException(status_code=404, detail=f"الفاتورة {alloc.inv_number} غير موجودة")
+        if invoice.supplier_code != payload.supplier_code:
+            raise HTTPException(status_code=400, detail=f"الفاتورة {alloc.inv_number} لا تخص المورد المحدَّد")
+        if invoice.status == "cancelled":
+            raise HTTPException(status_code=400, detail=f"لا يمكن السداد على فاتورة ملغاة ({alloc.inv_number})")
+
+        returned = db.query(func.coalesce(func.sum(PurchaseReturn.total), 0)).filter(
+            PurchaseReturn.inv_number == invoice.inv_number, PurchaseReturn.status != "cancelled",
+        ).scalar()
+        already_paid = _invoice_paid_amount(db, invoice.inv_number)
+        outstanding = round(_to_float(invoice.total) - _to_float(returned) - already_paid, 2)
+
+        if alloc.amount > outstanding + 0.01:
+            raise HTTPException(
+                status_code=400,
+                detail=f"مبلغ التخصيص للفاتورة {alloc.inv_number} ({alloc.amount}) أكبر من رصيدها المتبقي ({outstanding})",
+            )
+        validated_allocations.append((invoice, round(_to_float(alloc.amount), 2)))
+
+    try:
+        payment = SupplierPayment(
+            payment_number=_next_document_number(db, SupplierPayment, "payment_number", "SPAY"),
+            payment_date=payload.payment_date,
+            supplier_code=payload.supplier_code,
+            payment_method=payload.payment_method,
+            account_code=payload.account_code,
+            reference=payload.reference,
+            notes=payload.notes,
+            amount=total_amount,
+            status="posted",
+        )
+        db.add(payment)
+        db.flush()
+
+        for invoice, amount in validated_allocations:
+            db.add(SupplierPaymentAllocation(
+                payment_number=payment.payment_number, inv_number=invoice.inv_number, amount=amount,
+            ))
+            _log_activity(
+                db, "purchase_invoice", invoice.inv_number, "payment_received", actor,
+                f"سداد {amount} ضمن الدفعة {payment.payment_number}",
+            )
+
+        _post_supplier_payment_journal(db, payment)
+
+        db.commit()
+        db.refresh(payment)
+        return payment
+
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception:
+        db.rollback()
+        raise
+
+
+@spay_router.post("/{payment_number}/cancel", response_model=SupplierPaymentOut)
+def cancel_supplier_payment(
+    payment_number: str,
+    db: Session = Depends(get_db),
+    actor: Optional[str] = Query(None, description="اسم مستخدم النظام الذي نفّذ العملية (لسجل النشاط)"),
+):
+    """إلغاء دفعة سداد: يُلغي قيدها المحاسبي فقط (التخصيصات تبقى
+    كسجل تاريخي، لكنها تُستبعَد تلقائياً من حساب الرصيد المتبقي لأي
+    فاتورة بمجرد أن status الدفعة يصبح cancelled)."""
+    payment = db.query(SupplierPayment).filter(SupplierPayment.payment_number == payment_number).first()
+    if not payment:
+        raise HTTPException(status_code=404, detail="دفعة السداد غير موجودة")
+    if payment.status == "cancelled":
+        raise HTTPException(status_code=400, detail="الدفعة ملغاة بالفعل")
+
+    if payment.journal_entry_id:
+        entry = db.query(JournalEntry).filter(JournalEntry.id == payment.journal_entry_id).first()
+        if entry and entry.status == "posted":
+            entry.status = "cancelled"
+
+    payment.status = "cancelled"
+
+    for alloc in payment.allocations:
+        _log_activity(
+            db, "purchase_invoice", alloc.inv_number, "payment_cancelled", actor,
+            f"إلغاء سداد {alloc.amount} من الدفعة {payment.payment_number}",
+        )
+
+    db.commit()
+    db.refresh(payment)
+    return payment

@@ -205,3 +205,53 @@ class PurchaseReturnOut(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class SupplierPaymentAllocationIn(BaseModel):
+    inv_number: str
+    amount: float = Field(gt=0)
+
+
+class SupplierPaymentIn(BaseModel):
+    payment_date: date
+    supplier_code: str
+    payment_method: str = "bank_transfer"  # cash / bank_transfer / check
+    account_code: str
+    reference: Optional[str] = None
+    notes: Optional[str] = None
+    allocations: List[SupplierPaymentAllocationIn]
+
+
+class SupplierPaymentAllocationOut(BaseModel):
+    inv_number: str
+    amount: float
+
+    class Config:
+        from_attributes = True
+
+
+class SupplierPaymentOut(BaseModel):
+    payment_number: str
+    payment_date: date
+    supplier_code: str
+    payment_method: str
+    account_code: str
+    reference: Optional[str] = None
+    notes: Optional[str] = None
+    amount: float
+    status: str = "posted"
+    journal_entry_id: Optional[int] = None
+    allocations: List[SupplierPaymentAllocationOut] = []
+
+    class Config:
+        from_attributes = True
+
+
+class SupplierOpenInvoiceOut(BaseModel):
+    inv_number: str
+    inv_date: date
+    due_date: Optional[date] = None
+    total: float
+    returned: float
+    paid: float
+    outstanding: float

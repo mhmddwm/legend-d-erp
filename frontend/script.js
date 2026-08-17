@@ -30,6 +30,7 @@ let lineCounter=0;
 let appUsers=[]; // قائمة المستخدمين لاستخدامها في حقل "منشئ القيد"
 let costCenters=[]; // مراكز التكلفة
 let taxTypes=[]; // أنواع الضرائب المسجلة بالنظام
+let supplierPayments=[]; // مدفوعات الموردين
 let journalEditingId=null; // معرّف القيد الجاري تعديله (null = إنشاء قيد جديد)
 let journalPage=1; // الصفحة الحالية في قائمة القيود
 const JOURNAL_PAGE_SIZE=20;
@@ -249,6 +250,12 @@ returns_ = await safeLoad(
 );
 
 
+supplierPayments = await safeLoad(
+"مدفوعات الموردين",
+"/api/supplier-payments"
+);
+
+
 warehouses = await safeLoad(
 "المستودعات",
 "/api/warehouses"
@@ -356,6 +363,8 @@ function renderAll(){
   renderInvoices();
 
   renderReturns();
+
+  if(typeof renderSupplierPayments === 'function') renderSupplierPayments();
 
   renderWarehousesScreen();
 
@@ -3834,7 +3843,10 @@ function buildPinvDetailPageHtml(inv){
       return;
     }
     if(action==='payment'){
-      toast('شاشة مدفوعات الموردين لسه قيد التطوير بالنظام — هتتفعّل قريباً', true);
+      if(window.opener && !window.opener.closed && typeof window.opener.startPaymentFromInvoice==='function'){
+        window.opener.startPaymentFromInvoice(INV_NUMBER);
+        window.opener.focus();
+      } else { toast('افتح الشاشة الرئيسية أولاً لتسجيل عملية دفع', true); }
       return;
     }
     if(action==='note'){
@@ -3894,6 +3906,8 @@ function buildPinvDetailPageHtml(inv){
     cancelled: {icon:'🗑️', text:'إلغاء الفاتورة', cls:'cancel'},
     return_created: {icon:'↩️', text:'إنشاء مرتجع مرتبط', cls:'return'},
     return_cancelled: {icon:'↩️', text:'إلغاء مرتجع مرتبط', cls:'return'},
+    payment_received: {icon:'💳', text:'سداد مستلم', cls:''},
+    payment_cancelled: {icon:'💳', text:'إلغاء سداد', cls:'cancel'},
   };
 
   function fmtDateTime(iso){
@@ -3962,6 +3976,31 @@ function startReturnFromInvoice(invNumber){
   }, 60);
 }
 window.startReturnFromInvoice = startReturnFromInvoice;
+
+// بدء تسجيل "عملية دفع" من فاتورة محدَّدة مباشرة: يفتح شاشة مدفوعات
+// الموردين، يطوي نموذج سداد جديد بالمورد مُختاراً تلقائياً، وبمجرد
+// تحميل فواتيره المفتوحة يخصّص تلقائياً كامل رصيد هذه الفاتورة تحديداً
+// (يبقى قابلاً للتعديل يدوياً قبل الترحيل)
+async function startPaymentFromInvoice(invNumber){
+  const inv=(invoices||[]).find(i=>i.inv_number===invNumber);
+  if(!inv) return;
+  if(inv.status==='cancelled'){ alert('لا يمكن تسجيل سداد على فاتورة ملغاة'); return; }
+  if(typeof openSubModule==='function') openSubModule('مدفوعات الموردين');
+  setTimeout(()=>{
+    if(typeof toggleSpayNewForm==='function') toggleSpayNewForm(true);
+    const supSel=document.getElementById('spaySupplier');
+    if(supSel){
+      supSel.value=inv.supplier_code;
+      if(typeof onSpaySupplierChange==='function'){
+        onSpaySupplierChange().then(()=>{
+          const row=spayCurrentInvoices.find(r=>r.inv_number===invNumber);
+          if(row && typeof spayAllocFull==='function') spayAllocFull(invNumber);
+        });
+      }
+    }
+  }, 60);
+}
+window.startPaymentFromInvoice = startPaymentFromInvoice;
 
 // تعديل بيانات الفاتورة (الحقول غير المالية فقط، حفاظاً على سلامة القيود المرحّلة)
 function openPinvEditDialog(invNumber){
@@ -5162,6 +5201,297 @@ async function cancelPurchaseReturnAction(rtNumber){
   }catch(e){ alert(e.message); }
 }
 window.cancelPurchaseReturnAction = cancelPurchaseReturnAction;
+
+// ============================================================
+// مدفوعات الموردين — نفس أسلوب شاشة المرتجعات: قائمة أولاً، نموذج
+// إنشاء مطوي (المورد أولاً ثم فواتيره المفتوحة قابلة للتخصيص الجزئي)
+// ============================================================
+function spayEsc(s){ return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+let spayCurrentInvoices = []; // فواتير المورد المفتوحة المعروضة بنموذج السداد الحالي
+
+const SPAY_METHOD_LABELS = { cash:'نقدي', bank_transfer:'تحويل بنكي', check:'شيك' };
+
+function toggleSpayNewForm(forceOpen){
+  const box=document.getElementById('spayNewFormBox');
+  if(!box) return;
+  const isHidden = box.style.display==='none' || !box.style.display;
+  const open = forceOpen===true ? true : (forceOpen===false ? false : isHidden);
+  box.style.display = open ? 'block' : 'none';
+  if(open){
+    const supSel=document.getElementById('spaySupplier');
+    if(supSel){
+      const current=supSel.value;
+      supSel.innerHTML='<option value="">— اختر مورداً —</option>'+
+        (suppliers||[]).map(s=>`<option value="${spayEsc(s.code)}">${spayEsc(s.name)} (${spayEsc(s.code)})</option>`).join('');
+      supSel.value=current;
+    }
+    const acctSel=document.getElementById('spayAccount');
+    if(acctSel){
+      const current=acctSel.value;
+      const cashAccounts=(accounts||[]).filter(a=>a.account_type==='assets');
+      acctSel.innerHTML='<option value="">— اختر حساباً —</option>'+
+        cashAccounts.map(a=>`<option value="${spayEsc(a.code)}">${spayEsc(a.code)} — ${spayEsc(a.name_ar)}</option>`).join('');
+      acctSel.value=current;
+    }
+    const dt=document.getElementById('spayDate');
+    if(dt && !dt.value) dt.value=new Date().toISOString().slice(0,10);
+    box.scrollIntoView({behavior:'smooth', block:'nearest'});
+  }
+}
+window.toggleSpayNewForm = toggleSpayNewForm;
+
+// تعبئة فواتير المورد المختار المفتوحة فقط (لسه عليها رصيد متبقٍ)
+async function onSpaySupplierChange(){
+  const supplierCode=document.getElementById('spaySupplier').value;
+  const wrap=document.getElementById('spayInvoicesWrap');
+  spayCurrentInvoices=[];
+  if(!supplierCode){ wrap.innerHTML=''; recalcSpayTotal(); return; }
+  wrap.innerHTML='<div class="hint">جارٍ تحميل الفواتير المفتوحة...</div>';
+  try{
+    const openInvoices = await api('GET', `/api/suppliers/${encodeURIComponent(supplierCode)}/open-invoices`);
+    spayCurrentInvoices = (openInvoices||[]).map(oi=>({...oi, alloc:0}));
+    renderSpayInvoices();
+  }catch(e){
+    wrap.innerHTML=`<div class="err">تعذر تحميل فواتير المورد: ${spayEsc(e.message)}</div>`;
+  }
+}
+window.onSpaySupplierChange = onSpaySupplierChange;
+
+function onSpayAllocChange(invNumber, v){
+  const row=spayCurrentInvoices.find(x=>x.inv_number===invNumber);
+  if(!row) return;
+  let amt=parseFloat(v)||0;
+  if(amt<0) amt=0;
+  if(amt>row.outstanding) amt=row.outstanding;
+  row.alloc=amt;
+  renderSpayInvoices();
+}
+window.onSpayAllocChange = onSpayAllocChange;
+
+function spayAllocFull(invNumber){
+  const row=spayCurrentInvoices.find(x=>x.inv_number===invNumber);
+  if(!row) return;
+  row.alloc=row.outstanding;
+  renderSpayInvoices();
+}
+window.spayAllocFull = spayAllocFull;
+
+function renderSpayInvoices(){
+  const wrap=document.getElementById('spayInvoicesWrap');
+  if(!wrap) return;
+  if(!spayCurrentInvoices.length){
+    wrap.innerHTML='<div class="hint">لا توجد فواتير مفتوحة لهذا المورد — كل فواتيره مسدَّدة بالكامل.</div>';
+    recalcSpayTotal();
+    return;
+  }
+  const rows=spayCurrentInvoices.map(r=>`<tr>
+      <td>${spayEsc(r.inv_number)}</td>
+      <td>${spayEsc(r.inv_date)}</td>
+      <td>${spayEsc(r.due_date||'-')}</td>
+      <td class="num">${fmt(r.total)}</td>
+      <td class="num" style="color:#0b5db8;font-weight:700">${fmt(r.outstanding)}</td>
+      <td>
+        <div style="display:flex;gap:6px;align-items:center">
+          <input type="number" step="0.01" min="0" max="${r.outstanding}" value="${r.alloc}" style="width:110px" onchange="onSpayAllocChange('${spayEsc(r.inv_number)}',this.value)">
+          <button type="button" class="btn secondary" style="padding:4px 8px;font-size:11px" onclick="spayAllocFull('${spayEsc(r.inv_number)}')">الكل</button>
+        </div>
+      </td>
+    </tr>`).join('');
+  wrap.innerHTML=`<table class="line-items"><thead><tr><th>رقم الفاتورة</th><th>التاريخ</th><th>الاستحقاق</th><th>الإجمالي</th><th>المتبقي</th><th>المبلغ المخصَّص</th></tr></thead><tbody>${rows}</tbody></table>`;
+  recalcSpayTotal();
+}
+
+function recalcSpayTotal(){
+  const total=spayCurrentInvoices.reduce((s,r)=>s+(r.alloc||0),0);
+  const el=document.getElementById('spayTotal');
+  if(el) el.textContent=fmt(total);
+}
+window.recalcSpayTotal = recalcSpayTotal;
+
+async function submitSupplierPayment(){
+  const err=document.getElementById('spayErr');
+  const supplier_code=document.getElementById('spaySupplier').value;
+  const payment_date=document.getElementById('spayDate').value;
+  const payment_method=document.getElementById('spayMethod').value;
+  const account_code=document.getElementById('spayAccount').value;
+  const reference=document.getElementById('spayReference').value.trim()||null;
+  const notes=document.getElementById('spayNotes').value.trim()||null;
+  const allocations=spayCurrentInvoices.filter(r=>r.alloc>0).map(r=>({inv_number:r.inv_number, amount:r.alloc}));
+
+  if(!supplier_code){ err.textContent='يرجى اختيار المورد'; return; }
+  if(!payment_date){ err.textContent='يرجى إدخال تاريخ السداد'; return; }
+  if(!account_code){ err.textContent='يرجى اختيار حساب السداد'; return; }
+  if(!allocations.length){ err.textContent='يرجى تخصيص مبلغ لفاتورة واحدة على الأقل'; return; }
+  err.textContent='';
+
+  try{
+    await api('POST','/api/supplier-payments',{
+      payment_date, supplier_code, payment_method, account_code, reference, notes, allocations,
+    });
+    document.getElementById('spaySupplier').value='';
+    document.getElementById('spayInvoicesWrap').innerHTML='';
+    document.getElementById('spayReference').value='';
+    document.getElementById('spayNotes').value='';
+    spayCurrentInvoices=[];
+    recalcSpayTotal();
+    toggleSpayNewForm(false);
+    await loadAll();
+  }catch(e){ err.textContent=e.message; }
+}
+window.submitSupplierPayment = submitSupplierPayment;
+
+function getSpayBadge(pay){
+  if(pay.status==='cancelled') return '<span class="badge returned">ملغاة</span>';
+  return '<span class="badge posted">مرحّلة</span>';
+}
+
+function renderSupplierPayments(){
+  const body=document.getElementById('spayBody');
+  if(!body) return;
+
+  const searchEl=document.getElementById('spaySearch');
+  const q=(searchEl?.value||'').trim().toLowerCase();
+  let data=Array.isArray(supplierPayments)?[...supplierPayments]:[];
+
+  if(q){
+    data=data.filter(p=>{
+      const sup=(suppliers||[]).find(s=>s.code===p.supplier_code);
+      return (p.payment_number||'').toLowerCase().includes(q) ||
+        (p.reference||'').toLowerCase().includes(q) ||
+        (sup?.name||'').toLowerCase().includes(q);
+    });
+  }
+
+  data.sort((a,b)=> new Date(b.payment_date||0)-new Date(a.payment_date||0) || String(b.payment_number||'').localeCompare(String(a.payment_number||'')));
+
+  body.innerHTML=data.map(p=>{
+    const sup=(suppliers||[]).find(s=>s.code===p.supplier_code);
+    const acct=(accounts||[]).find(a=>a.code===p.account_code);
+    return `<tr>
+      <td>${spayEsc(p.payment_number)}</td>
+      <td>${spayEsc(p.payment_date)}</td>
+      <td>${spayEsc(sup?sup.name:p.supplier_code)}</td>
+      <td>${SPAY_METHOD_LABELS[p.payment_method]||spayEsc(p.payment_method)}</td>
+      <td>${spayEsc(acct?acct.code+' — '+acct.name_ar:p.account_code)}</td>
+      <td>${fmt(p.amount)}</td>
+      <td>${getSpayBadge(p)}</td>
+      <td style="text-align:center" onclick="event.stopPropagation()">
+        <button type="button" class="pinv-actions-btn" onclick="toggleSpayActionsMenu(event,'${spayEsc(p.payment_number)}')" title="الإجراءات">⋮</button>
+      </td>
+    </tr>`;
+  }).join('');
+
+  const empty=document.getElementById('spayEmpty');
+  if(empty) empty.style.display = data.length ? 'none' : 'block';
+
+  const countEl=document.getElementById('spaySavedCount');
+  if(countEl) countEl.textContent = (supplierPayments||[]).length + ' دفعة';
+}
+window.renderSupplierPayments = renderSupplierPayments;
+
+// ---------- قائمة إجراءات دفعة السداد (⋮) ----------
+let spayMenuCurrentPay = null;
+
+function ensureSpayActionsMenu(){
+  let menu = document.getElementById('spayActionsMenu');
+  if(!menu){
+    menu = document.createElement('div');
+    menu.id = 'spayActionsMenu';
+    menu.className = 'pinv-actions-menu';
+    menu.innerHTML = `
+      <button onclick="spayMenuRun('view')">👁️ عرض</button>
+      <hr>
+      <button class="danger" onclick="spayMenuRun('cancel')">🗑️ إلغاء السداد</button>
+    `;
+    document.body.appendChild(menu);
+  }
+  return menu;
+}
+
+function toggleSpayActionsMenu(e, paymentNumber){
+  e.stopPropagation();
+  const menu = ensureSpayActionsMenu();
+  const wasOpenForThis = menu.classList.contains('show') && spayMenuCurrentPay === paymentNumber;
+  closeSpayActionsMenu();
+  if (wasOpenForThis) return;
+
+  const btn = e.currentTarget;
+  const rect = btn.getBoundingClientRect();
+  menu.classList.add('show');
+  spayMenuCurrentPay = paymentNumber;
+
+  const menuRect = menu.getBoundingClientRect();
+  const menuW = menuRect.width || 190;
+  const menuH = menuRect.height || 120;
+  const margin = 8;
+  let top = rect.bottom + 6;
+  if (top + menuH > window.innerHeight - margin) top = Math.max(margin, rect.top - menuH - 6);
+  let left = rect.left - menuW + rect.width;
+  left = Math.min(Math.max(margin, left), window.innerWidth - menuW - margin);
+  menu.style.top = top + 'px';
+  menu.style.left = left + 'px';
+}
+window.toggleSpayActionsMenu = toggleSpayActionsMenu;
+
+function closeSpayActionsMenu(){
+  const menu = document.getElementById('spayActionsMenu');
+  if (menu) menu.classList.remove('show');
+  spayMenuCurrentPay = null;
+}
+document.addEventListener('click', closeSpayActionsMenu);
+
+function spayMenuRun(action){
+  const paymentNumber = spayMenuCurrentPay;
+  closeSpayActionsMenu();
+  if(!paymentNumber) return;
+  if(action==='view') openSupplierPaymentView(paymentNumber);
+  else if(action==='cancel') cancelSupplierPaymentAction(paymentNumber);
+}
+window.spayMenuRun = spayMenuRun;
+
+function openSupplierPaymentView(paymentNumber){
+  const pay=(supplierPayments||[]).find(p=>p.payment_number===paymentNumber);
+  if(!pay) return;
+  const sup=(suppliers||[]).find(s=>s.code===pay.supplier_code);
+  const acct=(accounts||[]).find(a=>a.code===pay.account_code);
+  const rows=(pay.allocations||[]).map(a=>`<tr>
+      <td>${spayEsc(a.inv_number)}</td>
+      <td class="num">${fmt(a.amount)}</td>
+    </tr>`).join('');
+  const html=`<div class="po-decision-dialog" id="spayViewDialog"><div class="box">
+    <div class="rfq-section-head">
+      <h3>سداد ${spayEsc(pay.payment_number)}</h3>
+      <button class="btn secondary" onclick="document.getElementById('spayViewDialog').remove()">إغلاق</button>
+    </div>
+    <div class="po-info-grid" style="margin-bottom:14px">
+      <div class="field"><label>المورد</label><input disabled value="${spayEsc(sup?sup.name:pay.supplier_code)}"></div>
+      <div class="field"><label>التاريخ</label><input disabled value="${spayEsc(pay.payment_date)}"></div>
+      <div class="field"><label>طريقة الدفع</label><input disabled value="${SPAY_METHOD_LABELS[pay.payment_method]||spayEsc(pay.payment_method)}"></div>
+      <div class="field"><label>حساب السداد</label><input disabled value="${spayEsc(acct?acct.code+' — '+acct.name_ar:pay.account_code)}"></div>
+      <div class="field"><label>المرجع</label><input disabled value="${spayEsc(pay.reference||'-')}"></div>
+      <div class="field"><label>الحالة</label><input disabled value="${pay.status==='cancelled'?'ملغاة':'مرحّلة'}"></div>
+    </div>
+    <table class="grid po-list-table"><thead><tr><th>الفاتورة المخصَّصة</th><th>المبلغ</th></tr></thead><tbody>${rows}</tbody></table>
+    <div class="totals-box" style="margin-top:12px"><div class="row grand"><span>إجمالي الدفعة</span><span>${fmt(pay.amount)}</span></div></div>
+    ${pay.journal_entry_id ? `<div class="hint pinv-journal-link" style="margin-top:10px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
+      <span>✅ تم ترحيل القيد المحاسبي رقم <b>#${pay.journal_entry_id}</b> تلقائياً (مدين حساب المورد / دائن ${spayEsc(acct?acct.name_ar:'حساب السداد')}).</span>
+      <button class="btn secondary" onclick="document.getElementById('spayViewDialog')?.remove(); openEntryDetail(${pay.journal_entry_id})">📒 فتح القيد المحاسبي</button>
+    </div>` : ''}
+  </div></div>`;
+  document.body.insertAdjacentHTML('beforeend', html);
+}
+window.openSupplierPaymentView = openSupplierPaymentView;
+
+async function cancelSupplierPaymentAction(paymentNumber){
+  if(!confirm(`سيتم إلغاء دفعة السداد ${paymentNumber} — سيُلغى قيدها المحاسبي وترجع الفواتير المرتبطة بها لتصبح مفتوحة (أو جزئياً مفتوحة) من جديد. هل تريد المتابعة؟`)) return;
+  try{
+    await api('POST', `/api/supplier-payments/${encodeURIComponent(paymentNumber)}/cancel`, {});
+    await loadAll();
+  }catch(e){ alert(e.message); }
+}
+window.cancelSupplierPaymentAction = cancelSupplierPaymentAction;
+
 
 
 // ============================================================

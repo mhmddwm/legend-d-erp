@@ -1188,6 +1188,12 @@ html[dir="ltr"] .brand-center{direction:ltr;}
 #panel-purchase_returns .prt-list-main{min-height:480px;display:flex;flex-direction:column}
 #panel-purchase_returns .prt-list-scroll{flex:1}
 #panel-purchase_returns .hint{color:#48566b}
+
+#panel-supplier_payments .po-hero{padding:14px 18px}
+#panel-supplier_payments .po-hero h2{font-size:20px;margin:2px 0 4px}
+#panel-supplier_payments .po-hero p{font-size:12.5px;color:#4b5768}
+#panel-supplier_payments .po-trace{margin-bottom:12px}
+#panel-supplier_payments .hint{color:#48566b}
 </style>
 </head>
 <body class="erp-body">
@@ -2701,7 +2707,59 @@ html[dir="ltr"] .brand-center{direction:ltr;}
     </div>
   </div>
 </div>
-  <div class="panel" id="panel-supplier_payments"><div class="formcard"><h3>مدفوعات الموردين</h3><div class="empty-msg">جاهزة للتطوير</div></div></div>
+  <div class="panel" id="panel-supplier_payments">
+  <div class="po-page erp-watermark-page">
+    <div class="po-watermark">LEGEND D ERP SYS<br><span>Supplier Payment</span></div>
+    <div class="po-hero">
+      <div>
+        <span class="mini-label">المشتريات</span>
+        <h2>مدفوعات الموردين Supplier Payment</h2>
+        <p>تسجيل سداد لمورد مع تخصيص المبلغ صراحةً على فاتورة أو أكثر (لا خصم عام من الرصيد)، وترحيل قيد محاسبي تلقائي (مدين حساب المورد / دائن حساب النقدية أو البنك).</p>
+      </div>
+      <div class="po-actions">
+        <button class="btn secondary" onclick="renderSupplierPayments()">تحديث</button>
+        <button class="btn" onclick="window.toggleSpayNewForm()">+ سداد جديد</button>
+      </div>
+    </div>
+    <div class="po-trace formcard rfq-timeline" id="spayTraceBar"><span onclick="window.goPoWorkflowStage('purchase_request')">طلب شراء</span><b>←</b><span onclick="window.goPoWorkflowStage('quotation_request')">طلب عرض سعر</span><b>←</b><span onclick="window.goPoWorkflowStage('compare')">مقارنة العروض</span><b>←</b><span onclick="window.goPoWorkflowStage('purchase_orders')">أمر شراء</span><b>←</b><span onclick="window.goPoWorkflowStage('goods_receipt')">استلام</span><b>←</b><span onclick="window.goPoWorkflowStage('purchase_invoices')">فاتورة</span><b>←</b><span class="active" onclick="window.goPoWorkflowStage('supplier_payments')">الدفع</span></div>
+
+    <div class="formcard rfq-card prt-list-main" style="margin-top:14px">
+      <div class="rfq-saved-toolbar"><div><h3 style="margin:0">مدفوعات الموردين المسجّلة</h3><small id="spaySavedCount">0 دفعة</small></div><input id="spaySearch" placeholder="بحث برقم الدفعة أو المورد أو المرجع" oninput="renderSupplierPayments()"></div>
+      <div class="scrollx prt-list-scroll"><table class="grid po-list-table"><thead><tr><th>رقم الدفعة</th><th>التاريخ</th><th>المورد</th><th>طريقة الدفع</th><th>حساب السداد</th><th>المبلغ</th><th>الحالة</th><th style="text-align:center">الإجراءات</th></tr></thead><tbody id="spayBody"></tbody></table></div>
+      <div id="spayEmpty" class="pr-list-empty" style="display:none">لا توجد مدفوعات مسجلة حتى الآن</div>
+    </div>
+
+    <div id="spayNewFormBox" class="formcard" style="display:none;margin-top:14px;border:1.5px dashed #93c5fd">
+      <div class="rfq-section-head">
+        <h3>سداد جديد</h3>
+        <button class="btn secondary" onclick="toggleSpayNewForm(false)">إلغاء</button>
+      </div>
+      <div class="frow two">
+        <div class="field"><label>المورد</label><select id="spaySupplier" onchange="onSpaySupplierChange()"><option value="">— اختر مورداً —</option></select></div>
+        <div class="field"><label>تاريخ السداد</label><input id="spayDate" type="date"></div>
+      </div>
+      <div class="frow two">
+        <div class="field"><label>طريقة الدفع</label><select id="spayMethod">
+          <option value="cash">نقدي</option>
+          <option value="bank_transfer">تحويل بنكي</option>
+          <option value="check">شيك</option>
+        </select></div>
+        <div class="field"><label>حساب السداد (نقدية/بنك)</label><select id="spayAccount"><option value="">— اختر حساباً —</option></select></div>
+      </div>
+      <div class="frow two">
+        <div class="field"><label>المرجع (رقم الشيك/التحويل — اختياري)</label><input id="spayReference" placeholder="مرجع"></div>
+        <div class="field"><label>ملاحظات (اختياري)</label><input id="spayNotes" placeholder="ملاحظة"></div>
+      </div>
+      <div id="spayInvoicesWrap"></div>
+      <div class="totals-box">
+        <div class="row grand"><span>إجمالي الدفعة (مجموع المخصَّص)</span><span id="spayTotal">0.00</span></div>
+      </div>
+      <div style="margin-top:14px"><button class="btn" onclick="submitSupplierPayment()">ترحيل السداد</button></div>
+      <div class="err" id="spayErr"></div>
+      <div class="hint">تظهر فواتير المورد المفتوحة فقط (التي لسه عليها رصيد متبقٍ بعد المرتجعات والمدفوعات السابقة). حدِّد المبلغ المراد سداده لكل فاتورة — يمكن السداد الجزئي.</div>
+    </div>
+  </div>
+</div>
   <div class="panel" id="panel-purchase_settings">
   <div class="pset-page erp-watermark-page">
     <div class="tax-watermark">LEGEND D ERP SYS<br><span>إعدادات المشتريات</span></div>
