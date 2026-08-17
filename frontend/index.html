@@ -5343,8 +5343,8 @@ table.uz-matrix input[type=checkbox]{width:16px;height:16px;cursor:pointer;accen
 (function(){
   let itemFile=null;
   let itemAnalysis={valid:[],errors:[],total:0};
-  const headers=['كود المنتج','اسم المنتج','الوحدة','سعر التكلفة الافتراضي','سعر البيع','الرصيد الافتتاحي (الكمية)','حد إعادة الطلب'];
-  const sampleRow=['SKU-1001','قهوة عربية 250 جرام','حبة','18','25','50','10'];
+  const headers=['كود المنتج','اسم المنتج','اسم المنتج (إنجليزي)','الوصف','الباركود','كود التصنيف','كود الماركة','كود المورد الافتراضي','كود المنتج عند المورد','الوحدة','كود قالب الوحدة (اختياري)','سعر التكلفة الافتراضي','سعر البيع','الرصيد الافتتاحي (الكمية)','حد إعادة الطلب','كود المستودع','الحالة (active/paused/inactive)'];
+  const sampleRow=['SKU-1001','قهوة عربية 250 جرام','Arabic Coffee 250g','قهوة عربية مطحونة فاخرة','6221234567890','','','','','حبة','','18','25','50','10','','active'];
   function byId(id){return document.getElementById(id)}
   function esc(v){return String(v??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
   function msg(t,ok){
@@ -5401,10 +5401,23 @@ table.uz-matrix input[type=checkbox]{width:16px;height:16px;cursor:pointer;accen
     return parseDelimited(decode(buffer));
   }
   function payloadFromMap(map){
+    const whCode=get(map,['كود المستودع','المستودع','Warehouse Code','Warehouse']);
+    const wh=whCode ? (window.warehouses||[]).find(w=>String(w.code).trim()===whCode) : null;
+    const statusRaw=(get(map,['الحالة (active/paused/inactive)','الحالة','Status'])||'active').toLowerCase();
+    const status=['active','paused','inactive'].includes(statusRaw) ? statusRaw : 'active';
     return {
       code:get(map,['كود المنتج','Item Code','SKU']),
       name:get(map,['اسم المنتج','Item Name']),
+      name_en:get(map,['اسم المنتج (إنجليزي)','اسم المنتج انجليزي','Item Name (English)','Name EN'])||null,
+      description:get(map,['الوصف','وصف المنتج','Description'])||null,
+      barcode:get(map,['الباركود','Barcode'])||null,
+      category_code:get(map,['كود التصنيف','التصنيف','Category Code'])||null,
+      brand_code:get(map,['كود الماركة','الماركة','Brand Code'])||null,
+      supplier_code:get(map,['كود المورد الافتراضي','كود المورد','المورد','Supplier Code'])||null,
+      supplier_item_code:get(map,['كود المنتج عند المورد','Supplier Item Code'])||null,
       unit:get(map,['الوحدة','Unit'])||'حبة',
+      default_warehouse_id: wh ? wh.id : null,
+      status,
       default_cost:parseFloat(get(map,['سعر التكلفة الافتراضي','التكلفة','Default Cost'])||0)||0,
       price:parseFloat(get(map,['سعر البيع','Price'])||0)||0,
       opening_qty:parseFloat(get(map,['الرصيد الافتتاحي (الكمية)','الرصيد الافتتاحي','Opening Qty'])||0)||0,
