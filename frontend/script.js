@@ -6113,6 +6113,7 @@ function openSubModule(name){
     'مراكز التكلفة':'cost',
     'إعدادات الحسابات':'settings',
     'إعدادات الضرائب':'tax_settings',
+    'التقارير المالية':'financial_reports',
 
     // المخزون
     'المنتجات':'items',
@@ -7397,3 +7398,120 @@ window.suppliers = window.suppliers || [];
     document.addEventListener('DOMContentLoaded', function(){ fmtObserver.observe(document.body, {childList:true, subtree:true}); });
   }
 })();
+
+// ============================================================
+// التقارير المالية — ميزان المراجعة / قائمة الدخل / الميزانية العمومية
+// محسوبة مباشرة من القيود المرحّلة الفعلية عبر /api/reports/*
+// ============================================================
+function frEsc(s){ return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+function showFReportSection(section){
+  document.querySelectorAll('#panel-financial_reports .pset-nav-btn').forEach(b=> b.classList.toggle('active', b.dataset.freport===section));
+  document.querySelectorAll('#panel-financial_reports .pset-section').forEach(s=> s.classList.toggle('active', s.dataset.freport===section));
+}
+window.showFReportSection = showFReportSection;
+
+async function runTrialBalanceReport(){
+  const box=document.getElementById('frTrialResult');
+  const date_from=document.getElementById('frTrialFrom').value || '';
+  const date_to=document.getElementById('frTrialTo').value || '';
+  box.innerHTML='<div class="hint">جارٍ تحميل التقرير...</div>';
+  try{
+    const qs=new URLSearchParams();
+    if(date_from) qs.set('date_from', date_from);
+    if(date_to) qs.set('date_to', date_to);
+    const data=await api('GET', `/api/reports/trial-balance?${qs.toString()}`);
+    const rows=(data.accounts||[]).map(a=>`<tr>
+        <td>${frEsc(a.code)}</td>
+        <td>${frEsc(a.name_ar)}</td>
+        <td class="num">${fmt(a.opening_balance)}</td>
+        <td class="num">${fmt(a.period_debit)}</td>
+        <td class="num">${fmt(a.period_credit)}</td>
+        <td class="num" style="font-weight:700">${fmt(a.debit_column)}</td>
+        <td class="num" style="font-weight:700">${fmt(a.credit_column)}</td>
+      </tr>`).join('');
+    box.innerHTML=`
+      <div class="scrollx"><table class="grid po-list-table">
+        <thead><tr><th>الكود</th><th>الحساب</th><th>الرصيد الافتتاحي</th><th>مدين الفترة</th><th>دائن الفترة</th><th>مدين</th><th>دائن</th></tr></thead>
+        <tbody>${rows || '<tr><td colspan="7" style="text-align:center;color:#94a3b8;padding:16px">لا يوجد نشاط ضمن هذه الفترة</td></tr>'}</tbody>
+        <tfoot><tr style="font-weight:800;border-top:2px solid #0f2744">
+          <td colspan="5" style="text-align:left;padding-left:12px">الإجمالي</td>
+          <td class="num">${fmt(data.total_debit)}</td>
+          <td class="num">${fmt(data.total_credit)}</td>
+        </tr></tfoot>
+      </table></div>
+      <div style="margin-top:12px;font-weight:800;color:${data.is_balanced?'#2e7d32':'#c62828'}">
+        ${data.is_balanced ? '✅ الميزان متزن (إجمالي المدين = إجمالي الدائن)' : '⚠️ الميزان غير متزن — يوجد خطأ بالقيود يحتاج مراجعة'}
+      </div>`;
+  }catch(e){
+    box.innerHTML=`<div class="err">تعذر تحميل التقرير: ${frEsc(e.message)}</div>`;
+  }
+}
+window.runTrialBalanceReport = runTrialBalanceReport;
+
+async function runIncomeStatementReport(){
+  const box=document.getElementById('frIncomeResult');
+  const date_from=document.getElementById('frIncomeFrom').value;
+  const date_to=document.getElementById('frIncomeTo').value;
+  if(!date_from || !date_to){ box.innerHTML='<div class="err">يرجى تحديد بداية ونهاية الفترة</div>'; return; }
+  box.innerHTML='<div class="hint">جارٍ تحميل التقرير...</div>';
+  try{
+    const data=await api('GET', `/api/reports/income-statement?date_from=${date_from}&date_to=${date_to}`);
+    const revRows=(data.revenue||[]).map(a=>`<tr><td>${frEsc(a.code)} — ${frEsc(a.name_ar)}</td><td class="num">${fmt(a.amount)}</td></tr>`).join('');
+    const expRows=(data.expenses||[]).map(a=>`<tr><td>${frEsc(a.code)} — ${frEsc(a.name_ar)}</td><td class="num">${fmt(a.amount)}</td></tr>`).join('');
+    const netColor = data.net_income >= 0 ? '#2e7d32' : '#c62828';
+    box.innerHTML=`
+      <div style="font-weight:800;color:#0f2744;margin-bottom:8px">الإيرادات</div>
+      <table class="grid po-list-table"><tbody>${revRows || '<tr><td style="text-align:center;color:#94a3b8;padding:12px">لا توجد إيرادات ضمن هذه الفترة</td></tr>'}</tbody>
+        <tfoot><tr style="font-weight:700"><td>إجمالي الإيرادات</td><td class="num">${fmt(data.total_revenue)}</td></tr></tfoot></table>
+
+      <div style="font-weight:800;color:#0f2744;margin:18px 0 8px">المصروفات</div>
+      <table class="grid po-list-table"><tbody>${expRows || '<tr><td style="text-align:center;color:#94a3b8;padding:12px">لا توجد مصروفات ضمن هذه الفترة</td></tr>'}</tbody>
+        <tfoot><tr style="font-weight:700"><td>إجمالي المصروفات</td><td class="num">${fmt(data.total_expenses)}</td></tr></tfoot></table>
+
+      <div style="margin-top:18px;padding:14px 18px;border-radius:12px;background:${netColor}14;border:1px solid ${netColor}44;display:flex;justify-content:space-between;align-items:center">
+        <span style="font-weight:800;color:${netColor}">${data.net_income>=0?'صافي الربح':'صافي الخسارة'}</span>
+        <span style="font-weight:900;font-size:18px;color:${netColor}">${fmt(Math.abs(data.net_income))}</span>
+      </div>`;
+  }catch(e){
+    box.innerHTML=`<div class="err">تعذر تحميل التقرير: ${frEsc(e.message)}</div>`;
+  }
+}
+window.runIncomeStatementReport = runIncomeStatementReport;
+
+async function runBalanceSheetReport(){
+  const box=document.getElementById('frBalanceResult');
+  const as_of=document.getElementById('frBalanceAsOf').value || '';
+  box.innerHTML='<div class="hint">جارٍ تحميل التقرير...</div>';
+  try{
+    const qs=new URLSearchParams();
+    if(as_of) qs.set('as_of', as_of);
+    const data=await api('GET', `/api/reports/balance-sheet?${qs.toString()}`);
+    const assetRows=(data.assets||[]).map(a=>`<tr><td>${frEsc(a.code)} — ${frEsc(a.name_ar)}</td><td class="num">${fmt(a.amount)}</td></tr>`).join('');
+    const liabRows=(data.liabilities||[]).map(a=>`<tr><td>${frEsc(a.code)} — ${frEsc(a.name_ar)}</td><td class="num">${fmt(a.amount)}</td></tr>`).join('');
+    const eqRows=(data.equity||[]).map(a=>`<tr><td>${frEsc(a.code)} — ${frEsc(a.name_ar)}</td><td class="num">${fmt(a.amount)}</td></tr>`).join('');
+    box.innerHTML=`
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px">
+        <div>
+          <div style="font-weight:800;color:#0f2744;margin-bottom:8px">الأصول</div>
+          <table class="grid po-list-table"><tbody>${assetRows || '<tr><td style="text-align:center;color:#94a3b8;padding:12px">لا يوجد رصيد</td></tr>'}</tbody>
+            <tfoot><tr style="font-weight:700"><td>إجمالي الأصول</td><td class="num">${fmt(data.total_assets)}</td></tr></tfoot></table>
+        </div>
+        <div>
+          <div style="font-weight:800;color:#0f2744;margin-bottom:8px">الخصوم</div>
+          <table class="grid po-list-table"><tbody>${liabRows || '<tr><td style="text-align:center;color:#94a3b8;padding:12px">لا يوجد رصيد</td></tr>'}</tbody>
+            <tfoot><tr style="font-weight:700"><td>إجمالي الخصوم</td><td class="num">${fmt(data.total_liabilities)}</td></tr></tfoot></table>
+
+          <div style="font-weight:800;color:#0f2744;margin:18px 0 8px">حقوق الملكية</div>
+          <table class="grid po-list-table"><tbody>${eqRows || '<tr><td style="text-align:center;color:#94a3b8;padding:12px">لا يوجد رصيد</td></tr>'}</tbody>
+            <tfoot><tr style="font-weight:700"><td>إجمالي حقوق الملكية</td><td class="num">${fmt(data.total_equity)}</td></tr></tfoot></table>
+        </div>
+      </div>
+      <div style="margin-top:16px;padding:14px 18px;border-radius:12px;background:${data.is_balanced?'#2e7d3214':'#c6282814'};border:1px solid ${data.is_balanced?'#2e7d3244':'#c6282844'};display:flex;justify-content:space-between;align-items:center;font-weight:800">
+        <span style="color:${data.is_balanced?'#2e7d32':'#c62828'}">${data.is_balanced?'✅ الميزانية متزنة':'⚠️ الميزانية غير متزنة'} (الأصول ${fmt(data.total_assets)} ${data.is_balanced?'=':'≠'} الخصوم + حقوق الملكية ${fmt(data.total_liabilities_and_equity)})</span>
+      </div>`;
+  }catch(e){
+    box.innerHTML=`<div class="err">تعذر تحميل التقرير: ${frEsc(e.message)}</div>`;
+  }
+}
+window.runBalanceSheetReport = runBalanceSheetReport;

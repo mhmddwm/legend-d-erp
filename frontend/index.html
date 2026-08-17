@@ -1270,7 +1270,7 @@ html[dir="ltr"] .brand-center{direction:ltr;}
  <div class="erp-module-card" onclick="toggleERPModule('printTemplatesSub')"><div class="erp-module-icon" data-module-icon="templates"></div><div class="erp-module-name">قوالب الطباعة</div></div>
  <div class="erp-module-card" onclick="toggleERPModule('generalSettingsSub')"><div class="erp-module-icon" data-module-icon="generalsettings"></div><div class="erp-module-name">الإعدادات العامة</div></div>
 </section>
-<div id="accountsSub" class="erp-submenu-horizontal accounts-menu"><button data-sub-icon="journal" onclick="openSubModule('القيود اليومية')">القيود اليومية</button><button data-sub-icon="add" onclick="openSubModule('إضافة قيد')">إضافة قيد</button><button data-sub-icon="cost" onclick="openSubModule('مراكز التكلفة')">مراكز التكلفة</button><button data-sub-icon="settings" onclick="openSubModule('إعدادات الحسابات')">إعدادات الحسابات</button><button data-sub-icon="tax" onclick="openSubModule('إعدادات الضرائب')">إعدادات الضرائب</button></div>
+<div id="accountsSub" class="erp-submenu-horizontal accounts-menu"><button data-sub-icon="journal" onclick="openSubModule('القيود اليومية')">القيود اليومية</button><button data-sub-icon="add" onclick="openSubModule('إضافة قيد')">إضافة قيد</button><button data-sub-icon="reports" onclick="openSubModule('التقارير المالية')">التقارير المالية</button><button data-sub-icon="cost" onclick="openSubModule('مراكز التكلفة')">مراكز التكلفة</button><button data-sub-icon="settings" onclick="openSubModule('إعدادات الحسابات')">إعدادات الحسابات</button><button data-sub-icon="tax" onclick="openSubModule('إعدادات الضرائب')">إعدادات الضرائب</button></div>
 <div id="purchaseSub" class="erp-submenu-horizontal"><button onclick="openSubModule('طلب شراء')">طلب شراء</button><button onclick="openSubModule('طلب عرض سعر')">طلب عرض سعر</button><button onclick="openSubModule('أوامر الشراء')">أوامر الشراء</button><button onclick="openSubModule('استلام البضاعة')">استلام البضاعة</button><button onclick="openSubModule('فواتير الشراء')">فواتير الشراء</button><button onclick="openSubModule('مرتجعات المشتريات')">مرتجعات المشتريات</button><button onclick="openSubModule('إدارة الموردين')">إدارة الموردين</button><button onclick="openSubModule('مدفوعات الموردين')">مدفوعات الموردين</button><button onclick="openSubModule('إعدادات المشتريات')">إعدادات المشتريات</button></div>
 <div id="salesSub" class="erp-submenu-horizontal"><button onclick="openSubModule('عرض سعر')">عرض سعر</button><button onclick="openSubModule('أمر بيع')">أمر بيع</button><button onclick="openSubModule('إذن تسليم/صرف بضاعة')">إذن تسليم/صرف بضاعة</button><button onclick="openSubModule('إنشاء فاتورة')">إنشاء فاتورة</button><button onclick="openSubModule('إدارة الفواتير')">إدارة الفواتير</button><button onclick="openSubModule('المرتجعات')">المرتجعات</button><button onclick="openSubModule('إشعارات دائنة')">إشعارات دائنة</button><button onclick="openSubModule('مدفوعات العملاء')">مدفوعات العملاء</button><button onclick="openSubModule('إعدادات المبيعات')">إعدادات المبيعات</button></div>
 <div id="posSub" class="erp-submenu-horizontal"><button onclick="openSubModule('بدء الجلسة')">بدء الجلسة</button><button onclick="openSubModule('الجلسات')">الجلسات</button><button onclick="openSubModule('تقارير نقاط البيع')">تقارير نقاط البيع</button><button onclick="openSubModule('إعدادات نقاط البيع')">إعدادات نقاط البيع</button></div>
@@ -3447,6 +3447,67 @@ html[dir="ltr"] .brand-center{direction:ltr;}
   </div>
 
   <div class="panel" id="panel-settings"><div class="formcard"><h3>إعدادات الحسابات</h3><div class="empty-msg">جاهزة للتطوير</div></div></div>
+
+  <div class="panel" id="panel-financial_reports">
+  <div class="pset-page erp-watermark-page">
+    <div class="tax-watermark">LEGEND D ERP SYS<br><span>التقارير المالية</span></div>
+    <div class="formcard pset-card">
+      <div class="tax-page-head">
+        <div>
+          <span class="tax-mini-label">الحسابات / التقارير</span>
+          <h2>التقارير المالية</h2>
+          <p>ميزان المراجعة، قائمة الدخل، والميزانية العمومية — محسوبة مباشرة من القيود المرحّلة الفعلية بالنظام.</p>
+        </div>
+      </div>
+
+      <div class="pset-body">
+        <div class="pset-nav">
+          <button class="pset-nav-btn active" data-freport="trial" onclick="showFReportSection('trial')">⚖️ ميزان المراجعة</button>
+          <button class="pset-nav-btn" data-freport="income" onclick="showFReportSection('income')">📈 قائمة الدخل</button>
+          <button class="pset-nav-btn" data-freport="balance" onclick="showFReportSection('balance')">🏛️ الميزانية العمومية</button>
+        </div>
+
+        <div class="pset-content">
+
+          <!-- ===== ميزان المراجعة ===== -->
+          <div class="pset-section active" data-freport="trial">
+            <div class="pset-section-head"><h3>ميزان المراجعة</h3><p>إجمالي مدين ودائن كل حساب نشط حتى تاريخ معيّن — يجب أن يتساوى إجمالي العمودين دائماً في قيد مزدوج سليم.</p></div>
+            <div class="frow two" style="margin-bottom:14px">
+              <div class="field"><label>من تاريخ (اختياري)</label><input type="date" id="frTrialFrom"></div>
+              <div class="field"><label>حتى تاريخ</label><input type="date" id="frTrialTo"></div>
+            </div>
+            <button class="btn" onclick="runTrialBalanceReport()">تشغيل التقرير</button>
+            <div id="frTrialResult" style="margin-top:16px"></div>
+          </div>
+
+          <!-- ===== قائمة الدخل ===== -->
+          <div class="pset-section" data-freport="income">
+            <div class="pset-section-head"><h3>قائمة الدخل (الأرباح والخسائر)</h3><p>إجمالي الإيرادات ناقص إجمالي المصروفات خلال فترة محدَّدة.</p></div>
+            <div class="frow two" style="margin-bottom:14px">
+              <div class="field"><label>من تاريخ</label><input type="date" id="frIncomeFrom"></div>
+              <div class="field"><label>إلى تاريخ</label><input type="date" id="frIncomeTo"></div>
+            </div>
+            <button class="btn" onclick="runIncomeStatementReport()">تشغيل التقرير</button>
+            <div id="frIncomeResult" style="margin-top:16px"></div>
+          </div>
+
+          <!-- ===== الميزانية العمومية ===== -->
+          <div class="pset-section" data-freport="balance">
+            <div class="pset-section-head"><h3>الميزانية العمومية</h3><p>الأصول = الخصوم + حقوق الملكية، كما بتاريخ معيّن.</p></div>
+            <div class="frow two" style="margin-bottom:14px">
+              <div class="field"><label>كما بتاريخ</label><input type="date" id="frBalanceAsOf"></div>
+              <div></div>
+            </div>
+            <button class="btn" onclick="runBalanceSheetReport()">تشغيل التقرير</button>
+            <div id="frBalanceResult" style="margin-top:16px"></div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
   <div class="panel" id="panel-tax_settings">
   <div class="tax-settings-page erp-watermark-page">
     <div class="tax-watermark">LEGEND D ERP SYS<br><span>إعدادات الضرائب</span></div>

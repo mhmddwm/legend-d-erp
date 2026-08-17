@@ -20,6 +20,7 @@ from app.routers import (
     warehouse,
     warehouse_locations,
     branches,
+    reports,
 )
 
 
@@ -114,6 +115,11 @@ app.include_router(
 # Branches
 app.include_router(
     branches.router
+)
+
+# Financial Reports
+app.include_router(
+    reports.router
 )
 
 
