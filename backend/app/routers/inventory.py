@@ -199,6 +199,55 @@ def update_supplier(code: str, payload: SupplierUpdate, db: Session = Depends(ge
                        payable_balance=calc_payable(db, s.code))
 
 
+@supplier_router.get("/{code}/statement")
+def get_supplier_statement(code: str, db: Session = Depends(get_db)):
+    """كشف حساب المورد — دفتر أستاذ مساعد (Subsidiary Ledger) مبني على
+    فلترة المستندات المرتبطة بكود المورد (فواتير مشتريات مرحّلة +
+    مرتجعات)، بدل إنشاء حساب مستقل بدليل الحسابات لكل مورد."""
+    supplier = db.query(Supplier).filter(Supplier.code == code).first()
+    if not supplier:
+        raise HTTPException(status_code=404, detail="المورد غير موجود")
+
+    movements = []
+
+    invoices = (
+        db.query(PurchaseInvoice)
+        .filter(PurchaseInvoice.supplier_code == code, PurchaseInvoice.status == "posted")
+        .all()
+    )
+    for inv in invoices:
+        desc = f"فاتورة مشتريات {inv.inv_number}"
+        if inv.supplier_inv_number:
+            desc += f" (فاتورة المورد: {inv.supplier_inv_number})"
+        movements.append({
+            "date": inv.inv_date, "doc_type": "purchase_invoice", "doc_number": inv.inv_number,
+            "description": desc, "debit": 0.0, "credit": float(inv.total or 0),
+            "journal_entry_id": inv.journal_entry_id,
+        })
+
+    returns = db.query(PurchaseReturn).filter(PurchaseReturn.supplier_code == code).all()
+    for rt in returns:
+        movements.append({
+            "date": rt.rt_date, "doc_type": "purchase_return", "doc_number": rt.rt_number,
+            "description": f"مرتجع مشتريات {rt.rt_number} (على فاتورة {rt.inv_number})",
+            "debit": float(rt.total or 0), "credit": 0.0, "journal_entry_id": None,
+        })
+
+    movements.sort(key=lambda m: (m["date"], m["doc_number"]))
+
+    running = 0.0
+    entries = []
+    for m in movements:
+        running = round(running + m["credit"] - m["debit"], 2)
+        entries.append({**m, "balance": running})
+
+    return {
+        "supplier_code": supplier.code, "supplier_name": supplier.name,
+        "account_code": supplier.account_code, "opening_balance": 0.0,
+        "closing_balance": running, "entries": entries,
+    }
+
+
 @supplier_router.delete("/{code}", status_code=204)
 def delete_supplier(code: str, db: Session = Depends(get_db)):
     from app.models.models import PurchaseOrder, GoodsReceipt

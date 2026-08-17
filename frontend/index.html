@@ -2539,6 +2539,10 @@ html[dir="ltr"] .brand-center{direction:ltr;}
         <div class="field"><label>تاريخ الاستلام</label><input id="grnDate" type="date"></div>
         <div class="field"><label>مرجع (اختياري)</label><input id="grnRef" placeholder="رقم إذن الاستلام"></div>
       </div>
+      <div class="frow two">
+        <div class="field"><label>المستودع</label><select id="grnWarehouse"></select></div>
+        <div></div>
+      </div>
       <table class="line-items">
         <thead><tr><th style="width:30%">الصنف</th><th style="width:12%">الكمية</th><th style="width:10%">الوحدة</th><th style="width:18%">تكلفة الوحدة</th><th style="width:16%">الإجمالي</th><th></th></tr></thead>
         <tbody id="grnLinesBody"></tbody>
@@ -2552,7 +2556,7 @@ html[dir="ltr"] .brand-center{direction:ltr;}
 
     <div class="formcard rfq-card" style="margin-top:14px">
       <div class="rfq-saved-toolbar"><div><h3 style="margin:0">الاستلامات المسجّلة</h3><small id="grnSavedCount">0 استلام</small></div><input id="grnSearch" placeholder="بحث برقم الاستلام أو المورد أو رقم أمر الشراء" oninput="renderGRNs()"></div>
-      <div class="scrollx"><table class="grid po-list-table"><thead><tr><th>رقم الاستلام</th><th>التاريخ</th><th>المورد</th><th>أمر الشراء</th><th>الإجمالي</th><th>حالة الفوترة</th></tr></thead><tbody id="grnBody"></tbody></table></div>
+      <div class="scrollx"><table class="grid po-list-table"><thead><tr><th>رقم الاستلام</th><th>التاريخ</th><th>المورد</th><th>أمر الشراء</th><th>المستودع</th><th>الإجمالي</th><th>حالة الفوترة</th></tr></thead><tbody id="grnBody"></tbody></table></div>
       <div id="grnEmpty" class="pr-list-empty" style="display:none">لا توجد استلامات مسجّلة حتى الآن</div>
     </div>
   </div>
@@ -2604,6 +2608,10 @@ html[dir="ltr"] .brand-center{direction:ltr;}
             <option value="inclusive">متضمنة (القيمة شاملة الضريبة)</option>
           </select>
         </div>
+      </div>
+      <div class="frow two">
+        <div class="field"><label>المستودع المستلم إليه</label><select id="dinvWarehouse"></select></div>
+        <div></div>
       </div>
       <table class="line-items">
         <thead><tr><th style="width:30%">الصنف</th><th style="width:12%">الكمية</th><th style="width:10%">الوحدة</th><th style="width:18%">تكلفة الوحدة</th><th style="width:16%">الإجمالي</th><th></th></tr></thead>
@@ -2699,6 +2707,10 @@ html[dir="ltr"] .brand-center{direction:ltr;}
               <div class="pset-row">
                 <div class="pset-row-text"><label>الفرع الافتراضي للمشتريات</label><small>يُستخدم كفرع افتراضي عند إنشاء طلبات وأوامر الشراء.</small></div>
                 <div class="pset-row-control"><select id="psetDefaultBranch"></select></div>
+              </div>
+              <div class="pset-row">
+                <div class="pset-row-text"><label>المستودع الافتراضي للمشتريات</label><small>يُعبَّأ تلقائياً في نماذج الاستلام والفاتورة المباشرة عند عدم التحديد.</small></div>
+                <div class="pset-row-control"><select id="psetDefaultWarehouse"></select></div>
               </div>
               <div class="pset-row">
                 <div class="pset-row-text"><label>مركز التكلفة الافتراضي</label><small>يُعبَّأ تلقائياً في نماذج الفواتير المباشرة والاستلام عند عدم التحديد.</small></div>

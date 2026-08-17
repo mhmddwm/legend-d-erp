@@ -23,6 +23,9 @@ from app.models.models import (
     Supplier,
     TaxType,
 )
+from app.models.warehouse import Warehouse
+from app.models.location import WarehouseLocation
+from app.models.warehouse_stock import WarehouseStock
 from app.schemas.inventory import (
     ItemIn,
     ItemOut,
@@ -363,215 +366,12 @@ def list_stock_moves(
 
 
 # =========================================================
-# SUPPLIERS
+# ملاحظة: نقاط API الخاصة بالموردين (قائمة/إنشاء/تعديل/حذف/كشف حساب)
+# منقولة بالكامل إلى inventory.py — الراوتر supplier_router المُسجَّل
+# فعلياً بالتطبيق (main.py) هو inventory.supplier_router، وليس النسخة
+# المعرَّفة بهذا الملف (لم تكن مُسجَّلة إطلاقاً بالتطبيق). أُبقيت
+# الدوال المساعدة أعلاه لعدم وجود اعتمادية خارجية عليها حالياً.
 # =========================================================
-@supplier_router.get("", response_model=list[SupplierOut])
-def list_suppliers(db: Session = Depends(get_db)):
-    suppliers = (
-        db.query(Supplier)
-        .filter(Supplier.is_active.is_(True))
-        .order_by(Supplier.code.asc())
-        .all()
-    )
-
-    return [
-        SupplierOut(
-            code=supplier.code,
-            name=supplier.name,
-            phone=supplier.phone,
-            email=supplier.email,
-            notes=supplier.notes,
-            payment_terms_days=supplier.payment_terms_days or 0,
-            payable_balance=calc_payable(db, supplier.code),
-        )
-        for supplier in suppliers
-    ]
-
-
-@supplier_router.post("", response_model=SupplierOut, status_code=201)
-def create_supplier(
-    payload: SupplierIn,
-    db: Session = Depends(get_db),
-):
-    code = payload.code.strip()
-
-    if not code:
-        raise HTTPException(status_code=400, detail="كود المورد مطلوب")
-
-    if db.query(Supplier).filter(Supplier.code == code).first():
-        raise HTTPException(status_code=400, detail="كود المورد مستخدم من قبل")
-
-    try:
-        data = payload.model_dump()
-        data["code"] = code
-
-        supplier = Supplier(**data)
-        db.add(supplier)
-        db.commit()
-        db.refresh(supplier)
-
-        return SupplierOut(
-            code=supplier.code,
-            name=supplier.name,
-            phone=supplier.phone,
-            email=supplier.email,
-            notes=supplier.notes,
-            payment_terms_days=supplier.payment_terms_days or 0,
-            payable_balance=0,
-        )
-
-    except Exception:
-        db.rollback()
-        raise
-
-
-@supplier_router.put("/{code}", response_model=SupplierOut)
-def update_supplier(
-    code: str,
-    payload: SupplierUpdate,
-    db: Session = Depends(get_db),
-):
-    supplier = db.query(Supplier).filter(Supplier.code == code).first()
-    if not supplier:
-        raise HTTPException(status_code=404, detail="المورد غير موجود")
-
-    data = payload.model_dump(exclude_unset=True)
-    new_code = data.pop("code", None)
-
-    if new_code:
-        new_code = new_code.strip()
-        if not new_code:
-            raise HTTPException(status_code=400, detail="كود المورد مطلوب")
-
-    if new_code and new_code != code:
-        if db.query(Supplier).filter(Supplier.code == new_code).first():
-            raise HTTPException(
-                status_code=400,
-                detail="الكود الجديد مستخدم من قبل",
-            )
-
-        if _supplier_has_transactions(db, code):
-            raise HTTPException(
-                status_code=400,
-                detail="لا يمكن تغيير كود مورد مرتبط بمستندات شراء",
-            )
-
-    try:
-        for key, value in data.items():
-            setattr(supplier, key, value)
-
-        if new_code and new_code != code:
-            supplier.code = new_code
-
-        db.commit()
-        db.refresh(supplier)
-
-        return SupplierOut(
-            code=supplier.code,
-            name=supplier.name,
-            phone=supplier.phone,
-            email=supplier.email,
-            notes=supplier.notes,
-            payment_terms_days=supplier.payment_terms_days or 0,
-            payable_balance=calc_payable(db, supplier.code),
-        )
-
-    except HTTPException:
-        db.rollback()
-        raise
-    except Exception:
-        db.rollback()
-        raise
-
-
-@supplier_router.get("/{code}/statement")
-def get_supplier_statement(code: str, db: Session = Depends(get_db)):
-    """كشف حساب المورد — دفتر أستاذ مساعد (Subsidiary Ledger) مبني على
-    فلترة المستندات المرتبطة بكود المورد (فواتير مشتريات مرحّلة +
-    مرتجعات)، بدل إنشاء حساب مستقل بدليل الحسابات لكل مورد. هذه هي
-    الطريقة المعتمدة باحترافية (SAP: Reconciliation Account + Vendor
-    Ledger) لأنها تعطي نفس الشفافية دون تضخيم دليل الحسابات."""
-    supplier = db.query(Supplier).filter(Supplier.code == code).first()
-    if not supplier:
-        raise HTTPException(status_code=404, detail="المورد غير موجود")
-
-    movements = []
-
-    invoices = (
-        db.query(PurchaseInvoice)
-        .filter(
-            PurchaseInvoice.supplier_code == code,
-            PurchaseInvoice.status == "posted",
-        )
-        .all()
-    )
-    for inv in invoices:
-        desc = f"فاتورة مشتريات {inv.inv_number}"
-        if inv.supplier_inv_number:
-            desc += f" (فاتورة المورد: {inv.supplier_inv_number})"
-        movements.append({
-            "date": inv.inv_date,
-            "doc_type": "purchase_invoice",
-            "doc_number": inv.inv_number,
-            "description": desc,
-            "debit": 0.0,
-            "credit": _to_float(inv.total),
-            "journal_entry_id": inv.journal_entry_id,
-        })
-
-    returns = (
-        db.query(PurchaseReturn)
-        .filter(PurchaseReturn.supplier_code == code)
-        .all()
-    )
-    for rt in returns:
-        movements.append({
-            "date": rt.rt_date,
-            "doc_type": "purchase_return",
-            "doc_number": rt.rt_number,
-            "description": f"مرتجع مشتريات {rt.rt_number} (على فاتورة {rt.inv_number})",
-            "debit": _to_float(rt.total),
-            "credit": 0.0,
-            "journal_entry_id": None,
-        })
-
-    movements.sort(key=lambda m: (m["date"], m["doc_number"]))
-
-    running = 0.0
-    entries = []
-    for m in movements:
-        running = round(running + m["credit"] - m["debit"], 2)
-        entries.append({**m, "balance": running})
-
-    return {
-        "supplier_code": supplier.code,
-        "supplier_name": supplier.name,
-        "account_code": supplier.account_code,
-        "opening_balance": 0.0,
-        "closing_balance": running,
-        "entries": entries,
-    }
-
-
-@supplier_router.delete("/{code}", status_code=204)
-def delete_supplier(code: str, db: Session = Depends(get_db)):
-    supplier = db.query(Supplier).filter(Supplier.code == code).first()
-    if not supplier:
-        raise HTTPException(status_code=404, detail="المورد غير موجود")
-
-    if _supplier_has_transactions(db, code):
-        raise HTTPException(
-            status_code=400,
-            detail="لا يمكن حذف مورد مرتبط بمستندات شراء",
-        )
-
-    try:
-        db.delete(supplier)
-        db.commit()
-        return None
-    except Exception:
-        db.rollback()
-        raise
 
 
 # =========================================================
@@ -737,6 +537,80 @@ def _post_grn_journal(db: Session, grn: GoodsReceipt, total: float):
     return entry
 
 
+def _resolve_warehouse_and_location(db: Session, warehouse_id, location_id):
+    """يحدد المستودع والموقع الفعليين لعملية استلام: يتحقق من صحتهما
+    إن أُرسلا، أو يستخدم المستودع الافتراضي (المُعلَّم is_default، أو
+    كود MAIN كحل احتياطي) وأول موقع تابع له إن لم يُحدَّد شيء —
+    للتوافق مع أي طلب لا يرسل مستودعاً صراحة."""
+    warehouse = None
+    if warehouse_id is not None:
+        warehouse = db.query(Warehouse).filter(Warehouse.id == warehouse_id, Warehouse.is_active.is_(True)).first()
+        if not warehouse:
+            raise HTTPException(status_code=404, detail="المستودع غير موجود أو غير نشط")
+    else:
+        warehouse = db.query(Warehouse).filter(Warehouse.is_default.is_(True), Warehouse.is_active.is_(True)).first()
+        if not warehouse:
+            warehouse = db.query(Warehouse).filter(Warehouse.code == "MAIN").first()
+        if not warehouse:
+            raise HTTPException(
+                status_code=400,
+                detail="لا يوجد مستودع افتراضي بالنظام — يرجى إنشاء مستودع أولاً من شاشة المستودعات",
+            )
+
+    location = None
+    if location_id is not None:
+        location = (
+            db.query(WarehouseLocation)
+            .filter(WarehouseLocation.id == location_id, WarehouseLocation.warehouse_id == warehouse.id)
+            .first()
+        )
+        if not location:
+            raise HTTPException(status_code=404, detail="موقع التخزين غير موجود ضمن هذا المستودع")
+    else:
+        location = (
+            db.query(WarehouseLocation)
+            .filter(WarehouseLocation.warehouse_id == warehouse.id)
+            .order_by(WarehouseLocation.id.asc())
+            .first()
+        )
+        if not location:
+            location = WarehouseLocation(warehouse_id=warehouse.id, code="GENERAL", name="موقع عام")
+            db.add(location)
+            db.flush()
+
+    return warehouse, location
+
+
+def _adjust_warehouse_stock(db: Session, item_id: int, warehouse_id: int, location_id, qty_delta: float, avg_cost: float):
+    """يحدّث رصيد الصنف بمستودع/موقع معيّن (warehouse_stock) بفارق الكمية
+    المُمرَّر (موجب = إضافة، سالب = خصم)، ثم يزامن avg_cost على كل صفوف
+    هذا الصنف بكل المستودعات دفعة واحدة لتبقى معكوسة لآخر تكلفة متوسطة
+    عامة صحيحة (Item.avg_cost) — تفادياً لبقاء قيمة قديمة (Stale) بمستودع
+    لم تحدث فيه الحركة الحالية، رغم أن التكلفة العامة للصنف تغيّرت."""
+    row = (
+        db.query(WarehouseStock)
+        .filter(
+            WarehouseStock.item_id == item_id,
+            WarehouseStock.warehouse_id == warehouse_id,
+            WarehouseStock.location_id == location_id,
+        )
+        .first()
+    )
+    if not row:
+        row = WarehouseStock(item_id=item_id, warehouse_id=warehouse_id, location_id=location_id, quantity=0, avg_cost=0)
+        db.add(row)
+        db.flush()
+
+    new_qty = _to_float(row.quantity) + qty_delta
+    row.quantity = max(new_qty, 0)
+    row.avg_cost = avg_cost
+
+    db.query(WarehouseStock).filter(WarehouseStock.item_id == item_id).update(
+        {WarehouseStock.avg_cost: avg_cost}, synchronize_session=False
+    )
+    return row
+
+
 def _create_grn_core(
     payload: GoodsReceiptIn,
     db: Session,
@@ -818,6 +692,8 @@ def _create_grn_core(
 
         prepared_lines.append((item, qty, unit_cost))
 
+    warehouse, location = _resolve_warehouse_and_location(db, payload.warehouse_id, payload.location_id)
+
     try:
         grn = GoodsReceipt(
             grn_number=_next_document_number(db, GoodsReceipt, "grn_number", "GRN"),
@@ -825,6 +701,8 @@ def _create_grn_core(
             supplier_code=payload.supplier_code,
             po_number=payload.po_number,
             reference=payload.reference,
+            warehouse_id=warehouse.id,
+            location_id=location.id,
             total=0,
             invoice_status="not_invoiced",
         )
@@ -861,11 +739,14 @@ def _create_grn_core(
                     item_id=item.id,
                     move_type="استلام مشتريات",
                     reference=f"GRN-{grn.grn_number}",
+                    warehouse_id=warehouse.id,
                     qty=qty,
                     unit_cost=unit_cost,
                     balance_after=new_qty,
                 )
             )
+
+            _adjust_warehouse_stock(db, item.id, warehouse.id, location.id, qty, new_avg_cost)
 
             total += qty * unit_cost
 
@@ -982,6 +863,9 @@ def update_grn(
         prepared_lines.append((item, qty, unit_cost))
 
     try:
+        old_warehouse_id = grn.warehouse_id
+        old_location_id = grn.location_id
+
         # 1) عكس أثر الأصناف القديمة على الكمية/التكلفة المتوسطة، وحذف حركاتها وسطورها القديمة
         old_lines = (
             db.query(GoodsReceiptLine)
@@ -990,6 +874,7 @@ def update_grn(
         )
         for old_line in old_lines:
             item = db.query(Item).filter(Item.id == old_line.item_id).first()
+            new_avg_after_reversal = 0.0
             if item:
                 old_qty = _to_float(item.qty)
                 old_avg = _to_float(item.avg_cost)
@@ -1003,12 +888,18 @@ def update_grn(
                     )
                 new_qty = max(new_qty, 0)
                 remaining_value = (old_qty * old_avg) - (line_qty * line_cost)
+                new_avg_after_reversal = (remaining_value / new_qty) if new_qty > 0 else 0
                 item.qty = new_qty
-                item.avg_cost = (remaining_value / new_qty) if new_qty > 0 else 0
+                item.avg_cost = new_avg_after_reversal
             db.query(StockMove).filter(
                 StockMove.item_id == old_line.item_id,
                 StockMove.reference == f"GRN-{grn.grn_number}",
             ).delete()
+            if old_warehouse_id:
+                _adjust_warehouse_stock(
+                    db, old_line.item_id, old_warehouse_id, old_location_id,
+                    -_to_float(old_line.qty), new_avg_after_reversal,
+                )
             db.delete(old_line)
 
         # 2) إلغاء قيد الاستلام القديم (إن وُجد) قبل ترحيل قيد جديد
@@ -1020,9 +911,12 @@ def update_grn(
             grn.journal_entry_id = None
 
         # 3) تطبيق بيانات ثم أصناف الاستلام الجديدة (نفس منطق الإنشاء)
+        warehouse, location = _resolve_warehouse_and_location(db, payload.warehouse_id, payload.location_id)
         grn.supplier_code = payload.supplier_code
         grn.grn_date = payload.grn_date
         grn.reference = payload.reference
+        grn.warehouse_id = warehouse.id
+        grn.location_id = location.id
 
         total = 0.0
         for item, qty, unit_cost in prepared_lines:
@@ -1041,8 +935,10 @@ def update_grn(
             item.avg_cost = new_avg_cost
             db.add(StockMove(
                 move_date=payload.grn_date, item_id=item.id, move_type="استلام مشتريات (معدّل)",
-                reference=f"GRN-{grn.grn_number}", qty=qty, unit_cost=unit_cost, balance_after=new_qty,
+                reference=f"GRN-{grn.grn_number}", warehouse_id=warehouse.id,
+                qty=qty, unit_cost=unit_cost, balance_after=new_qty,
             ))
+            _adjust_warehouse_stock(db, item.id, warehouse.id, location.id, qty, new_avg_cost)
             total += qty * unit_cost
 
         grn.total = total
@@ -1376,6 +1272,8 @@ def create_direct_purchase_invoice(
         supplier_code=payload.supplier_code,
         po_number=None,
         reference=payload.reference or "فاتورة مباشرة (بدون دورة شراء)",
+        warehouse_id=payload.warehouse_id,
+        location_id=payload.location_id,
         lines=payload.lines,
     )
     # لا يُرحَّل قيد استلام مستقل هنا: الاستلام والفاتورة يحدثان بنفس
@@ -1607,6 +1505,8 @@ def create_purchase_return(
         db.add(purchase_return)
         db.flush()
 
+        source_grn = db.query(GoodsReceipt).filter(GoodsReceipt.grn_number == invoice.grn_number).first()
+
         total = 0.0
         for item, qty, unit_cost in prepared_lines:
             new_qty = _to_float(item.qty) - qty
@@ -1630,11 +1530,18 @@ def create_purchase_return(
                     item_id=item.id,
                     move_type="مرتجع مشتريات",
                     reference=f"PRT-{purchase_return.rt_number}",
+                    warehouse_id=source_grn.warehouse_id if source_grn else None,
                     qty=-qty,
                     unit_cost=unit_cost,
                     balance_after=new_qty,
                 )
             )
+
+            if source_grn and source_grn.warehouse_id:
+                _adjust_warehouse_stock(
+                    db, item.id, source_grn.warehouse_id, source_grn.location_id,
+                    -qty, _to_float(item.avg_cost),
+                )
 
             total += qty * unit_cost
 

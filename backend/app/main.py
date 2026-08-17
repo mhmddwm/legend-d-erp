@@ -169,6 +169,10 @@ app.include_router(
 )
 
 app.include_router(
+    warehouse.stock_router
+)
+
+app.include_router(
     warehouse_locations.router
 )
 

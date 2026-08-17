@@ -552,11 +552,8 @@ async function submitWarehouse(){
     if(errEl) errEl.textContent = 'رمز المستودع والاسم مطلوبان';
     return;
   }
-  const params = new URLSearchParams({code, name});
-  if(location) params.set('location', location);
-  if(manager) params.set('manager', manager);
   try{
-    await api('POST', `/api/warehouses?${params.toString()}`);
+    await api('POST', '/api/warehouses', { code, name, location: location||null, manager: manager||null });
     document.getElementById('whCode').value='';
     document.getElementById('whName').value='';
     document.getElementById('whLocation').value='';
@@ -3189,6 +3186,7 @@ async function submitGRN(){
   const grn_date=document.getElementById('grnDate').value;
   const po_number=document.getElementById('grnPO').value||null;
   const reference=document.getElementById('grnRef').value.trim()||null;
+  const warehouse_id=document.getElementById('grnWarehouse')?.value ? parseInt(document.getElementById('grnWarehouse').value) : null;
   const err=document.getElementById('grnErr');
   const valid=grnLines.filter(l=>l.itemCode&&l.qty>0);
   if(!supplier_code){err.textContent='يرجى اختيار المورد'; return;}
@@ -3197,7 +3195,7 @@ async function submitGRN(){
   err.textContent='';
   try{
     await api('POST','/api/grn',{
-      grn_date,supplier_code,po_number,reference,
+      grn_date,supplier_code,po_number,reference,warehouse_id,
       lines:valid.map(l=>{
         const it=(items||[]).find(i=>i.code===l.itemCode);
         const factor = it ? (getItemUnitFactor(it, l.unit)||1) : 1;
@@ -3222,6 +3220,25 @@ function getGrnInvoiceBadge(grn){
   return `<span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:12px;background:${color}22;color:${color};border:1px solid ${color}55;">${text}</span>`;
 }
 
+// تعبئة قائمة المستودعات بنموذج الاستلام (والقيمة الافتراضية من إعدادات المشتريات إن وُجدت)
+function refreshGrnWarehouseOptions(){
+  const sel=document.getElementById('grnWarehouse');
+  if(!sel) return;
+  const current=sel.value;
+  const active=(warehouses||[]).filter(w=>w.is_active!==false);
+  sel.innerHTML = active.map(w=>`<option value="${w.id}">${grnEsc(w.code)} — ${grnEsc(w.name)}</option>`).join('')
+    || '<option value="">— لا توجد مستودعات —</option>';
+  if(current && active.some(w=>String(w.id)===current)){
+    sel.value=current;
+  } else if(typeof loadPurchaseSettings === 'function'){
+    const pset = loadPurchaseSettings();
+    if(pset.defaultWarehouseId && active.some(w=>String(w.id)===String(pset.defaultWarehouseId))){
+      sel.value = String(pset.defaultWarehouseId);
+    }
+  }
+}
+window.refreshGrnWarehouseOptions = refreshGrnWarehouseOptions;
+
 // تعبئة قائمة أوامر الشراء المفتوحة (غير المستلمة بالكامل بعد) في نموذج الاستلام
 function refreshGrnPoOptions(){
   const sel=document.getElementById('grnPO');
@@ -3242,6 +3259,7 @@ function renderGRNs(){
   if(!body) return;
 
   refreshGrnPoOptions();
+  refreshGrnWarehouseOptions();
 
   const searchEl=document.getElementById('grnSearch');
   const q=(searchEl?.value||'').trim().toLowerCase();
@@ -3260,11 +3278,13 @@ function renderGRNs(){
 
   body.innerHTML=data.map(g=>{
     const sup=(suppliers||[]).find(s=>s.code===g.supplier_code);
+    const wh=(warehouses||[]).find(w=>w.id===g.warehouse_id);
     return `<tr>
       <td>${grnEsc(g.grn_number)}</td>
       <td>${grnEsc(g.grn_date)}</td>
       <td>${grnEsc(sup?sup.name:g.supplier_code)}</td>
       <td>${grnEsc(g.po_number||'-')}</td>
+      <td>${grnEsc(wh?wh.code+' — '+wh.name:'-')}</td>
       <td>${fmt(g.total)}</td>
       <td>${getGrnInvoiceBadge(g)}</td>
     </tr>`;
@@ -3740,6 +3760,9 @@ function openPinvFullEditDialog(invNumber){
 
   const lockedSupplier = !!grn.po_number;
   const supOptions = (suppliers||[]).map(s=>`<option value="${pinvEsc(s.code)}" ${s.code===inv.supplier_code?'selected':''}>${pinvEsc(s.name)} (${pinvEsc(s.code)})</option>`).join('');
+  const whOptions = (warehouses||[]).filter(w=>w.is_active!==false).map(w=>
+    `<option value="${w.id}" ${w.id===grn.warehouse_id?'selected':''}>${pinvEsc(w.code)} — ${pinvEsc(w.name)}</option>`
+  ).join('');
   const ccOptions = '<option value="">— بدون —</option>' + (costCenters||[]).map(c=>
     `<option value="${pinvEsc(c.code)}" ${c.code===inv.cost_center_code?'selected':''}>${pinvEsc(c.code)} — ${pinvEsc(c.name_ar)}</option>`
   ).join('');
@@ -3752,7 +3775,7 @@ function openPinvFullEditDialog(invNumber){
       <h3>تعديل الفاتورة كاملة ${pinvEsc(inv.inv_number)}</h3>
       <button class="btn secondary" onclick="document.getElementById('pinvFullEditDialog').remove()">إغلاق</button>
     </div>
-    <div class="hint" style="margin-bottom:12px">التعديل هنا يشمل الأصناف والكميات والأسعار والمورد. عند الحفظ: تُلغى الفاتورة الحالية وقيدها المحاسبي، ويُعدَّل إذن الاستلام المرتبط، ثم تُرحَّل فاتورة جديدة تلقائياً بنفس رقم الاستلام وبالبيانات المعدَّلة. لن يُسمح بالحفظ لو تأثر أحد الأصناف بحركة مخزون لاحقة (بيع/مرتجع) — استخدم مرتجع مشتريات في هذه الحالة بدلاً من ذلك.</div>
+    <div class="hint" style="margin-bottom:12px">التعديل هنا يشمل الأصناف والكميات والأسعار والمورد والمستودع. عند الحفظ: تُلغى الفاتورة الحالية وقيدها المحاسبي، ويُعدَّل إذن الاستلام المرتبط، ثم تُرحَّل فاتورة جديدة تلقائياً بنفس رقم الاستلام وبالبيانات المعدَّلة. لن يُسمح بالحفظ لو تأثر أحد الأصناف بحركة مخزون لاحقة (بيع/مرتجع) — استخدم مرتجع مشتريات في هذه الحالة بدلاً من ذلك.</div>
     <div class="frow two">
       <div class="field"><label>المورد${lockedSupplier?' (مرتبط بأمر شراء، غير قابل للتغيير)':''}</label>
         <select id="pfeSupplier" ${lockedSupplier?'disabled':''}>${supOptions}</select></div>
@@ -3764,15 +3787,15 @@ function openPinvFullEditDialog(invNumber){
     </div>
     <div class="frow two">
       <div class="field"><label>مركز التكلفة</label><select id="pfeCostCenter">${ccOptions}</select></div>
-      <div class="field"><label>نوع الضريبة</label><select id="pfeTaxType" onchange="recalcPinvFullEditTotals()">${taxOptions}</select></div>
+      <div class="field"><label>المستودع</label><select id="pfeWarehouse">${whOptions}</select></div>
     </div>
     <div class="frow two">
+      <div class="field"><label>نوع الضريبة</label><select id="pfeTaxType" onchange="recalcPinvFullEditTotals()">${taxOptions}</select></div>
       <div class="field"><label>طريقة احتساب الضريبة</label>
         <select id="pfeTaxCalcMethod" onchange="recalcPinvFullEditTotals()">
           <option value="exclusive">غير متضمنة (تُضاف على القيمة)</option>
           <option value="inclusive">متضمنة (القيمة شاملة الضريبة)</option>
         </select></div>
-      <div></div>
     </div>
     <table class="line-items">
       <thead><tr><th style="width:28%">الصنف</th><th style="width:12%">الكمية</th><th style="width:10%">الوحدة</th><th style="width:16%">تكلفة الوحدة</th><th style="width:16%">الإجمالي</th><th></th></tr></thead>
@@ -3877,6 +3900,7 @@ async function submitPinvFullEdit(invNumber, grnNumber, poNumber){
   const cost_center_code=document.getElementById('pfeCostCenter').value||null;
   const tax_type_code=document.getElementById('pfeTaxType').value||null;
   const tax_calc_method=document.getElementById('pfeTaxCalcMethod').value||'exclusive';
+  const warehouse_id=document.getElementById('pfeWarehouse')?.value ? parseInt(document.getElementById('pfeWarehouse').value) : null;
   const valid=pinvFullEditLines.filter(l=>l.itemCode && l.qty>0);
 
   if(!supplier_code){ err.textContent='يرجى اختيار المورد'; return; }
@@ -3891,7 +3915,7 @@ async function submitPinvFullEdit(invNumber, grnNumber, poNumber){
 
     // 2) تعديل إذن الاستلام (يعكس الكمية/التكلفة القديمة بأمان ويطبّق الجديدة)
     await api('PUT', `/api/grn/${encodeURIComponent(grnNumber)}`, {
-      grn_date, supplier_code, po_number: poNumber||null, reference: 'تعديل فاتورة',
+      grn_date, supplier_code, po_number: poNumber||null, reference: 'تعديل فاتورة', warehouse_id,
       lines: valid.map(l=>{
         const it=(items||[]).find(i=>i.code===l.itemCode);
         const factor = it ? (getItemUnitFactor(it, l.unit)||1) : 1;
@@ -3979,6 +4003,7 @@ const PSET_STORAGE_KEY = 'legend_purchase_settings_v1';
 const PSET_DEFAULTS = {
   // عام
   defaultBranch: '',
+  defaultWarehouseId: '',
   defaultCostCenter: '',
   defaultPaymentTerms: 30,
   defaultCurrency: 'SAR',
@@ -4054,6 +4079,13 @@ function populatePurchaseSettingsForm(){
     branchSel.innerHTML = '<option value="">— بدون تحديد —</option>' +
       (branches||[]).map(b=>`<option value="${pinvSettingsEsc(b.code)}">${pinvSettingsEsc(b.name_ar || b.name || b.code)}</option>`).join('');
     branchSel.value = s.defaultBranch || '';
+  }
+
+  const whSel = document.getElementById('psetDefaultWarehouse');
+  if(whSel){
+    whSel.innerHTML = '<option value="">— بدون تحديد —</option>' +
+      (warehouses||[]).filter(w=>w.is_active!==false).map(w=>`<option value="${pinvSettingsEsc(w.id)}">${pinvSettingsEsc(w.code)} — ${pinvSettingsEsc(w.name)}</option>`).join('');
+    whSel.value = s.defaultWarehouseId || '';
   }
 
   const ccSel = document.getElementById('psetDefaultCostCenter');
@@ -4149,6 +4181,7 @@ function savePurchaseSettings(){
 
   const settings = {
     defaultBranch: getVal('psetDefaultBranch',''),
+    defaultWarehouseId: getVal('psetDefaultWarehouse',''),
     defaultCostCenter: getVal('psetDefaultCostCenter',''),
     defaultPaymentTerms: getNum('psetDefaultPaymentTerms', PSET_DEFAULTS.defaultPaymentTerms),
     defaultCurrency: getVal('psetDefaultCurrency', PSET_DEFAULTS.defaultCurrency),
@@ -4216,6 +4249,25 @@ window.resetPurchaseSettingsToDefault = resetPurchaseSettingsToDefault;
 // ============================================================
 let dinvLines=[];
 
+// تعبئة قائمة المستودعات لنموذج الفاتورة المباشرة (تُنشئ استلاماً تلقائياً خلفها)
+function refreshDinvWarehouseOptions(){
+  const sel=document.getElementById('dinvWarehouse');
+  if(!sel) return;
+  const current=sel.value;
+  const active=(warehouses||[]).filter(w=>w.is_active!==false);
+  sel.innerHTML = active.map(w=>`<option value="${w.id}">${pinvEsc(w.code)} — ${pinvEsc(w.name)}</option>`).join('')
+    || '<option value="">— لا توجد مستودعات —</option>';
+  if(current && active.some(w=>String(w.id)===current)){
+    sel.value=current;
+  } else if(typeof loadPurchaseSettings === 'function'){
+    const pset = loadPurchaseSettings();
+    if(pset.defaultWarehouseId && active.some(w=>String(w.id)===String(pset.defaultWarehouseId))){
+      sel.value = String(pset.defaultWarehouseId);
+    }
+  }
+}
+window.refreshDinvWarehouseOptions = refreshDinvWarehouseOptions;
+
 function toggleDirectInvoiceForm(forceOpen){
   const box=document.getElementById('dinvFormBox');
   if(!box) return;
@@ -4225,6 +4277,7 @@ function toggleDirectInvoiceForm(forceOpen){
   if(open){
     if(!dinvLines.length) addDinvLine();
     if(typeof populatePinvTaxTypeSelects === 'function') populatePinvTaxTypeSelects();
+    refreshDinvWarehouseOptions();
     box.scrollIntoView({behavior:'smooth', block:'nearest'});
   }
 }
@@ -4399,6 +4452,7 @@ async function submitDirectPinv(){
   const cost_center_code=document.getElementById('dinvCostCenter').value||null;
   const tax_type_code=document.getElementById('dinvTaxType')?.value||null;
   const tax_calc_method=document.getElementById('dinvTaxCalcMethod')?.value||'exclusive';
+  const warehouse_id=document.getElementById('dinvWarehouse')?.value ? parseInt(document.getElementById('dinvWarehouse').value) : null;
   const err=document.getElementById('dinvErr');
   const valid=dinvLines.filter(l=>l.itemCode && l.qty>0);
   if(!supplier_code){err.textContent='يرجى اختيار المورد'; return;}
@@ -4408,7 +4462,7 @@ async function submitDirectPinv(){
   try{
     await api('POST','/api/purchase-invoices/direct',{
       supplier_code, inv_date, supplier_inv_number, reference, payment_terms_days, cost_center_code,
-      tax_type_code, tax_calc_method,
+      tax_type_code, tax_calc_method, warehouse_id,
       lines: valid.map(l=>{
         const it=(items||[]).find(i=>i.code===l.itemCode);
         const factor = it ? (getItemUnitFactor(it, l.unit)||1) : 1;

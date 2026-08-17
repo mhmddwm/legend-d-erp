@@ -48,6 +48,8 @@ class GoodsReceiptIn(BaseModel):
     supplier_code: str
     po_number: Optional[str] = None
     reference: Optional[str] = None
+    warehouse_id: Optional[int] = None
+    location_id: Optional[int] = None
     lines: List[GRNLineIn]
 
 
@@ -67,6 +69,8 @@ class GoodsReceiptOut(BaseModel):
     supplier_code: str
     po_number: Optional[str]
     reference: Optional[str]
+    warehouse_id: Optional[int] = None
+    location_id: Optional[int] = None
     total: float
     invoice_status: str
     journal_entry_id: Optional[int] = None
@@ -102,6 +106,8 @@ class DirectPurchaseInvoiceIn(BaseModel):
     cost_center_code: Optional[str] = None
     tax_type_code: Optional[str] = None
     tax_calc_method: Optional[str] = "exclusive"
+    warehouse_id: Optional[int] = None
+    location_id: Optional[int] = None
     lines: List[GRNLineIn]
 
 

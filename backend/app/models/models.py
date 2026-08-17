@@ -270,6 +270,10 @@ class StockMove(Base):
     move_type = Column(String(30), nullable=False)
     reference = Column(String(200))
 
+    # المستودع الذي حدثت فيه الحركة (اختياري للتوافق مع الحركات
+    # القديمة قبل تفعيل تتبع المستودعات؛ يُملأ تلقائياً في الحركات الجديدة)
+    warehouse_id = Column(Integer, ForeignKey("warehouses.id"), nullable=True)
+
     qty = Column(Numeric(18,4), nullable=False)
     unit_cost = Column(Numeric(18,4), nullable=False, default=0)
     balance_after = Column(Numeric(18,4), nullable=False)
@@ -385,6 +389,11 @@ class GoodsReceipt(Base):
     )
 
     reference = Column(String(200))
+
+    # المستودع الذي استُلمت إليه البضاعة (اختياري للتوافق مع أذون
+    # الاستلام القديمة قبل تفعيل تتبع المستودعات)
+    warehouse_id = Column(Integer, ForeignKey("warehouses.id"), nullable=True)
+    location_id = Column(Integer, ForeignKey("warehouse_locations.id"), nullable=True)
 
     total = Column(
         Numeric(18,2),
