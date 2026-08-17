@@ -3297,7 +3297,41 @@ html[dir="ltr"] .brand-center{direction:ltr;}
   <div class="panel" id="panel-account_info"><div class="formcard"><h3>معلومات الحساب</h3><div class="empty-msg">جاهزة للتطوير</div></div></div>
 
 <!-- الأقسام التالية -->
-<div class="panel" id="panel-account_settings_general"><div class="formcard"><h3>إعدادات الحساب</h3><div class="empty-msg">جاهزة للتطوير</div></div></div>
+<div class="panel" id="panel-account_settings_general">
+  <div class="pset-page erp-watermark-page">
+    <div class="tax-watermark">LEGEND D ERP SYS<br><span>إعدادات الحساب</span></div>
+    <div class="formcard pset-card">
+      <div class="tax-page-head">
+        <div>
+          <span class="tax-mini-label">الإعدادات العامة</span>
+          <h2>إعدادات الحساب</h2>
+          <p>إعدادات عامة لحساب النظام، وأدوات إدارية حساسة تتطلب تأكيداً صريحاً.</p>
+        </div>
+      </div>
+
+      <div class="pset-body" style="display:block">
+        <div class="pset-section active" style="margin-top:6px">
+          <div class="pset-section-head" style="border-color:#f3caca">
+            <h3 style="color:#c62828">⚠️ منطقة الخطر (Danger Zone)</h3>
+            <p>إجراءات إدارية لا يمكن التراجع عنها — استخدمها بحذر شديد.</p>
+          </div>
+          <div class="pset-group" style="border-color:#f3caca;background:#fffaf9">
+            <div class="pset-row">
+              <div class="pset-row-text">
+                <label>تصفير كل الحركات التشغيلية والمحاسبية</label>
+                <small>حذف نهائي لكل القيود والفواتير والمرتجعات والمدفوعات وحركات المخزون، مع الإبقاء الكامل على دليل الحسابات والموردين والأصناف والمستودعات وإعدادات النظام. مفيد لبدء تشغيل حقيقي بعد فترة تجريبية.</small>
+              </div>
+              <div class="pset-row-control">
+                <button type="button" class="btn secondary" style="border-color:#c62828;color:#c62828" onclick="openResetTransactionsDialog()">🗑️ تصفير كل الحركات</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="panel" id="panel-sequence_settings">
     <div class="sequence-page">
         <aside class="sequence-list-card">
@@ -3456,9 +3490,6 @@ html[dir="ltr"] .brand-center{direction:ltr;}
           <span class="tax-mini-label">الحسابات / التقارير</span>
           <h2>التقارير المالية</h2>
           <p>ميزان المراجعة، قائمة الدخل، والميزانية العمومية — محسوبة مباشرة من القيود المرحّلة الفعلية بالنظام.</p>
-        </div>
-        <div class="tax-head-actions">
-          <button type="button" class="btn secondary" style="border-color:#c62828;color:#c62828" onclick="openResetTransactionsDialog()">🗑️ تصفير كل الحركات</button>
         </div>
       </div>
 
