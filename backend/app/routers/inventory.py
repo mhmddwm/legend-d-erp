@@ -3,11 +3,12 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 from datetime import date as date_type
 from app.database import get_db
-from app.models.models import Item, StockMove, Supplier, PurchaseInvoice, PurchaseReturn, Account, SupplierPayment, SupplierPaymentAllocation, Category, Brand
+from app.models.models import Item, StockMove, Supplier, PurchaseInvoice, PurchaseReturn, Account, SupplierPayment, SupplierPaymentAllocation, Category, Brand, UnitTemplate
 from app.models.warehouse_stock import WarehouseStock
 from app.schemas.inventory import (
     ItemIn, ItemUpdate, ItemOut, StockMoveOut, SupplierIn, SupplierUpdate, SupplierOut,
     CategoryIn, CategoryUpdate, CategoryOut, BrandIn, BrandUpdate, BrandOut,
+    UnitTemplateIn, UnitTemplateUpdate, UnitTemplateOut,
 )
 from app.schemas.purchasing import SupplierOpenInvoiceOut
 
@@ -16,6 +17,56 @@ stock_router = APIRouter(prefix="/api/stock-moves", tags=["StockMoves"])
 supplier_router = APIRouter(prefix="/api/suppliers", tags=["Suppliers"])
 category_router = APIRouter(prefix="/api/categories", tags=["Categories"])
 brand_router = APIRouter(prefix="/api/brands", tags=["Brands"])
+unit_template_router = APIRouter(prefix="/api/unit-templates", tags=["UnitTemplates"])
+
+
+# ============================================================
+# UNIT TEMPLATES (قوالب الوحدات)
+# ============================================================
+
+@unit_template_router.get("", response_model=list[UnitTemplateOut])
+def list_unit_templates(db: Session = Depends(get_db)):
+    return db.query(UnitTemplate).order_by(UnitTemplate.code.asc()).all()
+
+
+@unit_template_router.post("", response_model=UnitTemplateOut, status_code=201)
+def create_unit_template(payload: UnitTemplateIn, db: Session = Depends(get_db)):
+    if db.query(UnitTemplate).filter(UnitTemplate.code == payload.code).first():
+        raise HTTPException(400, "كود قالب الوحدة مستخدم من قبل")
+    if payload.higher_unit and (not payload.factor or payload.factor <= 1):
+        raise HTTPException(400, "معامل التحويل للوحدة الأعلى يجب أن يكون أكبر من 1")
+    tpl = UnitTemplate(**payload.model_dump())
+    db.add(tpl)
+    db.commit()
+    db.refresh(tpl)
+    return tpl
+
+
+@unit_template_router.put("/{code}", response_model=UnitTemplateOut)
+def update_unit_template(code: str, payload: UnitTemplateUpdate, db: Session = Depends(get_db)):
+    tpl = db.query(UnitTemplate).filter(UnitTemplate.code == code).first()
+    if not tpl:
+        raise HTTPException(404, "قالب الوحدة غير موجود")
+    data = payload.model_dump(exclude_unset=True)
+    new_factor = data.get("factor", tpl.factor)
+    new_higher = data.get("higher_unit", tpl.higher_unit)
+    if new_higher and (not new_factor or new_factor <= 1):
+        raise HTTPException(400, "معامل التحويل للوحدة الأعلى يجب أن يكون أكبر من 1")
+    for k, v in data.items():
+        setattr(tpl, k, v)
+    db.commit()
+    db.refresh(tpl)
+    return tpl
+
+
+@unit_template_router.delete("/{code}", status_code=204)
+def delete_unit_template(code: str, db: Session = Depends(get_db)):
+    tpl = db.query(UnitTemplate).filter(UnitTemplate.code == code).first()
+    if not tpl:
+        raise HTTPException(404, "قالب الوحدة غير موجود")
+    db.delete(tpl)
+    db.commit()
+    return None
 
 
 # ============================================================

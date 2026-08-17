@@ -170,3 +170,36 @@ class SupplierOut(BaseModel):
 
     class Config:
         from_attributes = True
+
+class UnitTemplateIn(BaseModel):
+    code: str
+    name: str
+    base_unit: str
+    higher_unit: Optional[str] = None
+    factor: float = 1
+    min_price: Optional[float] = None
+    max_price: Optional[float] = None
+
+
+class UnitTemplateUpdate(BaseModel):
+    name: Optional[str] = None
+    base_unit: Optional[str] = None
+    higher_unit: Optional[str] = None
+    factor: Optional[float] = None
+    min_price: Optional[float] = None
+    max_price: Optional[float] = None
+    is_active: Optional[bool] = None
+
+
+class UnitTemplateOut(BaseModel):
+    code: str
+    name: str
+    base_unit: str
+    higher_unit: Optional[str] = None
+    factor: float = 1
+    min_price: Optional[float] = None
+    max_price: Optional[float] = None
+    is_active: bool = True
+
+    class Config:
+        from_attributes = True

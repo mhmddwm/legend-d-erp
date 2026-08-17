@@ -709,3 +709,19 @@ class SupplierPaymentAllocation(Base):
     payment_number = Column(String(30), ForeignKey("supplier_payments.payment_number"), nullable=False)
     inv_number = Column(String(30), ForeignKey("purchase_invoices.inv_number"), nullable=False)
     amount = Column(Numeric(18, 2), nullable=False, default=0)
+
+
+class UnitTemplate(Base):
+    """قالب وحدة: وحدة أساسية + وحدة أعلى اختيارية بمعامل تحويل واحد
+    (مثال: قطعة ← كرتون ×12)، مع سعر أدنى/أعلى اختياري لكل مستوى."""
+    __tablename__ = "unit_templates"
+
+    code = Column(String(30), primary_key=True)
+    name = Column(String(200), nullable=False)
+    base_unit = Column(String(50), nullable=False)
+    higher_unit = Column(String(50), nullable=True)
+    factor = Column(Numeric(18, 4), nullable=False, default=1)
+    min_price = Column(Numeric(18, 4), nullable=True)
+    max_price = Column(Numeric(18, 4), nullable=True)
+    is_active = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())

@@ -150,6 +150,10 @@ app.include_router(
     inventory.brand_router
 )
 
+app.include_router(
+    inventory.unit_template_router
+)
+
 
 # Purchasing
 app.include_router(
