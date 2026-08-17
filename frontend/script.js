@@ -3531,6 +3531,7 @@ function ensurePinvActionsMenu(){
       <button onclick="pinvMenuRun('pdf')">📄 طباعة PDF</button>
       <button onclick="pinvMenuRun('print')">🖨️ طباعة</button>
       <button onclick="pinvMenuRun('copy')">📋 نسخ</button>
+      <button onclick="pinvMenuRun('return')">↩️ مرتجع</button>
       <button onclick="pinvMenuRun('email')">✉️ إرسال عبر البريد</button>
       <button onclick="pinvMenuRun('whatsapp')">💬 إرسال عبر واتساب</button>
       <hr>
@@ -3590,6 +3591,7 @@ function pinvMenuRun(action){
   else if(action==='pdf') openPinvPrintTab(invNumber, {autoPrint:true});
   else if(action==='print') openPinvPrintTab(invNumber, {autoPrint:true});
   else if(action==='copy') copyPinvToNewInvoice(invNumber);
+  else if(action==='return') startReturnFromInvoice(invNumber);
   else if(action==='email') sendPinvByEmail(invNumber);
   else if(action==='whatsapp') sendPinvByWhatsapp(invNumber);
   else if(action==='delete') deletePinvInvoice(invNumber);
@@ -3597,7 +3599,7 @@ function pinvMenuRun(action){
 window.pinvMenuRun = pinvMenuRun;
 
 // بناء صفحة HTML مطبوعة/قابلة للعرض للفاتورة (تُفتح في تبويب جديد)
-function buildPinvPrintHtml(inv){
+function buildPinvDetailPageHtml(inv){
   const sup=(suppliers||[]).find(s=>s.code===inv.supplier_code);
   const cc=(costCenters||[]).find(c=>c.code===inv.cost_center_code);
   const taxType=(taxTypes||[]).find(t=>t.code===inv.tax_type_code);
@@ -3612,7 +3614,8 @@ function buildPinvPrintHtml(inv){
       <td class="num">${fmt(l.qty*l.unit_cost)}</td>
     </tr>`;
   }).join('');
-  const badge = inv.status==='cancelled'
+  const isCancelled = inv.status==='cancelled';
+  const badge = isCancelled
     ? '<span class="pinv-badge cancelled">ملغاة</span>'
     : '<span class="pinv-badge">مرحّلة</span>';
   const hasTax = inv.tax_amount && Number(inv.tax_amount) > 0;
@@ -3620,56 +3623,308 @@ function buildPinvPrintHtml(inv){
     ? `<div class="row"><span>الصافي قبل الضريبة</span><span>${fmt(inv.subtotal)}</span></div>
        <div class="row"><span>الضريبة${taxType?` (${pinvEsc(taxType.name_ar||taxType.code)} ${fmt(taxType.rate)}%)`:''}</span><span>${fmt(inv.tax_amount)}</span></div>`
     : '';
+  const ccOptionsHtml = (costCenters||[]).map(c=>
+    `<option value="${pinvEsc(c.code)}" ${c.code===inv.cost_center_code?'selected':''}>${pinvEsc(c.code)} — ${pinvEsc(c.name_ar)}</option>`
+  ).join('');
+
   return `<!DOCTYPE html>
 <html lang="ar" dir="rtl"><head><meta charset="UTF-8">
 <title>فاتورة مشتريات ${pinvEsc(inv.inv_number)}</title>
-<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;900&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&display=swap" rel="stylesheet">
 <style>
   *{box-sizing:border-box;}
-  body{font-family:'Cairo',sans-serif;margin:0;padding:32px;color:#1c2430;background:#fff;}
-  .pinv-print-head{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #1c2430;padding-bottom:16px;margin-bottom:22px;}
-  .pinv-print-head h1{font-size:21px;margin:0 0 6px;}
-  .pinv-print-head .muted{color:#666;font-size:13px;}
-  .pinv-badge{display:inline-block;padding:4px 12px;border-radius:14px;font-size:12px;font-weight:700;background:#2e7d3222;color:#2e7d32;border:1px solid #2e7d3255;}
+  body{font-family:'Cairo',sans-serif;margin:0;background:#eef2f7;color:#1c2430;}
+  .page{max-width:980px;margin:0 auto;padding:24px 20px 60px;}
+
+  /* شريط الإجراءات */
+  .toolbar{position:sticky;top:0;z-index:20;background:#0f2744;border-radius:0 0 16px 16px;padding:12px 18px;
+    display:flex;align-items:center;gap:8px;flex-wrap:wrap;box-shadow:0 6px 18px rgba(15,39,68,.25);margin-bottom:22px;}
+  .toolbar .tb-title{color:#fff;font-weight:800;font-size:14px;margin-left:auto;padding-right:6px;white-space:nowrap;opacity:.9}
+  .tb-btn{display:flex;align-items:center;gap:6px;background:rgba(255,255,255,.08);color:#eaf1fb;border:1px solid rgba(255,255,255,.14);
+    border-radius:10px;padding:8px 13px;font-family:inherit;font-size:12.5px;font-weight:700;cursor:pointer;transition:.15s;white-space:nowrap;}
+  .tb-btn:hover{background:rgba(255,255,255,.18);border-color:rgba(255,255,255,.3);transform:translateY(-1px);}
+  .tb-btn.danger{background:rgba(230,80,80,.18);border-color:rgba(230,80,80,.35);color:#ffd7d7;}
+  .tb-btn.danger:hover{background:rgba(230,80,80,.3);}
+  .tb-btn.primary{background:#1f78d1;border-color:#1f78d1;color:#fff;}
+  .tb-btn.primary:hover{background:#2a86e0;}
+  .tb-btn:disabled{opacity:.4;cursor:not-allowed;transform:none;}
+
+  .card{background:#fff;border-radius:16px;box-shadow:0 4px 18px rgba(15,39,68,.07);padding:26px;margin-bottom:18px;}
+  .doc-head{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #0f2744;padding-bottom:16px;margin-bottom:22px;}
+  .doc-head h1{font-size:20px;margin:0 0 6px;}
+  .doc-head .muted{color:#667;font-size:13px;}
+  .pinv-badge{display:inline-block;padding:5px 14px;border-radius:14px;font-size:12px;font-weight:800;background:#2e7d3222;color:#2e7d32;border:1px solid #2e7d3255;}
   .pinv-badge.cancelled{background:#c6282822;color:#c62828;border-color:#c6282855;}
-  .pinv-info-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px 24px;margin-bottom:26px;}
+  .pinv-info-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px 24px;margin-bottom:8px;}
   .pinv-info-grid div{font-size:13px;}
-  .pinv-info-grid label{display:block;color:#888;font-size:11px;margin-bottom:3px;}
+  .pinv-info-grid label{display:block;color:#8a95a8;font-size:11px;margin-bottom:3px;}
+
   table{width:100%;border-collapse:collapse;font-size:13px;}
-  th,td{border:1px solid #ddd;padding:8px 10px;text-align:right;}
-  th{background:#f4f5f7;font-weight:700;}
+  th,td{border:1px solid #e6eaf0;padding:9px 11px;text-align:right;}
+  th{background:#f4f6fa;font-weight:800;color:#334;}
   td.num,th.num{text-align:left;font-family:monospace,'Cairo';}
   .pinv-total-row{margin-top:16px;display:flex;justify-content:flex-end;}
-  .pinv-total-row .box{min-width:280px;display:flex;flex-direction:column;gap:6px;font-size:13px;border-top:2px solid #1c2430;padding-top:10px;}
+  .pinv-total-row .box{min-width:290px;display:flex;flex-direction:column;gap:6px;font-size:13px;border-top:2px solid #0f2744;padding-top:10px;}
   .pinv-total-row .box .row{display:flex;justify-content:space-between;color:#555;}
-  .pinv-total-row .box .grand{display:flex;justify-content:space-between;font-size:16px;font-weight:800;color:#1c2430;margin-top:4px;}
-  .pinv-print-toolbar{margin-bottom:20px;}
-  .pinv-print-toolbar button{font-family:'Cairo',sans-serif;padding:9px 18px;border-radius:8px;border:1px solid #1c2430;background:#1c2430;color:#fff;cursor:pointer;font-size:13px;font-weight:600;}
-  @media print{ .pinv-print-toolbar{display:none;} body{padding:0;} }
+  .pinv-total-row .box .grand{display:flex;justify-content:space-between;font-size:17px;font-weight:800;color:#0f2744;margin-top:4px;}
+
+  .notes-box{background:#fbfbfd;border:1px dashed #d3dae5;border-radius:12px;padding:14px 16px;font-size:13px;color:#445;white-space:pre-wrap;min-height:20px;}
+  .notes-box:empty::before, .notes-box.empty::before{content:'لا توجد ملاحظات على هذه الفاتورة بعد.';color:#9aa5b5;}
+  .section-title{font-size:14px;font-weight:800;color:#0f2744;margin:0 0 10px;display:flex;align-items:center;gap:8px;}
+
+  /* سجل النشاط */
+  .activity-item{display:flex;gap:12px;padding:10px 0;border-bottom:1px solid #f0f2f6;}
+  .activity-item:last-child{border-bottom:none;}
+  .activity-dot{width:9px;height:9px;border-radius:50%;background:#1f78d1;margin-top:6px;flex-shrink:0;}
+  .activity-dot.cancel{background:#c62828;}
+  .activity-dot.return{background:#b45309;}
+  .activity-body{flex:1;font-size:13px;}
+  .activity-action{font-weight:800;color:#1c2430;}
+  .activity-meta{color:#8a95a8;font-size:11.5px;margin-top:2px;}
+  .activity-details{color:#556;font-size:12.5px;margin-top:3px;}
+  .activity-empty{color:#9aa5b5;font-size:13px;padding:6px 0;}
+  .activity-loading{color:#9aa5b5;font-size:13px;padding:6px 0;}
+
+  /* حقل ملاحظة/نافذة داخلية بسيطة */
+  .inline-modal-backdrop{position:fixed;inset:0;background:rgba(15,25,40,.45);display:none;align-items:center;justify-content:center;z-index:50;}
+  .inline-modal-backdrop.show{display:flex;}
+  .inline-modal{background:#fff;border-radius:14px;padding:20px;width:92%;max-width:420px;box-shadow:0 20px 50px rgba(0,0,0,.25);}
+  .inline-modal h3{margin:0 0 12px;font-size:15px;}
+  .inline-modal textarea, .inline-modal select{width:100%;font-family:inherit;font-size:13px;padding:10px;border:1px solid #d3dae5;border-radius:9px;resize:vertical;min-height:90px;}
+  .inline-modal select{min-height:auto;height:42px;}
+  .inline-modal .actions{display:flex;gap:8px;justify-content:flex-end;margin-top:14px;}
+  .inline-modal button{font-family:inherit;font-size:13px;font-weight:700;padding:9px 16px;border-radius:9px;border:1px solid #d3dae5;background:#fff;cursor:pointer;}
+  .inline-modal button.primary{background:#0f2744;color:#fff;border-color:#0f2744;}
+  .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#0f2744;color:#fff;padding:10px 20px;border-radius:10px;font-size:13px;font-weight:700;z-index:60;box-shadow:0 8px 20px rgba(0,0,0,.25);display:none;}
+
+  @media print{
+    body{background:#fff;}
+    .toolbar, .inline-modal-backdrop, .toast{display:none !important;}
+    .page{padding:0;max-width:none;}
+    .card{box-shadow:none;border-radius:0;padding:0;margin-bottom:16px;}
+  }
 </style></head>
 <body>
-  <div class="pinv-print-toolbar"><button onclick="window.print()">🖨️ طباعة</button></div>
-  <div class="pinv-print-head">
-    <div>
-      <h1>LEGEND D — فاتورة مشتريات</h1>
-      <div class="muted">رقم الفاتورة: ${pinvEsc(inv.inv_number)}</div>
+
+  <div class="toolbar">
+    <button class="tb-btn primary" onclick="pdAction('edit')" ${isCancelled?'disabled':''}>✏️ تعديل</button>
+    <button class="tb-btn" onclick="pdAction('payment')">💳 إضافة عملية دفع</button>
+    <button class="tb-btn" onclick="pdAction('note')" ${isCancelled?'disabled':''}>📝 إضافة ملاحظة</button>
+    <button class="tb-btn" onclick="pdAction('costcenter')" ${isCancelled?'disabled':''}>🏷️ تعيين مركز تكلفة</button>
+    <button class="tb-btn" onclick="pdAction('print')">🖨️ طباعة</button>
+    <button class="tb-btn" onclick="pdAction('pdf')">📄 PDF</button>
+    <button class="tb-btn" onclick="pdAction('copy')">⧉ نسخ</button>
+    <button class="tb-btn" onclick="pdAction('creditnote')" ${isCancelled?'disabled':''}>↩️ إشعار دائن</button>
+    <button class="tb-btn danger" onclick="pdAction('delete')" ${isCancelled?'disabled':''}>🗑️ حذف</button>
+    <span class="tb-title">فاتورة مشتريات ${pinvEsc(inv.inv_number)}</span>
+  </div>
+
+  <div class="page">
+    <div class="card">
+      <div class="doc-head">
+        <div>
+          <h1>LEGEND D — فاتورة مشتريات</h1>
+          <div class="muted">رقم الفاتورة: ${pinvEsc(inv.inv_number)}</div>
+        </div>
+        <div>${badge}</div>
+      </div>
+      <div class="pinv-info-grid">
+        <div><label>المورد</label>${pinvEsc(sup?sup.name:inv.supplier_code)}</div>
+        <div><label>تاريخ الفاتورة</label>${pinvEsc(inv.inv_date)}</div>
+        <div><label>تاريخ الاستحقاق</label>${pinvEsc(inv.due_date||'-')}</div>
+        <div><label>الاستلام المرتبط</label>${pinvEsc(inv.grn_number)}</div>
+        <div><label>رقم فاتورة المورد</label>${pinvEsc(inv.supplier_inv_number||'-')}</div>
+        <div><label>مركز التكلفة</label><span id="pdCostCenterLabel">${pinvEsc(cc?cc.code+' — '+cc.name_ar:'— بدون —')}</span></div>
+      </div>
     </div>
-    <div>${badge}</div>
+
+    <div class="card">
+      <table><thead><tr><th>#</th><th>الصنف</th><th class="num">الكمية</th><th class="num">الوحدة</th><th class="num">التكلفة</th><th class="num">الإجمالي</th></tr></thead>
+      <tbody>${rows}</tbody></table>
+      <div class="pinv-total-row"><div class="box">
+        ${taxSummaryRows}
+        <div class="grand"><span>الإجمالي الكلي</span><span>${fmt(inv.total)}</span></div>
+      </div></div>
+    </div>
+
+    <div class="card">
+      <div class="section-title">📝 ملاحظات</div>
+      <div class="notes-box ${inv.notes?'':'empty'}" id="pdNotesBox">${pinvEsc(inv.notes||'')}</div>
+    </div>
+
+    <div class="card">
+      <div class="section-title">🕘 سجل النشاط</div>
+      <div id="pdActivityList"><div class="activity-loading">جارٍ تحميل سجل النشاط...</div></div>
+    </div>
   </div>
-  <div class="pinv-info-grid">
-    <div><label>المورد</label>${pinvEsc(sup?sup.name:inv.supplier_code)}</div>
-    <div><label>تاريخ الفاتورة</label>${pinvEsc(inv.inv_date)}</div>
-    <div><label>تاريخ الاستحقاق</label>${pinvEsc(inv.due_date||'-')}</div>
-    <div><label>الاستلام المرتبط</label>${pinvEsc(inv.grn_number)}</div>
-    <div><label>رقم فاتورة المورد</label>${pinvEsc(inv.supplier_inv_number||'-')}</div>
-    <div><label>مركز التكلفة</label>${pinvEsc(cc?cc.code+' — '+cc.name_ar:'—')}</div>
+
+  <div class="inline-modal-backdrop" id="pdNoteModal">
+    <div class="inline-modal">
+      <h3>إضافة / تعديل ملاحظة</h3>
+      <textarea id="pdNoteInput"></textarea>
+      <div class="actions">
+        <button onclick="pdCloseModal('pdNoteModal')">إلغاء</button>
+        <button class="primary" onclick="pdSaveNote()">حفظ</button>
+      </div>
+    </div>
   </div>
-  <table><thead><tr><th>#</th><th>الصنف</th><th class="num">الكمية</th><th class="num">الوحدة</th><th class="num">التكلفة</th><th class="num">الإجمالي</th></tr></thead>
-  <tbody>${rows}</tbody></table>
-  <div class="pinv-total-row"><div class="box">
-    ${taxSummaryRows}
-    <div class="grand"><span>الإجمالي الكلي</span><span>${fmt(inv.total)}</span></div>
-  </div></div>
+
+  <div class="inline-modal-backdrop" id="pdCostCenterModal">
+    <div class="inline-modal">
+      <h3>تعيين مركز التكلفة</h3>
+      <select id="pdCostCenterInput"><option value="">— بدون —</option>${ccOptionsHtml}</select>
+      <div class="actions">
+        <button onclick="pdCloseModal('pdCostCenterModal')">إلغاء</button>
+        <button class="primary" onclick="pdSaveCostCenter()">حفظ</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="pdToast"></div>
+
+<script>
+(function(){
+  const API_BASE = ${JSON.stringify(API)};
+  const INV_NUMBER = ${JSON.stringify(inv.inv_number)};
+  const actor = localStorage.getItem('legend_current_user') || 'مدير النظام';
+
+  function toast(msg, isError){
+    const t=document.getElementById('pdToast');
+    t.textContent=msg;
+    t.style.background = isError ? '#c62828' : '#0f2744';
+    t.style.display='block';
+    clearTimeout(window._pdToastTimer);
+    window._pdToastTimer=setTimeout(()=>{ t.style.display='none'; }, 3200);
+  }
+
+  async function apiCall(method, path, body){
+    const opts={method, headers:{'Content-Type':'application/json'}};
+    if(body) opts.body=JSON.stringify(body);
+    const res=await fetch(API_BASE+path, opts);
+    const json=await res.json().catch(()=>({}));
+    if(!res.ok) throw new Error(json.detail || json.message || 'خطأ في الخادم');
+    return json;
+  }
+
+  window.pdCloseModal = function(id){ document.getElementById(id).classList.remove('show'); };
+
+  window.pdAction = function(action){
+    if(action==='print'){ window.print(); return; }
+    if(action==='pdf'){ window.print(); return; }
+
+    if(action==='edit'){
+      if(window.opener && !window.opener.closed && typeof window.opener.openPinvFullEditDialog==='function'){
+        window.opener.openPinvFullEditDialog(INV_NUMBER);
+        window.opener.focus();
+      } else { toast('افتح الشاشة الرئيسية أولاً لاستخدام التعديل الكامل', true); }
+      return;
+    }
+    if(action==='copy'){
+      if(window.opener && !window.opener.closed && typeof window.opener.copyPinvToNewInvoice==='function'){
+        window.opener.copyPinvToNewInvoice(INV_NUMBER);
+        window.opener.focus();
+      } else { toast('افتح الشاشة الرئيسية أولاً لاستخدام النسخ', true); }
+      return;
+    }
+    if(action==='creditnote'){
+      if(window.opener && !window.opener.closed && typeof window.opener.startReturnFromInvoice==='function'){
+        window.opener.startReturnFromInvoice(INV_NUMBER);
+        window.opener.focus();
+      } else { toast('افتح الشاشة الرئيسية أولاً — إشعار الدائن يُصدَر عبر شاشة مرتجعات المشتريات', true); }
+      return;
+    }
+    if(action==='payment'){
+      toast('شاشة مدفوعات الموردين لسه قيد التطوير بالنظام — هتتفعّل قريباً', true);
+      return;
+    }
+    if(action==='note'){
+      document.getElementById('pdNoteInput').value = document.getElementById('pdNotesBox').textContent.trim();
+      document.getElementById('pdNoteModal').classList.add('show');
+      return;
+    }
+    if(action==='costcenter'){
+      document.getElementById('pdCostCenterModal').classList.add('show');
+      return;
+    }
+    if(action==='delete'){
+      if(!confirm('سيتم إلغاء الفاتورة ${pinvEsc(inv.inv_number)} (وليس حذفها نهائياً) — سيُلغى قيدها المحاسبي ويعود إذن الاستلام قابلاً للفوترة من جديد. متابعة؟')) return;
+      apiCall('POST', '/api/purchase-invoices/'+encodeURIComponent(INV_NUMBER)+'/cancel?actor='+encodeURIComponent(actor))
+        .then(()=>{
+          toast('تم إلغاء الفاتورة');
+          if(window.opener && !window.opener.closed && typeof window.opener.loadAll==='function') window.opener.loadAll();
+          setTimeout(()=>location.reload(), 900);
+        })
+        .catch(e=>toast(e.message, true));
+      return;
+    }
+  };
+
+  window.pdSaveNote = function(){
+    const notes = document.getElementById('pdNoteInput').value;
+    apiCall('PATCH', '/api/purchase-invoices/'+encodeURIComponent(INV_NUMBER)+'?actor='+encodeURIComponent(actor), {notes})
+      .then(()=>{
+        const box=document.getElementById('pdNotesBox');
+        box.textContent = notes;
+        box.classList.toggle('empty', !notes);
+        pdCloseModal('pdNoteModal');
+        toast('تم حفظ الملاحظة');
+        loadActivity();
+        if(window.opener && !window.opener.closed && typeof window.opener.loadAll==='function') window.opener.loadAll();
+      })
+      .catch(e=>toast(e.message, true));
+  };
+
+  window.pdSaveCostCenter = function(){
+    const sel=document.getElementById('pdCostCenterInput');
+    const cost_center_code = sel.value || null;
+    apiCall('PATCH', '/api/purchase-invoices/'+encodeURIComponent(INV_NUMBER)+'?actor='+encodeURIComponent(actor), {cost_center_code})
+      .then(()=>{
+        document.getElementById('pdCostCenterLabel').textContent = sel.value ? sel.options[sel.selectedIndex].textContent : '— بدون —';
+        pdCloseModal('pdCostCenterModal');
+        toast('تم تحديث مركز التكلفة');
+        loadActivity();
+        if(window.opener && !window.opener.closed && typeof window.opener.loadAll==='function') window.opener.loadAll();
+      })
+      .catch(e=>toast(e.message, true));
+  };
+
+  const ACTION_LABELS = {
+    created: {icon:'✅', text:'إنشاء الفاتورة', cls:''},
+    edited: {icon:'✏️', text:'تعديل بيانات الفاتورة', cls:''},
+    cancelled: {icon:'🗑️', text:'إلغاء الفاتورة', cls:'cancel'},
+    return_created: {icon:'↩️', text:'إنشاء مرتجع مرتبط', cls:'return'},
+    return_cancelled: {icon:'↩️', text:'إلغاء مرتجع مرتبط', cls:'return'},
+  };
+
+  function fmtDateTime(iso){
+    try{
+      const d=new Date(iso);
+      return d.toLocaleString('ar-EG', {year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'});
+    }catch(e){ return iso; }
+  }
+
+  function loadActivity(){
+    const box=document.getElementById('pdActivityList');
+    apiCall('GET', '/api/purchase-invoices/'+encodeURIComponent(INV_NUMBER)+'/activity')
+      .then(list=>{
+        if(!list || !list.length){ box.innerHTML='<div class="activity-empty">لا يوجد سجل نشاط بعد.</div>'; return; }
+        box.innerHTML = list.slice().reverse().map(a=>{
+          const meta = ACTION_LABELS[a.action] || {icon:'•', text:a.action, cls:''};
+          return '<div class="activity-item">'
+            + '<div class="activity-dot '+meta.cls+'"></div>'
+            + '<div class="activity-body">'
+            +   '<div class="activity-action">'+meta.icon+' '+meta.text+'</div>'
+            +   '<div class="activity-meta">'+fmtDateTime(a.created_at)+' — بواسطة '+(a.actor||'مستخدم النظام')+'</div>'
+            +   (a.details ? '<div class="activity-details">'+a.details+'</div>' : '')
+            + '</div>'
+          + '</div>';
+        }).join('');
+      })
+      .catch(()=>{ box.innerHTML='<div class="activity-empty">تعذّر تحميل سجل النشاط.</div>'; });
+  }
+  loadActivity();
+})();
+</script>
 </body></html>`;
 }
 
@@ -3680,13 +3935,33 @@ function openPinvPrintTab(invNumber, opts){
   const w=window.open('', '_blank');
   if(!w){ alert('يرجى السماح بفتح النوافذ المنبثقة لعرض الفاتورة'); return; }
   w.document.open();
-  w.document.write(buildPinvPrintHtml(inv));
+  w.document.write(buildPinvDetailPageHtml(inv));
   w.document.close();
   if(opts && opts.autoPrint){
     w.onload=()=>{ setTimeout(()=>{ try{ w.print(); }catch(err){} }, 300); };
   }
 }
 window.openPinvPrintTab = openPinvPrintTab;
+
+// بدء مرتجع (أو "إشعار دائن") من فاتورة محدَّدة مباشرة: يفتح شاشة
+// المرتجعات ويطوي/يفتح نموذج مرتجع جديد بمورد وفاتورة هذه الفاتورة
+// مُختارين تلقائياً، بدل ما يضطر المستخدم يدوّر عليها من جديد
+function startReturnFromInvoice(invNumber){
+  const inv=(invoices||[]).find(i=>i.inv_number===invNumber);
+  if(!inv) return;
+  if(inv.status==='cancelled'){ alert('لا يمكن إنشاء مرتجع على فاتورة ملغاة'); return; }
+  if(typeof openSubModule==='function') openSubModule('مرتجعات المشتريات');
+  setTimeout(()=>{
+    if(typeof togglePrtNewForm==='function') togglePrtNewForm(true);
+    const supSel=document.getElementById('prtSupplier');
+    if(supSel){ supSel.value=inv.supplier_code; if(typeof onPrtSupplierChange==='function') onPrtSupplierChange(); }
+    setTimeout(()=>{
+      const invSel=document.getElementById('prtInvoice');
+      if(invSel){ invSel.value=inv.inv_number; if(typeof onPrtInvoiceChange==='function') onPrtInvoiceChange(); }
+    }, 60);
+  }, 60);
+}
+window.startReturnFromInvoice = startReturnFromInvoice;
 
 // تعديل بيانات الفاتورة (الحقول غير المالية فقط، حفاظاً على سلامة القيود المرحّلة)
 function openPinvEditDialog(invNumber){

@@ -1,6 +1,7 @@
 from datetime import date
+from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -26,6 +27,7 @@ from app.models.models import (
 from app.models.warehouse import Warehouse
 from app.models.location import WarehouseLocation
 from app.models.warehouse_stock import WarehouseStock
+from app.models.audit_log import AuditLog
 from app.schemas.inventory import (
     ItemIn,
     ItemOut,
@@ -36,6 +38,7 @@ from app.schemas.inventory import (
     SupplierUpdate,
 )
 from app.schemas.purchasing import (
+    AuditLogOut,
     DirectPurchaseInvoiceIn,
     GoodsReceiptIn,
     GoodsReceiptOut,
@@ -69,6 +72,19 @@ prt_router = APIRouter(
 # =========================================================
 def _to_float(value) -> float:
     return float(value or 0)
+
+
+def _log_activity(db: Session, entity_type: str, entity_id: str, action: str, actor: str = None, details: str = None):
+    """يسجّل حركة فعلية بجدول audit_log (بديل AuditService الهيكلي غير
+    المتصل بتخزين). لا يستدعي commit بنفسه — يُضاف للجلسة الحالية
+    فيُحفظ مع نفس معاملة العملية الأصلية."""
+    db.add(AuditLog(
+        entity_type=entity_type,
+        entity_id=entity_id,
+        action=action,
+        actor=actor or "مستخدم النظام",
+        details=details,
+    ))
 
 
 def _validate_non_negative(value, field_name: str) -> float:
@@ -1147,6 +1163,7 @@ def list_purchase_invoices(db: Session = Depends(get_db)):
 def create_purchase_invoice(
     payload: PurchaseInvoiceIn,
     db: Session = Depends(get_db),
+    actor: Optional[str] = Query(None, description="اسم مستخدم النظام الذي نفّذ العملية (لسجل النشاط)"),
 ):
     grn = (
         db.query(GoodsReceipt)
@@ -1238,6 +1255,11 @@ def create_purchase_invoice(
 
         _post_purchase_invoice_journal(db, invoice, grn, subtotal, tax_amount, total, tax_type)
 
+        _log_activity(
+            db, "purchase_invoice", invoice.inv_number, "created", actor,
+            f"إنشاء الفاتورة على الاستلام {grn.grn_number} — الإجمالي {total}",
+        )
+
         db.commit()
         db.refresh(invoice)
         return invoice
@@ -1258,6 +1280,7 @@ def create_purchase_invoice(
 def create_direct_purchase_invoice(
     payload: DirectPurchaseInvoiceIn,
     db: Session = Depends(get_db),
+    actor: Optional[str] = Query(None, description="اسم مستخدم النظام الذي نفّذ العملية (لسجل النشاط)"),
 ):
     """
     إنشاء فاتورة مشتريات مباشرة دون المرور يدوياً بدورة الشراء الكاملة
@@ -1291,7 +1314,7 @@ def create_direct_purchase_invoice(
         tax_type_code=payload.tax_type_code,
         tax_calc_method=payload.tax_calc_method,
     )
-    return create_purchase_invoice(payload=inv_payload, db=db)
+    return create_purchase_invoice(payload=inv_payload, db=db, actor=actor)
 
 
 @pinv_router.patch("/{inv_number}", response_model=PurchaseInvoiceOut)
@@ -1299,11 +1322,12 @@ def update_purchase_invoice(
     inv_number: str,
     payload: PurchaseInvoiceUpdate,
     db: Session = Depends(get_db),
+    actor: Optional[str] = Query(None, description="اسم مستخدم النظام الذي نفّذ العملية (لسجل النشاط)"),
 ):
     """تعديل الحقول غير المالية لفاتورة مشتريات موجودة (تاريخ الفاتورة،
-    رقم فاتورة المورد، فترة السماح، مركز التكلفة). لا يسمح هذا المسار
-    بتعديل الأصناف أو الكميات أو التكلفة حفاظاً على سلامة القيود
-    المحاسبية والتكلفة المتوسطة المرحّلة أصلاً على إذن الاستلام."""
+    رقم فاتورة المورد، فترة السماح، مركز التكلفة، ملاحظات). لا يسمح
+    هذا المسار بتعديل الأصناف أو الكميات أو التكلفة حفاظاً على سلامة
+    القيود المحاسبية والتكلفة المتوسطة المرحّلة أصلاً على إذن الاستلام."""
     invoice = (
         db.query(PurchaseInvoice)
         .filter(PurchaseInvoice.inv_number == inv_number)
@@ -1317,6 +1341,8 @@ def update_purchase_invoice(
     if invoice.status == "cancelled":
         raise HTTPException(status_code=400, detail="لا يمكن تعديل فاتورة ملغاة")
 
+    changed_fields = []
+
     if payload.cost_center_code is not None:
         if payload.cost_center_code:
             cost_center = (
@@ -1329,9 +1355,13 @@ def update_purchase_invoice(
                     status_code=404,
                     detail=f"مركز التكلفة {payload.cost_center_code} غير موجود",
                 )
+        if invoice.cost_center_code != (payload.cost_center_code or None):
+            changed_fields.append(f"مركز التكلفة → {payload.cost_center_code or 'بدون'}")
         invoice.cost_center_code = payload.cost_center_code or None
 
     if payload.inv_date is not None:
+        if invoice.inv_date != payload.inv_date:
+            changed_fields.append(f"تاريخ الفاتورة → {payload.inv_date}")
         invoice.inv_date = payload.inv_date
         # مزامنة تاريخ القيد المحاسبي المرتبط حتى يبقى متسقاً مع تاريخ الفاتورة
         if invoice.journal_entry_id:
@@ -1339,9 +1369,22 @@ def update_purchase_invoice(
             if entry:
                 entry.entry_date = payload.inv_date
     if payload.supplier_inv_number is not None:
+        if invoice.supplier_inv_number != (payload.supplier_inv_number or None):
+            changed_fields.append("رقم فاتورة المورد")
         invoice.supplier_inv_number = payload.supplier_inv_number or None
     if payload.payment_terms_days is not None:
+        if invoice.payment_terms_days != payload.payment_terms_days:
+            changed_fields.append(f"فترة السماح → {payload.payment_terms_days} يوم")
         invoice.payment_terms_days = payload.payment_terms_days
+    if payload.notes is not None:
+        changed_fields.append("الملاحظات")
+        invoice.notes = payload.notes or None
+
+    if changed_fields:
+        _log_activity(
+            db, "purchase_invoice", invoice.inv_number, "edited", actor,
+            "تعديل: " + "، ".join(changed_fields),
+        )
 
     db.commit()
     db.refresh(invoice)
@@ -1352,6 +1395,7 @@ def update_purchase_invoice(
 def cancel_purchase_invoice(
     inv_number: str,
     db: Session = Depends(get_db),
+    actor: Optional[str] = Query(None, description="اسم مستخدم النظام الذي نفّذ العملية (لسجل النشاط)"),
 ):
     """إلغاء فاتورة مشتريات (وليس حذفها نهائياً) حفاظاً على سلامة السجل
     المحاسبي والترقيم المتسلسل. تُعلَّم الفاتورة كملغاة ويعود إذن
@@ -1385,9 +1429,26 @@ def cancel_purchase_invoice(
         if entry and entry.status == "posted":
             entry.status = "cancelled"
 
+    _log_activity(db, "purchase_invoice", invoice.inv_number, "cancelled", actor)
+
     db.commit()
     db.refresh(invoice)
     return invoice
+
+
+@pinv_router.get("/{inv_number}/activity", response_model=list[AuditLogOut])
+def get_purchase_invoice_activity(inv_number: str, db: Session = Depends(get_db)):
+    """سجل النشاط الكامل لفاتورة مشتريات: كل حركة (إنشاء/تعديل/إلغاء/
+    ملاحظة...) بترتيب زمني، مع اسم من نفّذها وتوقيتها بالدقيقة."""
+    invoice = db.query(PurchaseInvoice).filter(PurchaseInvoice.inv_number == inv_number).first()
+    if not invoice:
+        raise HTTPException(status_code=404, detail=f"فاتورة المشتريات {inv_number} غير موجودة")
+    return (
+        db.query(AuditLog)
+        .filter(AuditLog.entity_type == "purchase_invoice", AuditLog.entity_id == inv_number)
+        .order_by(AuditLog.created_at.asc(), AuditLog.id.asc())
+        .all()
+    )
 
 
 # =========================================================
@@ -1492,6 +1553,7 @@ def list_purchase_returns(db: Session = Depends(get_db)):
 def create_purchase_return(
     payload: PurchaseReturnIn,
     db: Session = Depends(get_db),
+    actor: Optional[str] = Query(None, description="اسم مستخدم النظام الذي نفّذ العملية (لسجل النشاط)"),
 ):
     _validate_lines(payload.lines, "مرتجع الشراء")
 
@@ -1652,6 +1714,11 @@ def create_purchase_return(
 
         _post_purchase_return_journal(db, purchase_return, purchase_return.subtotal, tax_amount, total, tax_type)
 
+        _log_activity(
+            db, "purchase_invoice", invoice.inv_number, "return_created", actor,
+            f"مرتجع {purchase_return.rt_number} بإجمالي {total} (خُصم من رصيد المورد)",
+        )
+
         db.commit()
         db.refresh(purchase_return)
         return purchase_return
@@ -1668,6 +1735,7 @@ def create_purchase_return(
 def cancel_purchase_return(
     rt_number: str,
     db: Session = Depends(get_db),
+    actor: Optional[str] = Query(None, description="اسم مستخدم النظام الذي نفّذ العملية (لسجل النشاط)"),
 ):
     """إلغاء مرتجع مشتريات: يعيد الكمية المرتجعة إلى المخزون (بمزج
     آمن ضمن التكلفة المتوسطة الحالية، تماماً كاستلام جديد — لا يتطلب
@@ -1722,6 +1790,11 @@ def cancel_purchase_return(
                 entry.status = "cancelled"
 
         purchase_return.status = "cancelled"
+
+        _log_activity(
+            db, "purchase_invoice", purchase_return.inv_number, "return_cancelled", actor,
+            f"إلغاء مرتجع {purchase_return.rt_number} — أُعيدت الكمية للمخزون",
+        )
 
         db.commit()
         db.refresh(purchase_return)

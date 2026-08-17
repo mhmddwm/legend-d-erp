@@ -509,6 +509,8 @@ class PurchaseInvoice(Base):
     # [+ مدين ضريبة المشتريات القابلة للخصم] / دائن حساب المورد)
     journal_entry_id = Column(Integer, ForeignKey("journal_entries.id"), nullable=True)
 
+    notes = Column(Text, nullable=True)
+
     created_at = Column(
         DateTime(timezone=True),
         server_default=func.now()

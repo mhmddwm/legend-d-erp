@@ -3,3 +3,4 @@ from app.models.user import User, Role
 from app.models.warehouse import Warehouse
 from app.models.location import WarehouseLocation
 from app.models.warehouse_stock import WarehouseStock
+from app.models.audit_log import AuditLog

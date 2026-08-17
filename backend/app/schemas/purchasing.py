@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field
 from typing import Optional, List
-from datetime import date
+from datetime import date, datetime
 
 
 class POLineIn(BaseModel):
@@ -119,6 +119,7 @@ class PurchaseInvoiceUpdate(BaseModel):
     supplier_inv_number: Optional[str] = None
     payment_terms_days: Optional[int] = None
     cost_center_code: Optional[str] = None
+    notes: Optional[str] = None
 
 
 class PInvLineOut(BaseModel):
@@ -145,7 +146,21 @@ class PurchaseInvoiceOut(BaseModel):
     cost_center_code: Optional[str] = None
     due_date: Optional[date] = None
     journal_entry_id: Optional[int] = None
+    notes: Optional[str] = None
     lines: List[PInvLineOut] = []
+
+    class Config:
+        from_attributes = True
+
+
+class AuditLogOut(BaseModel):
+    id: int
+    entity_type: str
+    entity_id: str
+    action: str
+    actor: Optional[str] = None
+    details: Optional[str] = None
+    created_at: datetime
 
     class Config:
         from_attributes = True
