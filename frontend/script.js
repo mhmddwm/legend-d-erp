@@ -262,6 +262,24 @@ warehouses = await safeLoad(
 );
 
 
+warehouseLocations = await safeLoad(
+"مواقع المستودعات",
+"/api/warehouse-locations"
+);
+
+
+categories = await safeLoad(
+"تصنيفات الأصناف",
+"/api/categories"
+);
+
+
+brands = await safeLoad(
+"الماركات",
+"/api/brands"
+);
+
+
 stockIssueRequests = await safeLoad(
 "طلبات صرف المخزون",
 "/api/stock-issue-requests"
@@ -367,6 +385,9 @@ function renderAll(){
   if(typeof renderSupplierPayments === 'function') renderSupplierPayments();
 
   renderWarehousesScreen();
+
+  if(typeof renderCategoriesList === 'function') renderCategoriesList();
+  if(typeof renderBrands === 'function') renderBrands();
 
   if(typeof renderCostCenters === 'function') renderCostCenters();
 
@@ -2626,12 +2647,10 @@ async function removeAttachment(entryId, attachmentId){
 }
 
 function getProductCategories(){
-  try{
-    const list = JSON.parse(localStorage.getItem('categories') || '[]');
-    window.categories = list;
-    if (typeof categories !== 'undefined') categories = list;
-    return list;
-  }catch(e){ return window.categories || []; }
+  // مصدر البيانات الحقيقي الآن: مصفوفة categories المحمّلة من /api/categories
+  // (كانت محلية بالكامل بالمتصفح). نُعيد الشكل بحقلي id/name المتوافقين
+  // مع كل الكود القديم المستهلك لهذه الدالة، فوق الحقلين الحقيقيين code/name_ar.
+  return (categories||[]).map(c=>({...c, id:c.code, name:c.name_ar}));
 }
 
 function getUnitTemplates(){
@@ -2789,6 +2808,9 @@ function loadProductDropdowns(){
      unit.value = tpl ? String(tpl.id||tpl.name||tpl.base) : selected;
    }
  }
+ if(typeof refreshBrandDropdown==='function') refreshBrandDropdown();
+ if(typeof refreshSupplierDropdown==='function') refreshSupplierDropdown();
+ if(typeof refreshItemWarehouseOptions==='function') refreshItemWarehouseOptions();
 }
 
 function loadSearchCategories(){
@@ -2836,37 +2858,56 @@ async function submitItem(){
   if(!document.getElementById('itemCategory').value){err.textContent='يجب اختيار التصنيف'; return;}
   if(!document.getElementById('itemUnit').value){err.textContent='يجب اختيار قالب الوحدات'; return;}
   err.textContent='';
+  const whVal=document.getElementById('itemWarehouse')?.value || '';
+  const locVal=document.getElementById('itemLocation')?.value || '';
   try{
     const payload={
-name,
-name_en:document.getElementById('itemNameEn').value,
-description:document.getElementById('itemDesc').value,
-category:document.getElementById('itemCategory').value,
-brand:document.getElementById('itemBrand').value,
-supplier:document.getElementById('itemSupplier').value,
-barcode:document.getElementById('itemBarcode').value,
-price_lists:document.getElementById('itemPriceLists').value,
-avg_price:document.getElementById('itemAvgPrice').value,
-last_purchase:document.getElementById('itemLastPurchase').value,
-status:document.getElementById('itemStatus').value,
-unit,unit_template:unitTemplate ? (unitTemplate.id||unitTemplate.name) : '',display_unit:unit,default_cost,sale_price,opening_qty,reorder_point};
-    payload.code = editCode || code;
+      code: editCode || code,
+      name, name_en: document.getElementById('itemNameEn').value || null,
+      description: document.getElementById('itemDesc').value || null,
+      barcode: document.getElementById('itemBarcode').value || null,
+      category_code: document.getElementById('itemCategory').value || null,
+      brand_code: document.getElementById('itemBrand').value || null,
+      supplier_code: document.getElementById('itemSupplier').value || null,
+      supplier_item_code: document.getElementById('itemSupplierProductCode').value || null,
+      status: document.getElementById('itemStatus').value || 'active',
+      default_warehouse_id: whVal ? parseInt(whVal) : null,
+      default_location_id: locVal ? parseInt(locVal) : null,
+      unit, default_cost, price: sale_price, reorder_level: reorder_point,
+    };
     if(editCode){
-      // حفظ فعلي للتعديل: نرسل الكود داخل البيانات ونحدث القائمة المعروضة حتى لو كان الخادم لا يرجع التعديل فورًا
-      try{ await api('PUT',`/api/items/${encodeURIComponent(editCode)}`,payload); }
-      catch(apiErr){ console.warn('تعذر حفظ التعديل في الخادم، تم حفظه محليًا:', apiErr.message); }
-      items = (items||[]).map(x => String(x.code)===String(editCode) ? {...x, ...payload, code:editCode} : x);
+      await api('PUT', `/api/items/${encodeURIComponent(editCode)}`, payload);
     }else{
-      try{ await api('POST','/api/items',payload); }
-      catch(apiErr){ console.warn('تعذر إضافة المنتج في الخادم، تم حفظه محليًا:', apiErr.message); }
-      const exists=(items||[]).some(x=>String(x.code)===String(code));
-      items = exists ? (items||[]).map(x=>String(x.code)===String(code)?{...x,...payload}:x) : [...(items||[]), payload];
+      payload.opening_qty = opening_qty;
+      await api('POST', '/api/items', payload);
     }
-    try{ localStorage.setItem('items_cache', JSON.stringify(items||[])); }catch(e){}
-    renderItems();
+    await loadAll();
     cancelItemEdit();
   }catch(e){err.textContent=e.message;}
 }
+
+// تعبئة قائمتي المستودع والموقع الفرعي بنموذج المنتج
+function refreshItemWarehouseOptions(){
+  const whSel=document.getElementById('itemWarehouse');
+  if(!whSel) return;
+  const current=whSel.value;
+  whSel.innerHTML='<option value="">— بدون تحديد —</option>'+
+    (warehouses||[]).filter(w=>w.is_active!==false).map(w=>`<option value="${w.id}">${w.code} — ${w.name}</option>`).join('');
+  whSel.value=current;
+  onItemWarehouseChange();
+}
+function onItemWarehouseChange(){
+  const whSel=document.getElementById('itemWarehouse');
+  const locSel=document.getElementById('itemLocation');
+  if(!whSel || !locSel) return;
+  const current=locSel.value;
+  const whId=whSel.value ? parseInt(whSel.value) : null;
+  const locs=(warehouseLocations||[]).filter(l=>!whId || l.warehouse_id===whId);
+  locSel.innerHTML='<option value="">— بدون تحديد —</option>'+
+    locs.map(l=>`<option value="${l.id}">${l.code?l.code+' — ':''}${l.name}</option>`).join('');
+  if(current && locs.some(l=>String(l.id)===current)) locSel.value=current;
+}
+window.onItemWarehouseChange = onItemWarehouseChange;
 
 function editItem(code){
   const f=document.getElementById('itemFormBox'); if(f) f.style.display='block';
@@ -2876,23 +2917,32 @@ function editItem(code){
   document.getElementById('itemCode').value=it.code;
   document.getElementById('itemCode').disabled=true;
   document.getElementById('itemName').value=it.name||'';
-  document.getElementById('itemNameEn').value=it.name_en||it.nameEn||'';
+  document.getElementById('itemNameEn').value=it.name_en||'';
   document.getElementById('itemDesc').value=it.description||'';
-  document.getElementById('itemBrand').value=it.brand||'';
-  document.getElementById('itemSupplier').value=it.supplier||it.supplier_name||it.vendor||'';
   document.getElementById('itemBarcode').value=it.barcode||'';
-  document.getElementById('itemPriceLists').value=it.price_lists||'';
-  document.getElementById('itemAvgPrice').value=it.avg_price||it.avg_cost||0;
-  document.getElementById('itemLastPurchase').value=it.last_purchase||0;
-  document.getElementById('itemStatus').value=it.status||'تنشيط';
+  document.getElementById('itemSupplierProductCode').value=it.supplier_item_code||'';
+  document.getElementById('itemAvgPrice').value=it.avg_cost||0;
+  document.getElementById('itemLastPurchase').value=it.avg_cost||0;
+  document.getElementById('itemStatus').value=it.status||'active';
   loadProductDropdowns();
-  setSelectValueSmart('itemCategory', it.category||it.category_id||it.category_name||it.categoryName||'');
+  refreshBrandDropdown();
+  refreshSupplierDropdown();
+  refreshItemWarehouseOptions();
+  setSelectValueSmart('itemCategory', it.category_code||'');
+  setSelectValueSmart('itemBrand', it.brand_code||'');
+  setSelectValueSmart('itemSupplier', it.supplier_code||'');
+  if(it.default_warehouse_id){
+    document.getElementById('itemWarehouse').value=String(it.default_warehouse_id);
+    onItemWarehouseChange();
+    if(it.default_location_id) document.getElementById('itemLocation').value=String(it.default_location_id);
+  }
   const editUnitTemplate=findUnitTemplateByValue(it.unit_template||it.unit);
   document.getElementById('itemUnit').value=editUnitTemplate ? String(editUnitTemplate.id||editUnitTemplate.name||editUnitTemplate.base) : (it.unit||'');
   document.getElementById('itemCost').value=it.default_cost||0;
-  document.getElementById('itemPrice').value=it.sale_price||0;
-  document.getElementById('itemOpenQty').value=it.opening_qty||0;
-  document.getElementById('itemReorder').value=it.reorder_point||0;
+  document.getElementById('itemPrice').value=it.price||0;
+  document.getElementById('itemOpenQty').value=it.qty||0;
+  document.getElementById('itemOpenQty').disabled=true; // الكمية الافتتاحية لا تُعدَّل بعد أول حفظ — تُصحَّح عبر حركات مخزون
+  document.getElementById('itemReorder').value=it.reorder_level||0;
   document.getElementById('itemFormTitle').textContent='تعديل: '+it.name;
   document.getElementById('itemSubmitBtn').textContent='حفظ التعديلات';
   document.getElementById('itemCancelBtn').style.display='inline-block';
@@ -2900,8 +2950,21 @@ function editItem(code){
   window.scrollTo({top:0,behavior:'smooth'});
 }
 
+function refreshBrandDropdown(){
+  const sel=document.getElementById('itemBrand'); if(!sel) return;
+  const current=sel.value;
+  sel.innerHTML='<option value="">اختر الماركة</option>'+(brands||[]).map(b=>`<option value="${b.code}">${b.name_ar}</option>`).join('');
+  sel.value=current;
+}
+function refreshSupplierDropdown(){
+  const sel=document.getElementById('itemSupplier'); if(!sel) return;
+  const current=sel.value;
+  sel.innerHTML='<option value="">— بدون مورد افتراضي —</option>'+(suppliers||[]).map(s=>`<option value="${s.code}">${s.name} (${s.code})</option>`).join('');
+  sel.value=current;
+}
+
 function cancelItemEdit(){
-  const ids=['itemCode','itemName','itemNameEn','itemDesc','itemCategory','itemBrand','itemUnit','itemSupplier','itemBarcode','itemCost','itemPrice','itemOpenQty','itemAvgPrice','itemLastPurchase','itemReorder','itemPriceLists','itemStatus'];
+  const ids=['itemCode','itemName','itemNameEn','itemDesc','itemCategory','itemBrand','itemUnit','itemSupplier','itemSupplierProductCode','itemBarcode','itemCost','itemPrice','itemOpenQty','itemAvgPrice','itemLastPurchase','itemReorder','itemPriceLists','itemStatus','itemWarehouse','itemLocation'];
   ids.forEach(id=>{const e=document.getElementById(id); if(e){e.disabled=false; e.value='';}});
   const edit=document.getElementById('itemEditCode'); if(edit) edit.value='';
   const code=document.getElementById('itemCode'); if(code) code.disabled=false;
@@ -5769,33 +5832,204 @@ function toggleProductSettingsMenu(btn){
 }
 
 
-// التصنيفات
-let categories=JSON.parse(localStorage.getItem('categories')||'[]');
+// التصنيفات — مصدرها الآن API حقيقي (كانت محلية بالكامل بالمتصفح)
+let categories=[];
+let brands=[];
+let warehouseLocations=[];
 let editingCategoryId=null;
 function openCategoryForm(){document.getElementById('catForm').style.display='block'; loadCategoryParents();}
-function closeCategoryForm(){document.getElementById('catForm').style.display='none';editingCategoryId=null;}
-function loadCategoryParents(){let s=document.getElementById('catParent'); if(!s)return; s.innerHTML='<option value="">تصنيف رئيسي</option>'+categories.map(c=>`<option value="${c.id}">${c.name}</option>`).join('');}
-function openCategories(){
+function closeCategoryForm(){
+  document.getElementById('catForm').style.display='none';
+  editingCategoryId=null;
+  document.getElementById('catEditCode').value='';
+  document.getElementById('catCode').value='';
+  document.getElementById('catCode').disabled=false;
+  document.getElementById('catName').value='';
+  document.getElementById('catDesc').value='';
+  document.getElementById('catParent').value='';
+}
+function loadCategoryParents(){
+  let s=document.getElementById('catParent'); if(!s)return;
+  const editCode=document.getElementById('catEditCode')?.value||'';
+  s.innerHTML='<option value="">تصنيف رئيسي</option>'+
+    (categories||[]).filter(c=>c.code!==editCode).map(c=>`<option value="${c.code}">${c.name_ar}</option>`).join('');
+}
+function renderCategoriesList(){
  let b=document.getElementById('categoryBody');
  if(!b)return;
- b.innerHTML=categories.map(c=>`<tr><td><input type="checkbox" class="catCheck" value="${c.id}" onchange="showCatActions()"></td><td>${c.name}</td><td>${c.parent? (categories.find(x=>x.id==c.parent)?.name||''): 'تصنيف رئيسي'}</td><td>${c.desc||''}</td></tr>`).join('');
+ b.innerHTML=(categories||[]).map(c=>`<tr><td><input type="checkbox" class="catCheck" value="${c.code}" onchange="showCatActions()"></td><td>${c.name_ar}</td><td>${c.parent_code? ((categories||[]).find(x=>x.code===c.parent_code)?.name_ar||''): 'تصنيف رئيسي'}</td><td>${c.description||''}</td></tr>`).join('');
 }
-function saveCategory(){
- let c={id:editingCategoryId||Date.now(),name:document.getElementById('catName').value.trim(),parent:document.getElementById('catParent')?.value||'',desc:document.getElementById('catDesc').value};
- if(!c.name)return;
- if(categories.some(x=>x.name.trim()===c.name.trim()&&x.id!==c.id)){alert('التصنيف موجود مسبقاً');return;}
- if(editingCategoryId) categories=categories.map(x=>x.id===editingCategoryId?c:x); else categories.push(c);
- localStorage.setItem('categories',JSON.stringify(categories));
- window.categories=categories;
- openCategories();
- if(typeof loadProductDropdowns==='function') loadProductDropdowns();
- if(typeof loadSearchCategories==='function') loadSearchCategories();
+// اسم قديم كان يُستدعى من أماكن متفرقة بالكود — يبقى للتوافق
+function openCategories(){ renderCategoriesList(); }
+
+function slugifyCategoryCode(name){
+  const base=(name||'').trim().replace(/\s+/g,'-').slice(0,20) || 'CAT';
+  let code=base, n=1;
+  while((categories||[]).some(c=>c.code===code)){ code=`${base}-${n++}`; }
+  return code;
+}
+
+async function saveCategory(){
+  const name_ar=document.getElementById('catName').value.trim();
+  let code=document.getElementById('catCode').value.trim();
+  const parent_code=document.getElementById('catParent')?.value||null;
+  const description=document.getElementById('catDesc').value||null;
+  if(!name_ar){ alert('يرجى إدخال اسم التصنيف'); return; }
+  try{
+    if(editingCategoryId){
+      await api('PUT', `/api/categories/${encodeURIComponent(editingCategoryId)}`, {name_ar, parent_code, description});
+    }else{
+      if(!code) code=slugifyCategoryCode(name_ar);
+      await api('POST', '/api/categories', {code, name_ar, parent_code, description});
+    }
+    closeCategoryForm();
+    await loadAll();
+    if(typeof loadProductDropdowns==='function') loadProductDropdowns();
+    if(typeof loadSearchCategories==='function') loadSearchCategories();
+  }catch(e){ alert('تعذر حفظ التصنيف: '+e.message); }
 }
 function showCatActions(){document.getElementById('catActions').style.display=[...document.querySelectorAll('.catCheck:checked')].length?'block':'none';}
 
-function editSelectedCategory(){let id=[...document.querySelectorAll('.catCheck:checked')][0]?.value;let c=categories.find(x=>x.id==id);if(!c)return;editingCategoryId=c.id;openCategoryForm();document.getElementById('catName').value=c.name;document.getElementById('catDesc').value=c.desc||'';document.getElementById('catParent').value=c.parent||'';}
-function deleteSelectedCategories(){let ids=[...document.querySelectorAll('.catCheck:checked')].map(x=>x.value);categories=categories.filter(c=>!ids.includes(String(c.id)));localStorage.setItem('categories',JSON.stringify(categories));openCategories();}
-function exportCategories(){let csv='التصنيف,الوصف\n'+categories.map(c=>`${c.name},${c.desc||''}`).join('\n');let a=document.createElement('a');a.href='data:text/csv;charset=utf-8,'+encodeURIComponent(csv);a.download='categories.csv';a.click();}
+function editSelectedCategory(){
+  let code=[...document.querySelectorAll('.catCheck:checked')][0]?.value;
+  let c=(categories||[]).find(x=>x.code===code); if(!c) return;
+  editingCategoryId=c.code;
+  openCategoryForm();
+  document.getElementById('catEditCode').value=c.code;
+  document.getElementById('catCode').value=c.code;
+  document.getElementById('catCode').disabled=true;
+  document.getElementById('catName').value=c.name_ar;
+  document.getElementById('catDesc').value=c.description||'';
+  loadCategoryParents();
+  document.getElementById('catParent').value=c.parent_code||'';
+}
+async function deleteSelectedCategories(){
+  let codes=[...document.querySelectorAll('.catCheck:checked')].map(x=>x.value);
+  if(!codes.length) return;
+  if(!confirm(`سيتم حذف ${codes.length} تصنيف. هل تريد المتابعة؟`)) return;
+  for(const code of codes){
+    try{ await api('DELETE', `/api/categories/${encodeURIComponent(code)}`); }
+    catch(e){ alert(`تعذر حذف التصنيف ${code}: ${e.message}`); }
+  }
+  await loadAll();
+}
+function exportCategories(){let csv='الكود,التصنيف,الوصف\n'+(categories||[]).map(c=>`${c.code},${c.name_ar},${c.description||''}`).join('\n');let a=document.createElement('a');a.href='data:text/csv;charset=utf-8,'+encodeURIComponent(csv);a.download='categories.csv';a.click();}
+
+// ============================================================
+// الماركات — CRUD حقيقي متصل بـ /api/brands (كانت الشاشة موجودة
+// بالواجهة بدون أي دوال JS خلفها إطلاقاً، أي إنها كانت لا تعمل نهائياً)
+// ============================================================
+let brandViewedCode=null;
+
+function brandEsc(s){ return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+function openBrandForm(){
+  const box=document.getElementById('brandFormBox'); if(!box) return;
+  box.style.display='block';
+  document.getElementById('brandFormTitle').textContent='إضافة ماركة';
+  document.getElementById('brandEditId').value='';
+  document.getElementById('brandName').value='';
+  document.getElementById('brandErr').textContent='';
+  document.getElementById('brandSaveBtn').style.display='inline-block';
+  document.getElementById('brandEditBtn').style.display='none';
+  document.getElementById('brandDeleteBtn').style.display='none';
+  brandViewedCode=null;
+}
+window.openBrandForm = openBrandForm;
+
+function closeBrandForm(){
+  const box=document.getElementById('brandFormBox'); if(box) box.style.display='none';
+  brandViewedCode=null;
+}
+window.closeBrandForm = closeBrandForm;
+
+function slugifyBrandCode(name){
+  const base=(name||'').trim().replace(/\s+/g,'-').slice(0,20) || 'BRD';
+  let code=base, n=1;
+  while((brands||[]).some(b=>b.code===code)){ code=`${base}-${n++}`; }
+  return code;
+}
+
+async function saveBrand(){
+  const name_ar=document.getElementById('brandName').value.trim();
+  const editCode=document.getElementById('brandEditId').value;
+  const err=document.getElementById('brandErr');
+  if(!name_ar){ err.textContent='يرجى إدخال اسم الماركة'; return; }
+  err.textContent='';
+  try{
+    if(editCode){
+      await api('PUT', `/api/brands/${encodeURIComponent(editCode)}`, {name_ar});
+    }else{
+      const code=slugifyBrandCode(name_ar);
+      await api('POST', '/api/brands', {code, name_ar});
+    }
+    closeBrandForm();
+    await loadAll();
+  }catch(e){ err.textContent='تعذر حفظ الماركة: '+e.message; }
+}
+window.saveBrand = saveBrand;
+
+function viewBrand(code){
+  const b=(brands||[]).find(x=>x.code===code); if(!b) return;
+  const box=document.getElementById('brandFormBox'); if(box) box.style.display='block';
+  document.getElementById('brandFormTitle').textContent='عرض ماركة';
+  document.getElementById('brandEditId').value='';
+  document.getElementById('brandName').value=b.name_ar;
+  document.getElementById('brandErr').textContent='';
+  document.getElementById('brandSaveBtn').style.display='none';
+  document.getElementById('brandEditBtn').style.display='inline-block';
+  document.getElementById('brandDeleteBtn').style.display='inline-block';
+  brandViewedCode=code;
+}
+window.viewBrand = viewBrand;
+
+function editViewedBrand(){
+  if(!brandViewedCode) return;
+  document.getElementById('brandFormTitle').textContent='تعديل ماركة';
+  document.getElementById('brandEditId').value=brandViewedCode;
+  document.getElementById('brandSaveBtn').style.display='inline-block';
+  document.getElementById('brandEditBtn').style.display='none';
+  document.getElementById('brandDeleteBtn').style.display='none';
+}
+window.editViewedBrand = editViewedBrand;
+
+async function deleteViewedBrand(){
+  if(!brandViewedCode) return;
+  if(!confirm('سيتم حذف هذه الماركة نهائياً. هل تريد المتابعة؟')) return;
+  try{
+    await api('DELETE', `/api/brands/${encodeURIComponent(brandViewedCode)}`);
+    closeBrandForm();
+    await loadAll();
+  }catch(e){ alert('تعذر حذف الماركة: '+e.message); }
+}
+window.deleteViewedBrand = deleteViewedBrand;
+
+function clearBrandSearch(){
+  const s1=document.getElementById('brandSearch'); if(s1) s1.value='';
+  renderBrands();
+}
+window.clearBrandSearch = clearBrandSearch;
+
+function renderBrands(){
+  const body=document.getElementById('brandsBody');
+  if(!body) return;
+  const q=(document.getElementById('brandSearch')?.value||'').trim().toLowerCase();
+  let data=Array.isArray(brands) ? [...brands] : [];
+  if(q) data=data.filter(b=>(b.name_ar||'').toLowerCase().includes(q) || (b.name_en||'').toLowerCase().includes(q));
+  body.innerHTML=data.map(b=>`<tr>
+      <td><input type="checkbox" class="brandCheck" value="${brandEsc(b.code)}"></td>
+      <td>—</td>
+      <td>${brandEsc(b.name_ar)}${b.name_en?` <span style="color:#94a3b8">(${brandEsc(b.name_en)})</span>`:''}</td>
+      <td>-</td>
+      <td>-</td>
+      <td><button type="button" class="btn secondary" style="padding:4px 10px;font-size:12px" onclick="viewBrand('${brandEsc(b.code)}')">عرض</button></td>
+    </tr>`).join('');
+  const empty=document.getElementById('brandsEmpty');
+  if(empty) empty.style.display = data.length ? 'none' : 'block';
+  const countEl=document.getElementById('brandsCount');
+  if(countEl) countEl.textContent = (brands||[]).length + ' ماركة';
+}
+window.renderBrands = renderBrands;
 
 
 let itemPage=1;
@@ -5876,7 +6110,7 @@ function renderItemsTable(){
  <td><input class="itemCheck" type="checkbox" value="${x.code}"></td>
  <td>${x.code||''}</td>
  <td>${x.name||''}</td>
- <td>${findCategoryName(x.category||x.category_id, x)}</td>
+ <td>${findCategoryName(x.category_code, x)}</td>
  <td>${renderUnitSelector(x)}</td>
  <td>${fmt(dv.qty)}</td>
  <td>${fmt(dv.purchase)}</td>
@@ -5888,6 +6122,7 @@ function renderItemsTable(){
     <div id="menu-${x.code}" class="menu-popup" style="display:none">
       <button onclick="viewItem('${x.code}')"><b>👁</b><span>عرض</span></button>
       <button onclick="editItem('${x.code}')"><b>✎</b><span>تعديل</span></button>
+      <button onclick="openItemWarehouseStockView('${x.code}')"><b>📦</b><span>الأرصدة حسب المستودع</span></button>
       <button onclick="copyItem('${x.code}')"><b>⧉</b><span>نسخ</span></button>
       <button class="danger" onclick="deleteItemSafe('${x.code}')"><b>🗑</b><span>حذف</span></button>
     </div>
@@ -5895,6 +6130,41 @@ function renderItemsTable(){
  </td>
  </tr>`}).join('');
 }
+
+// عرض رصيد الصنف موزّعاً على كل مستودع (ومكان التخزين الفرعي إن وُجد)
+async function openItemWarehouseStockView(code){
+  const it=(items||[]).find(i=>i.code===code);
+  if(!it) return;
+  document.getElementById('itemWhStockDialog')?.remove();
+  let rows='<tr><td colspan="4" style="text-align:center;color:#94a3b8;padding:14px">جارٍ التحميل...</td></tr>';
+  const html=`<div class="po-decision-dialog" id="itemWhStockDialog"><div class="box" style="max-width:640px">
+    <div class="rfq-section-head">
+      <h3>📦 أرصدة الصنف حسب المستودع — ${brandEsc(it.name)}</h3>
+      <button class="btn secondary" onclick="document.getElementById('itemWhStockDialog').remove()">إغلاق</button>
+    </div>
+    <table class="grid po-list-table"><thead><tr><th>المستودع</th><th>الموقع الفرعي</th><th>الكمية</th><th>متوسط التكلفة</th></tr></thead>
+    <tbody id="itemWhStockBody">${rows}</tbody></table>
+    <div class="hint" style="margin-top:10px">إجمالي الكمية بكل المستودعات معاً يجب أن يساوي الكمية الإجمالية للصنف (${fmt(it.qty)}).</div>
+  </div></div>`;
+  document.body.insertAdjacentHTML('beforeend', html);
+  try{
+    const stock = await api('GET', `/api/warehouse-stock?item_id=${encodeURIComponent(it.id)}`);
+    const body=document.getElementById('itemWhStockBody');
+    if(!body) return;
+    body.innerHTML = (stock||[]).length
+      ? stock.map(s=>`<tr>
+          <td>${brandEsc(s.warehouse_code)} — ${brandEsc(s.warehouse_name)}</td>
+          <td>${brandEsc(s.location_name||'-')}</td>
+          <td class="num" style="font-weight:700">${fmt(s.quantity)}</td>
+          <td class="num">${fmt(s.avg_cost)}</td>
+        </tr>`).join('')
+      : '<tr><td colspan="4" style="text-align:center;color:#94a3b8;padding:14px">لا يوجد رصيد لهذا الصنف بأي مستودع</td></tr>';
+  }catch(e){
+    const body=document.getElementById('itemWhStockBody');
+    if(body) body.innerHTML=`<tr><td colspan="4" style="text-align:center;color:#c62828;padding:14px">تعذر تحميل الأرصدة: ${brandEsc(e.message)}</td></tr>`;
+  }
+}
+window.openItemWarehouseStockView = openItemWarehouseStockView;
 function toggleItemMenu(code, ev){
  if(ev) ev.stopPropagation();
  const m=document.getElementById('menu-'+code);

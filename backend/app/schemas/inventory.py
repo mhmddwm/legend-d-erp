@@ -6,6 +6,16 @@ from datetime import date
 class ItemIn(BaseModel):
     code: str
     name: str
+    name_en: Optional[str] = None
+    description: Optional[str] = None
+    barcode: Optional[str] = None
+    category_code: Optional[str] = None
+    brand_code: Optional[str] = None
+    supplier_code: Optional[str] = None
+    supplier_item_code: Optional[str] = None
+    status: str = "active"
+    default_warehouse_id: Optional[int] = None
+    default_location_id: Optional[int] = None
     unit: str = "حبة"
     default_cost: float = 0
     price: float = 0
@@ -16,6 +26,16 @@ class ItemIn(BaseModel):
 class ItemUpdate(BaseModel):
     code: Optional[str] = None
     name: Optional[str] = None
+    name_en: Optional[str] = None
+    description: Optional[str] = None
+    barcode: Optional[str] = None
+    category_code: Optional[str] = None
+    brand_code: Optional[str] = None
+    supplier_code: Optional[str] = None
+    supplier_item_code: Optional[str] = None
+    status: Optional[str] = None
+    default_warehouse_id: Optional[int] = None
+    default_location_id: Optional[int] = None
     unit: Optional[str] = None
     default_cost: Optional[float] = None
     price: Optional[float] = None
@@ -26,12 +46,76 @@ class ItemOut(BaseModel):
     id: int
     code: str
     name: str
+    name_en: Optional[str] = None
+    description: Optional[str] = None
+    barcode: Optional[str] = None
+    category_code: Optional[str] = None
+    brand_code: Optional[str] = None
+    supplier_code: Optional[str] = None
+    supplier_item_code: Optional[str] = None
+    status: str = "active"
+    default_warehouse_id: Optional[int] = None
+    default_location_id: Optional[int] = None
     unit: str
     default_cost: float
     price: float
     qty: float
     avg_cost: float
     reorder_level: float
+    is_active: bool = True
+
+    class Config:
+        from_attributes = True
+
+
+class CategoryIn(BaseModel):
+    code: str
+    name_ar: str
+    name_en: Optional[str] = None
+    parent_code: Optional[str] = None
+    description: Optional[str] = None
+    image_url: Optional[str] = None
+
+
+class CategoryUpdate(BaseModel):
+    name_ar: Optional[str] = None
+    name_en: Optional[str] = None
+    parent_code: Optional[str] = None
+    description: Optional[str] = None
+    image_url: Optional[str] = None
+    is_active: Optional[bool] = None
+
+
+class CategoryOut(BaseModel):
+    code: str
+    name_ar: str
+    name_en: Optional[str] = None
+    parent_code: Optional[str] = None
+    description: Optional[str] = None
+    image_url: Optional[str] = None
+    is_active: bool = True
+
+    class Config:
+        from_attributes = True
+
+
+class BrandIn(BaseModel):
+    code: str
+    name_ar: str
+    name_en: Optional[str] = None
+
+
+class BrandUpdate(BaseModel):
+    name_ar: Optional[str] = None
+    name_en: Optional[str] = None
+    is_active: Optional[bool] = None
+
+
+class BrandOut(BaseModel):
+    code: str
+    name_ar: str
+    name_en: Optional[str] = None
+    is_active: bool = True
 
     class Config:
         from_attributes = True

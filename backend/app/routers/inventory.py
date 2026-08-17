@@ -3,13 +3,111 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 from datetime import date as date_type
 from app.database import get_db
-from app.models.models import Item, StockMove, Supplier, PurchaseInvoice, PurchaseReturn, Account, SupplierPayment, SupplierPaymentAllocation
-from app.schemas.inventory import ItemIn, ItemUpdate, ItemOut, StockMoveOut, SupplierIn, SupplierUpdate, SupplierOut
+from app.models.models import Item, StockMove, Supplier, PurchaseInvoice, PurchaseReturn, Account, SupplierPayment, SupplierPaymentAllocation, Category, Brand
+from app.models.warehouse_stock import WarehouseStock
+from app.schemas.inventory import (
+    ItemIn, ItemUpdate, ItemOut, StockMoveOut, SupplierIn, SupplierUpdate, SupplierOut,
+    CategoryIn, CategoryUpdate, CategoryOut, BrandIn, BrandUpdate, BrandOut,
+)
 from app.schemas.purchasing import SupplierOpenInvoiceOut
 
 router = APIRouter(prefix="/api/items", tags=["Items"])
 stock_router = APIRouter(prefix="/api/stock-moves", tags=["StockMoves"])
 supplier_router = APIRouter(prefix="/api/suppliers", tags=["Suppliers"])
+category_router = APIRouter(prefix="/api/categories", tags=["Categories"])
+brand_router = APIRouter(prefix="/api/brands", tags=["Brands"])
+
+
+# ============================================================
+# CATEGORIES
+# ============================================================
+
+@category_router.get("", response_model=list[CategoryOut])
+def list_categories(db: Session = Depends(get_db)):
+    return db.query(Category).order_by(Category.code.asc()).all()
+
+
+@category_router.post("", response_model=CategoryOut, status_code=201)
+def create_category(payload: CategoryIn, db: Session = Depends(get_db)):
+    if db.query(Category).filter(Category.code == payload.code).first():
+        raise HTTPException(400, "كود التصنيف مستخدم من قبل")
+    if payload.parent_code and not db.query(Category).filter(Category.code == payload.parent_code).first():
+        raise HTTPException(404, "التصنيف الرئيسي غير موجود")
+    category = Category(**payload.model_dump())
+    db.add(category)
+    db.commit()
+    db.refresh(category)
+    return category
+
+
+@category_router.put("/{code}", response_model=CategoryOut)
+def update_category(code: str, payload: CategoryUpdate, db: Session = Depends(get_db)):
+    category = db.query(Category).filter(Category.code == code).first()
+    if not category:
+        raise HTTPException(404, "التصنيف غير موجود")
+    for k, v in payload.model_dump(exclude_unset=True).items():
+        setattr(category, k, v)
+    db.commit()
+    db.refresh(category)
+    return category
+
+
+@category_router.delete("/{code}", status_code=204)
+def delete_category(code: str, db: Session = Depends(get_db)):
+    category = db.query(Category).filter(Category.code == code).first()
+    if not category:
+        raise HTTPException(404, "التصنيف غير موجود")
+    if db.query(Item).filter(Item.category_code == code).first():
+        raise HTTPException(400, "لا يمكن حذف تصنيف مرتبط بأصناف")
+    if db.query(Category).filter(Category.parent_code == code).first():
+        raise HTTPException(400, "لا يمكن حذف تصنيف له تصنيفات فرعية")
+    db.delete(category)
+    db.commit()
+    return None
+
+
+# ============================================================
+# BRANDS
+# ============================================================
+
+@brand_router.get("", response_model=list[BrandOut])
+def list_brands(db: Session = Depends(get_db)):
+    return db.query(Brand).order_by(Brand.code.asc()).all()
+
+
+@brand_router.post("", response_model=BrandOut, status_code=201)
+def create_brand(payload: BrandIn, db: Session = Depends(get_db)):
+    if db.query(Brand).filter(Brand.code == payload.code).first():
+        raise HTTPException(400, "كود الماركة مستخدم من قبل")
+    brand = Brand(**payload.model_dump())
+    db.add(brand)
+    db.commit()
+    db.refresh(brand)
+    return brand
+
+
+@brand_router.put("/{code}", response_model=BrandOut)
+def update_brand(code: str, payload: BrandUpdate, db: Session = Depends(get_db)):
+    brand = db.query(Brand).filter(Brand.code == code).first()
+    if not brand:
+        raise HTTPException(404, "الماركة غير موجودة")
+    for k, v in payload.model_dump(exclude_unset=True).items():
+        setattr(brand, k, v)
+    db.commit()
+    db.refresh(brand)
+    return brand
+
+
+@brand_router.delete("/{code}", status_code=204)
+def delete_brand(code: str, db: Session = Depends(get_db)):
+    brand = db.query(Brand).filter(Brand.code == code).first()
+    if not brand:
+        raise HTTPException(404, "الماركة غير موجودة")
+    if db.query(Item).filter(Item.brand_code == code).first():
+        raise HTTPException(400, "لا يمكن حذف ماركة مرتبطة بأصناف")
+    db.delete(brand)
+    db.commit()
+    return None
 
 
 # ============================================================
@@ -26,12 +124,29 @@ def create_item(payload: ItemIn, db: Session = Depends(get_db)):
     if db.query(Item).filter(Item.code == payload.code).first():
         raise HTTPException(400, "كود الصنف مستخدم من قبل")
 
+    if payload.category_code and not db.query(Category).filter(Category.code == payload.category_code).first():
+        raise HTTPException(404, "التصنيف غير موجود")
+    if payload.brand_code and not db.query(Brand).filter(Brand.code == payload.brand_code).first():
+        raise HTTPException(404, "الماركة غير موجودة")
+    if payload.supplier_code and not db.query(Supplier).filter(Supplier.code == payload.supplier_code).first():
+        raise HTTPException(404, "المورد غير موجود")
+
     opening_qty = float(payload.opening_qty or 0)
     default_cost = float(payload.default_cost or 0)
 
     item = Item(
         code=payload.code,
         name=payload.name,
+        name_en=payload.name_en,
+        description=payload.description,
+        barcode=payload.barcode,
+        category_code=payload.category_code,
+        brand_code=payload.brand_code,
+        supplier_code=payload.supplier_code,
+        supplier_item_code=payload.supplier_item_code,
+        status=payload.status or "active",
+        default_warehouse_id=payload.default_warehouse_id,
+        default_location_id=payload.default_location_id,
         unit=payload.unit,
         default_cost=default_cost,
         price=float(payload.price or 0),
@@ -48,11 +163,18 @@ def create_item(payload: ItemIn, db: Session = Depends(get_db)):
             item_id=item.id,
             move_type="افتتاحي",
             reference="رصيد افتتاحي",
+            warehouse_id=payload.default_warehouse_id,
             qty=opening_qty,
             unit_cost=default_cost,
             balance_after=opening_qty,
         )
         db.add(move)
+
+        if payload.default_warehouse_id:
+            db.add(WarehouseStock(
+                item_id=item.id, warehouse_id=payload.default_warehouse_id,
+                location_id=payload.default_location_id, quantity=opening_qty, avg_cost=default_cost,
+            ))
 
     db.commit()
     db.refresh(item)
@@ -67,6 +189,13 @@ def update_item(code: str, payload: ItemUpdate, db: Session = Depends(get_db)):
 
     data = payload.model_dump(exclude_unset=True)
     new_code = data.pop("code", None)
+
+    if "category_code" in data and data["category_code"] and not db.query(Category).filter(Category.code == data["category_code"]).first():
+        raise HTTPException(404, "التصنيف غير موجود")
+    if "brand_code" in data and data["brand_code"] and not db.query(Brand).filter(Brand.code == data["brand_code"]).first():
+        raise HTTPException(404, "الماركة غير موجودة")
+    if "supplier_code" in data and data["supplier_code"] and not db.query(Supplier).filter(Supplier.code == data["supplier_code"]).first():
+        raise HTTPException(404, "المورد غير موجود")
 
     for k, v in data.items():
         setattr(item, k, v)

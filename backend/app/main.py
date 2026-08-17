@@ -142,6 +142,14 @@ app.include_router(
     inventory.supplier_router
 )
 
+app.include_router(
+    inventory.category_router
+)
+
+app.include_router(
+    inventory.brand_router
+)
+
 
 # Purchasing
 app.include_router(

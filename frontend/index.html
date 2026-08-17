@@ -2130,17 +2130,19 @@ html[dir="ltr"] .brand-center{direction:ltr;}
 <div class="field"><label>التصنيف *</label><select id="itemCategory"></select></div>
 <div class="field"><label>قالب الوحدات *</label><select id="itemUnit"></select></div>
 <div class="field"><label>الماركة</label><select id="itemBrand"><option value="">اختر الماركة</option></select></div>
-<div class="field"><label>المورد</label><input id="itemSupplier" list="itemSupplierList" placeholder="ابحث باسم المورد أو رقمه أو جواله"><datalist id="itemSupplierList"></datalist></div>
+<div class="field"><label>المورد</label><select id="itemSupplier"><option value="">— بدون مورد افتراضي —</option></select></div>
 <div class="field"><label>كود المنتج عند المورد</label><input id="itemSupplierProductCode" placeholder="كود المنتج لدى المورد"></div>
 <div class="field"><label>الباركود</label><input id="itemBarcode"></div>
 <div class="field"><label>سعر الشراء</label><input id="itemCost" type="number"></div>
 <div class="field"><label>سعر البيع</label><input id="itemPrice" type="number"></div>
-<div class="field"><label>قوائم الأسعار</label><input id="itemPriceLists"></div>
-<div class="field"><label>الكمية المتاحة</label><input id="itemOpenQty" type="number"></div>
-<div class="field"><label>متوسط السعر</label><input id="itemAvgPrice" type="number"></div>
-<div class="field"><label>آخر سعر شراء</label><input id="itemLastPurchase" type="number"></div>
+<div class="field"><label>قوائم الأسعار (قريباً)</label><input id="itemPriceLists" disabled placeholder="سيُفعَّل في مرحلة لاحقة"></div>
+<div class="field"><label>الكمية الافتتاحية</label><input id="itemOpenQty" type="number"></div>
+<div class="field"><label>المستودع (مكان التخزين)</label><select id="itemWarehouse" onchange="onItemWarehouseChange()"><option value="">— بدون تحديد —</option></select></div>
+<div class="field"><label>الموقع الفرعي (رف/منطقة)</label><select id="itemLocation"><option value="">— بدون تحديد —</option></select></div>
+<div class="field"><label>متوسط التكلفة الحالي</label><input id="itemAvgPrice" type="number" disabled placeholder="يُحسب تلقائياً (متوسط مرجّح)"></div>
+<div class="field"><label>آخر سعر شراء</label><input id="itemLastPurchase" type="number" disabled placeholder="يُحسب تلقائياً من فواتير الشراء"></div>
 <div class="field"><label>الحد الأدنى للطلب</label><input id="itemReorder" type="number"></div>
-<div class="field"><label>الحالة</label><select id="itemStatus"><option>تنشيط</option><option>ايقاف</option><option>غير نشط</option></select></div>
+<div class="field"><label>الحالة</label><select id="itemStatus"><option value="active">تنشيط</option><option value="paused">ايقاف</option><option value="inactive">غير نشط</option></select></div>
 </div>
 <button type="button" class="btn" id="itemSubmitBtn" onclick="submitItem()">حفظ</button>
 <button type="button" class="btn secondary" id="itemCancelBtn" onclick="cancelItemEdit()" style="display:none">إلغاء</button>
@@ -3584,6 +3586,8 @@ html[dir="ltr"] .brand-center{direction:ltr;}
 <div style="display:flex;justify-content:space-between;align-items:center"><h3>التصنيفات</h3><button class="btn" onclick="openCategoryForm()">＋ إضافة تصنيف جديد</button></div>
 <div class="index-toolbar" id="catIndexToolbar"><div class="index-info" id="catIndexInfo">عرض 0 من 0</div><div class="index-buttons"><button class="index-btn" id="catPrevBtn" onclick="prevCategoryPage()">السابق</button><button class="index-btn" id="catNextBtn" onclick="nextCategoryPage()">التالي</button></div></div>
 <div id="catForm" style="display:none;margin-top:20px" class="formcard"><div class="frow">
+<input type="hidden" id="catEditCode">
+<div class="field"><label>كود التصنيف (اختياري)</label><input id="catCode" placeholder="يُولَّد تلقائياً إن تُرك فارغاً"></div>
 <div class="field"><label>اسم التصنيف</label><input id="catName"></div>
 <div class="field"><label>صورة التصنيف</label><input id="catImage" type="file"></div>
 <div class="field"><label>التصنيف الرئيسي</label><select id="catParent"><option value="">تصنيف رئيسي</option></select></div>

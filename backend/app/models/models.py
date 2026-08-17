@@ -217,6 +217,29 @@ class LineCostAllocation(Base):
     )
 
 
+class Category(Base):
+    __tablename__ = "categories"
+
+    code = Column(String(30), primary_key=True)
+    name_ar = Column(String(200), nullable=False)
+    name_en = Column(String(200))
+    parent_code = Column(String(30), ForeignKey("categories.code"), nullable=True)
+    description = Column(Text, nullable=True)
+    image_url = Column(String(300), nullable=True)
+    is_active = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class Brand(Base):
+    __tablename__ = "brands"
+
+    code = Column(String(30), primary_key=True)
+    name_ar = Column(String(200), nullable=False)
+    name_en = Column(String(200))
+    is_active = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
 class Item(Base):
     __tablename__ = "items"
 
@@ -229,6 +252,26 @@ class Item(Base):
     )
 
     name = Column(String(200), nullable=False)
+    name_en = Column(String(200), nullable=True)
+    description = Column(Text, nullable=True)
+    barcode = Column(String(80), nullable=True)
+
+    category_code = Column(String(30), ForeignKey("categories.code"), nullable=True)
+    brand_code = Column(String(30), ForeignKey("brands.code"), nullable=True)
+
+    # المورد الافتراضي للصنف وكوده لدى ذلك المورد (لتسهيل إنشاء أوامر
+    # الشراء دون البحث عن المورد المناسب لكل صنف يدوياً كل مرة)
+    supplier_code = Column(String(30), ForeignKey("suppliers.code"), nullable=True)
+    supplier_item_code = Column(String(80), nullable=True)
+
+    # حالة نصية وصفية إضافية (تنشيط/إيقاف/غير نشط) — is_active أدناه
+    # يبقى الحقل الفعلي الذي تعتمد عليه شاشات المشتريات لتصفية الأصناف
+    # القابلة للاستخدام في مستندات جديدة.
+    status = Column(String(20), nullable=False, default="active")
+
+    # أين يُخزَّن الصنف افتراضياً: مستودع + موقع فرعي (رف/منطقة) داخله
+    default_warehouse_id = Column(Integer, ForeignKey("warehouses.id"), nullable=True)
+    default_location_id = Column(Integer, ForeignKey("warehouse_locations.id"), nullable=True)
 
     unit = Column(
         String(20),
