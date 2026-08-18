@@ -203,6 +203,10 @@ app.include_router(
     sales.sq_router
 )
 
+app.include_router(
+    sales.sr_router
+)
+
 
 # Users / Roles / Permissions
 app.include_router(

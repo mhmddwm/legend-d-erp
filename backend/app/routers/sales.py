@@ -20,6 +20,8 @@ from app.models.models import (
     SalesOrderLine,
     SalesQuote,
     SalesQuoteLine,
+    SalesReturn,
+    SalesReturnLine,
     StockMove,
     TaxType,
 )
@@ -38,6 +40,8 @@ from app.schemas.sales import (
     SalesQuoteIn,
     SalesQuoteOut,
     SalesQuoteStatusUpdate,
+    SalesReturnIn,
+    SalesReturnOut,
 )
 
 customer_router = APIRouter(prefix="/api/customers", tags=["Customers"])
@@ -45,6 +49,7 @@ si_router = APIRouter(prefix="/api/sales-invoices", tags=["SalesInvoices"])
 so_router = APIRouter(prefix="/api/sales-orders", tags=["SalesOrders"])
 dn_router = APIRouter(prefix="/api/delivery-notes", tags=["DeliveryNotes"])
 sq_router = APIRouter(prefix="/api/sales-quotes", tags=["SalesQuotes"])
+sr_router = APIRouter(prefix="/api/sales-returns", tags=["SalesReturns"])
 
 
 # =========================================================
@@ -71,14 +76,19 @@ def _next_document_number(db: Session, model, column_name: str, prefix: str, pad
 
 
 def calc_receivable(db: Session, customer_code: str) -> float:
-    """الرصيد المستحق على العميل = فواتير مبيعات مرحّلة (لاحقاً: ناقص
-    مرتجعات ومدفوعات عملاء عند بنائها في مرحلة تالية)."""
+    """الرصيد المستحق على العميل = فواتير مبيعات مرحّلة ناقص مرتجعات
+    (لاحقاً: ناقص مدفوعات عملاء عند بنائها في مرحلة تالية)."""
     invoiced = (
         db.query(func.coalesce(func.sum(SalesInvoice.total), 0))
         .filter(SalesInvoice.customer_code == customer_code, SalesInvoice.status != "cancelled")
         .scalar()
     )
-    return float(invoiced or 0)
+    returned = (
+        db.query(func.coalesce(func.sum(SalesReturn.total), 0))
+        .filter(SalesReturn.customer_code == customer_code, SalesReturn.status != "cancelled")
+        .scalar()
+    )
+    return float(invoiced or 0) - float(returned or 0)
 
 
 # =========================================================
@@ -730,3 +740,265 @@ def cancel_sales_invoice(inv_number: str, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(invoice)
     return invoice
+
+
+# =========================================================
+# SALES RETURN (مرتجع مبيعات) — عكس تناسبي مزدوج (إيراد+ضريبة، وتكلفة بضاعة+مخزون)
+# =========================================================
+def _post_sales_return_journal(db: Session, sales_return: SalesReturn, subtotal, tax_amount, total, tax_type, cogs_total):
+    """يرحّل قيدين لمرتجع المبيعات:
+    1) مدين إيرادات المبيعات [+ مدين ضريبة المبيعات المستحقة إن كان
+       نوع الضريبة مرتبطاً بحساب] / دائن حساب العميل — تخفيض تناسبي
+       لما استحق عليه.
+    2) مدين المخزون / دائن تكلفة البضاعة المباعة — إرجاع البضاعة
+       للمخزون بنفس تكلفتها وقت البيع الأصلي."""
+    revenue_account = db.query(Account).filter(Account.code == "41").first()
+    if not revenue_account:
+        raise HTTPException(400, "حساب إيرادات المبيعات (41) غير موجود بدليل الحسابات.")
+    cogs_account = db.query(Account).filter(Account.code == "51").first()
+    if not cogs_account:
+        raise HTTPException(400, "حساب تكلفة البضاعة المباعة (51) غير موجود بدليل الحسابات.")
+    inventory_account = db.query(Account).filter(Account.code == "123").first()
+    if not inventory_account:
+        raise HTTPException(400, "حساب المخزون (123) غير موجود بدليل الحسابات.")
+
+    customer = db.query(Customer).filter(Customer.code == sales_return.customer_code).first()
+    receivable_account_code = (customer.account_code if customer and customer.account_code else None) or "1121"
+    receivable_account = db.query(Account).filter(Account.code == receivable_account_code).first()
+    if not receivable_account:
+        raise HTTPException(400, f"الحساب المحاسبي المرتبط بالعميل ({receivable_account_code}) غير موجود بدليل الحسابات.")
+
+    tax_account = None
+    if tax_type and tax_type.account_code:
+        tax_account = db.query(Account).filter(Account.code == tax_type.account_code).first()
+
+    entry = JournalEntry(
+        entry_date=sales_return.rt_date,
+        description=f"مرتجع مبيعات {sales_return.rt_number} — العميل {sales_return.customer_code}",
+        source_type="sales_return",
+        source_ref=sales_return.rt_number,
+        status="posted",
+        total_amount=total,
+    )
+    db.add(entry)
+    db.flush()
+
+    line_no = 1
+    if tax_amount and tax_account:
+        db.add(JournalEntryLine(
+            entry_id=entry.id, line_no=line_no, account_code=revenue_account.code,
+            debit=subtotal, credit=0,
+            line_description=f"تخفيض إيرادات — مرتجع {sales_return.rt_number}",
+        ))
+        line_no += 1
+        db.add(JournalEntryLine(
+            entry_id=entry.id, line_no=line_no, account_code=tax_account.code,
+            debit=tax_amount, credit=0,
+            line_description=f"عكس ضريبة مبيعات — مرتجع {sales_return.rt_number}",
+            tax_type_code=tax_type.code, tax_rate=tax_type.rate, tax_amount=tax_amount,
+        ))
+        line_no += 1
+    else:
+        line_kwargs = dict(
+            entry_id=entry.id, line_no=line_no, account_code=revenue_account.code,
+            debit=round(subtotal + (tax_amount or 0), 2), credit=0,
+            line_description=f"تخفيض إيرادات — مرتجع {sales_return.rt_number}",
+        )
+        if tax_type and tax_amount:
+            line_kwargs.update(tax_type_code=tax_type.code, tax_rate=tax_type.rate, tax_amount=tax_amount)
+        db.add(JournalEntryLine(**line_kwargs))
+        line_no += 1
+
+    db.add(JournalEntryLine(
+        entry_id=entry.id, line_no=line_no, account_code=receivable_account.code,
+        debit=0, credit=total,
+        line_description=f"تخفيض مستحق على العميل {sales_return.customer_code} — مرتجع {sales_return.rt_number}",
+    ))
+    line_no += 1
+
+    if cogs_total:
+        db.add(JournalEntryLine(
+            entry_id=entry.id, line_no=line_no, account_code=inventory_account.code,
+            debit=cogs_total, credit=0,
+            line_description=f"إرجاع بضاعة للمخزون — مرتجع {sales_return.rt_number}",
+        ))
+        line_no += 1
+        db.add(JournalEntryLine(
+            entry_id=entry.id, line_no=line_no, account_code=cogs_account.code,
+            debit=0, credit=cogs_total,
+            line_description=f"عكس تكلفة بضاعة مباعة — مرتجع {sales_return.rt_number}",
+        ))
+        line_no += 1
+
+    sales_return.journal_entry_id = entry.id
+    return entry
+
+
+@sr_router.get("", response_model=list[SalesReturnOut])
+def list_sales_returns(db: Session = Depends(get_db)):
+    return db.query(SalesReturn).order_by(SalesReturn.rt_date.desc(), SalesReturn.rt_number.desc()).all()
+
+
+@sr_router.post("", response_model=SalesReturnOut, status_code=201)
+def create_sales_return(
+    payload: SalesReturnIn,
+    db: Session = Depends(get_db),
+    actor: Optional[str] = Query(None),
+):
+    if not payload.lines:
+        raise HTTPException(400, "يجب إضافة صنف واحد على الأقل للمرتجع")
+
+    invoice = db.query(SalesInvoice).filter(SalesInvoice.inv_number == payload.inv_number).first()
+    if not invoice:
+        raise HTTPException(404, f"فاتورة المبيعات {payload.inv_number} غير موجودة")
+    if invoice.status == "cancelled":
+        raise HTTPException(400, "لا يمكن إنشاء مرتجع على فاتورة ملغاة")
+
+    prepared_lines = []
+    for line in payload.lines:
+        if line.qty <= 0:
+            raise HTTPException(400, "كمية المرتجع يجب أن تكون أكبر من صفر")
+        item = db.query(Item).filter(Item.code == line.item_code, Item.is_active.is_(True)).first()
+        if not item:
+            raise HTTPException(404, f"الصنف {line.item_code} غير موجود أو غير نشط")
+
+        invoice_line = (
+            db.query(SalesInvoiceLine)
+            .filter(SalesInvoiceLine.inv_number == invoice.inv_number, SalesInvoiceLine.item_id == item.id)
+            .first()
+        )
+        if not invoice_line:
+            raise HTTPException(400, f"الصنف {line.item_code} غير موجود في فاتورة المبيعات")
+
+        previously_returned = (
+            db.query(func.coalesce(func.sum(SalesReturnLine.qty), 0))
+            .join(SalesReturn, SalesReturn.rt_number == SalesReturnLine.rt_number)
+            .filter(
+                SalesReturn.inv_number == invoice.inv_number,
+                SalesReturnLine.item_id == item.id,
+                SalesReturn.status != "cancelled",
+            )
+            .scalar()
+        )
+        invoiced_qty = _to_float(invoice_line.qty)
+        remaining_returnable = invoiced_qty - _to_float(previously_returned)
+        if line.qty > remaining_returnable:
+            raise HTTPException(
+                400,
+                f"كمية مرتجع الصنف {line.item_code} أكبر من الكمية المتبقية القابلة للإرجاع ({remaining_returnable})",
+            )
+
+        prepared_lines.append((item, line.qty, _to_float(invoice_line.unit_price), _to_float(invoice_line.unit_cost)))
+
+    try:
+        sales_return = SalesReturn(
+            rt_number=_next_document_number(db, SalesReturn, "rt_number", "SRT"),
+            rt_date=payload.rt_date, customer_code=invoice.customer_code, inv_number=invoice.inv_number,
+            status="posted", subtotal=0, tax_amount=0, total=0, cogs_total=0,
+        )
+        db.add(sales_return)
+        db.flush()
+
+        subtotal = 0.0
+        cogs_total = 0.0
+        wh_id = invoice.warehouse_id
+        for item, qty, unit_price, unit_cost in prepared_lines:
+            db.add(SalesReturnLine(
+                rt_number=sales_return.rt_number, item_id=item.id,
+                qty=qty, unit_price=unit_price, unit_cost=unit_cost,
+            ))
+            subtotal += qty * unit_price
+            cogs_total += qty * unit_cost
+
+            new_qty = _to_float(item.qty) + qty
+            item.qty = new_qty
+            db.add(StockMove(
+                move_date=payload.rt_date, item_id=item.id, move_type="مرتجع مبيعات",
+                reference=f"SRT-{sales_return.rt_number}", warehouse_id=wh_id,
+                qty=qty, unit_cost=unit_cost, balance_after=new_qty,
+            ))
+            if wh_id:
+                row = (
+                    db.query(WarehouseStock)
+                    .filter(
+                        WarehouseStock.item_id == item.id, WarehouseStock.warehouse_id == wh_id,
+                        WarehouseStock.location_id == (invoice.location_id or item.default_location_id),
+                    )
+                    .first()
+                )
+                if row:
+                    row.quantity = _to_float(row.quantity) + qty
+
+        # نصيب المرتجع التناسبي من ضريبة الفاتورة الأصلية (إن وُجدت)
+        tax_type = None
+        tax_amount = 0.0
+        if invoice.tax_type_code and _to_float(invoice.subtotal) > 0:
+            tax_type = db.query(TaxType).filter(TaxType.code == invoice.tax_type_code).first()
+            effective_rate = _to_float(invoice.tax_amount) / _to_float(invoice.subtotal)
+            tax_amount = round(subtotal * effective_rate, 2)
+
+        total = round(subtotal + tax_amount, 2)
+        sales_return.subtotal = round(subtotal, 2)
+        sales_return.tax_type_code = tax_type.code if tax_type else None
+        sales_return.tax_amount = tax_amount
+        sales_return.total = total
+        sales_return.cogs_total = round(cogs_total, 2)
+
+        _post_sales_return_journal(db, sales_return, sales_return.subtotal, tax_amount, total, tax_type, sales_return.cogs_total)
+
+        db.commit()
+        db.refresh(sales_return)
+        return sales_return
+
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception:
+        db.rollback()
+        raise
+
+
+@sr_router.post("/{rt_number}/cancel", response_model=SalesReturnOut)
+def cancel_sales_return(rt_number: str, db: Session = Depends(get_db)):
+    """إلغاء مرتجع مبيعات: يخصم الكمية المرتجعة من المخزون مرة أخرى
+    (بأمان — تماماً كبيع جديد، لا يخاطر برصيد سالب طالما البضاعة لم
+    تُستهلك أو تُبَع بعد)، ويُلغي قيده المزدوج."""
+    sales_return = db.query(SalesReturn).filter(SalesReturn.rt_number == rt_number).first()
+    if not sales_return:
+        raise HTTPException(404, "مرتجع المبيعات غير موجود")
+    if sales_return.status == "cancelled":
+        raise HTTPException(400, "المرتجع ملغى بالفعل")
+
+    invoice = db.query(SalesInvoice).filter(SalesInvoice.inv_number == sales_return.inv_number).first()
+    wh_id = invoice.warehouse_id if invoice else None
+
+    for line in sales_return.lines:
+        item = db.query(Item).filter(Item.id == line.item_id).first()
+        if item:
+            if _to_float(item.qty) < _to_float(line.qty):
+                raise HTTPException(
+                    400,
+                    f"لا يمكن إلغاء المرتجع — الرصيد الحالي للصنف {item.code} أقل من الكمية المطلوب سحبها",
+                )
+            item.qty = _to_float(item.qty) - _to_float(line.qty)
+            if wh_id:
+                row = (
+                    db.query(WarehouseStock)
+                    .filter(
+                        WarehouseStock.item_id == item.id, WarehouseStock.warehouse_id == wh_id,
+                        WarehouseStock.location_id == (invoice.location_id if invoice else None) or item.default_location_id,
+                    )
+                    .first()
+                )
+                if row:
+                    row.quantity = max(_to_float(row.quantity) - _to_float(line.qty), 0)
+
+    if sales_return.journal_entry_id:
+        entry = db.query(JournalEntry).filter(JournalEntry.id == sales_return.journal_entry_id).first()
+        if entry and entry.status == "posted":
+            entry.status = "cancelled"
+
+    sales_return.status = "cancelled"
+    db.commit()
+    db.refresh(sales_return)
+    return sales_return

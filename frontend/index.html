@@ -1215,6 +1215,12 @@ html[dir="ltr"] .brand-center{direction:ltr;}
 #panel-sales_quote .po-hero p{font-size:12.5px;color:#4b5768}
 #panel-sales_quote .po-trace{margin-bottom:12px}
 
+#panel-sales_returns .po-hero{padding:14px 18px}
+#panel-sales_returns .po-hero h2{font-size:20px;margin:2px 0 4px}
+#panel-sales_returns .po-hero p{font-size:12.5px;color:#4b5768}
+#panel-sales_returns .po-trace{margin-bottom:12px}
+#panel-sales_returns .hint{color:#48566b}
+
 #panel-delivery_note .po-hero{padding:14px 18px}
 #panel-delivery_note .po-hero h2{font-size:20px;margin:2px 0 4px}
 #panel-delivery_note .po-hero p{font-size:12.5px;color:#4b5768}
@@ -3278,7 +3284,53 @@ html[dir="ltr"] .brand-center{direction:ltr;}
     </div>
   </div>
 </div>
-  <div class="panel" id="panel-sales_returns"><div class="formcard"><h3>المرتجعات</h3><div class="empty-msg">جاهزة للتطوير</div></div></div>
+  <div class="panel" id="panel-sales_returns">
+  <div class="po-page erp-watermark-page">
+    <div class="po-watermark">LEGEND D ERP SYS<br><span>Sales Return</span></div>
+    <div class="po-hero">
+      <div>
+        <span class="mini-label">المبيعات</span>
+        <h2>مرتجعات المبيعات Sales Return</h2>
+        <p>استرجاع أصناف من عميل على فاتورة مرحّلة، مع إعادتها للمخزون وترحيل عكس تناسبي مزدوج تلقائي (تخفيض الإيراد والضريبة والذمة، وعكس تكلفة البضاعة المباعة).</p>
+      </div>
+      <div class="po-actions">
+        <button class="btn secondary" onclick="renderSalesReturns()">تحديث</button>
+        <button class="btn" onclick="window.toggleSrNewForm()">+ مرتجع جديد</button>
+      </div>
+    </div>
+    <div class="po-trace formcard rfq-timeline" id="srTraceBar"><span onclick="window.goSalesWorkflowStage('sales_quote')">عرض سعر</span><b>←</b><span onclick="window.goSalesWorkflowStage('sales_order')">أمر بيع</span><b>←</b><span onclick="window.goSalesWorkflowStage('delivery_note')">تسليم</span><b>←</b><span onclick="window.goSalesWorkflowStage('sales_invoices')">فاتورة</span><b>←</b><span class="active" onclick="window.goSalesWorkflowStage('sales_returns')">مرتجع</span><b>←</b><span onclick="window.goSalesWorkflowStage('customer_payments')">الدفع</span></div>
+
+    <div class="formcard rfq-card prt-list-main" style="margin-top:14px">
+      <div class="rfq-saved-toolbar"><div><h3 style="margin:0">مرتجعات المبيعات المسجّلة</h3><small id="srSavedCount">0 مرتجع</small></div><input id="srSearch" placeholder="بحث برقم المرتجع أو اسم العميل أو رقم الفاتورة" oninput="renderSalesReturns()"></div>
+      <div class="scrollx prt-list-scroll"><table class="grid po-list-table"><thead><tr><th>رقم المرتجع</th><th>التاريخ</th><th>العميل</th><th>الفاتورة</th><th>الإجمالي</th><th>الحالة</th><th style="text-align:center">الإجراءات</th></tr></thead><tbody id="srBody"></tbody></table></div>
+      <div id="srEmpty" class="pr-list-empty" style="display:none">لا توجد مرتجعات مبيعات مسجلة حتى الآن</div>
+    </div>
+
+    <div id="srNewFormBox" class="formcard" style="display:none;margin-top:14px;border:1.5px dashed #93c5fd">
+      <div class="rfq-section-head">
+        <h3>مرتجع مبيعات جديد</h3>
+        <button class="btn secondary" onclick="toggleSrNewForm(false)">إلغاء</button>
+      </div>
+      <div class="frow two">
+        <div class="field"><label>العميل</label><select id="srCustomer" onchange="onSrCustomerChange()"><option value="">— اختر عميلاً —</option></select></div>
+        <div class="field"><label>الفاتورة المرتبطة</label><select id="srInvoice" onchange="onSrInvoiceChange()"><option value="">— اختر عميلاً أولاً —</option></select></div>
+      </div>
+      <div class="frow two">
+        <div class="field"><label>تاريخ المرتجع</label><input id="srDate" type="date"></div>
+        <div></div>
+      </div>
+      <div id="srLinesWrap"></div>
+      <div class="totals-box">
+        <div class="row"><span>الصافي قبل الضريبة</span><span id="srSubtotal">0.00</span></div>
+        <div class="row"><span id="srTaxLabel">الضريبة (نصيب تناسبي)</span><span id="srTaxAmount">0.00</span></div>
+        <div class="row grand"><span>إجمالي المرتجع (يُخصَم من مستحقات العميل)</span><span id="srTotal">0.00</span></div>
+      </div>
+      <div style="margin-top:14px"><button class="btn" onclick="submitSalesReturn()">ترحيل المرتجع</button></div>
+      <div class="err" id="srErr"></div>
+      <div class="hint">تظهر هنا فقط فواتير العميل المختار (غير الملغاة). تُحسب حصة المرتجع من الضريبة تلقائياً وتناسبياً من الفاتورة الأصلية.</div>
+    </div>
+  </div>
+</div>
   <div class="panel" id="panel-credit_notes"><div class="formcard"><h3>إشعارات دائنة</h3><div class="empty-msg">جاهزة للتطوير</div></div></div>
   <div class="panel" id="panel-customer_payments"><div class="formcard"><h3>مدفوعات العملاء</h3><div class="empty-msg">جاهزة للتطوير</div></div></div>
   <div class="panel" id="panel-sales_settings"><div class="formcard"><h3>إعدادات المبيعات</h3><div class="empty-msg">جاهزة للتطوير</div></div></div>

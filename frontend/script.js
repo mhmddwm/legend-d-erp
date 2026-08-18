@@ -40,6 +40,8 @@ let deliveryNotes=[]; // أذون التسليم
 let dnLines2=[]; // سطور نموذج إذن التسليم الحالي
 let salesQuotes=[]; // عروض أسعار البيع
 let sqLines=[]; // سطور نموذج عرض السعر الحالي
+let salesReturns=[]; // مرتجعات المبيعات
+let srCurrentLines=[]; // سطور نموذج مرتجع المبيعات الحالي
 let journalEditingId=null; // معرّف القيد الجاري تعديله (null = إنشاء قيد جديد)
 let journalPage=1; // الصفحة الحالية في قائمة القيود
 const JOURNAL_PAGE_SIZE=20;
@@ -290,6 +292,12 @@ salesQuotes = await safeLoad(
 );
 
 
+salesReturns = await safeLoad(
+"مرتجعات المبيعات",
+"/api/sales-returns"
+);
+
+
 warehouses = await safeLoad(
 "المستودعات",
 "/api/warehouses"
@@ -423,6 +431,7 @@ function renderAll(){
   if(typeof renderSalesOrders === 'function') renderSalesOrders();
   if(typeof renderDeliveryNotes === 'function') renderDeliveryNotes();
   if(typeof renderSalesQuotes === 'function') renderSalesQuotes();
+  if(typeof renderSalesReturns === 'function') renderSalesReturns();
 
   renderWarehousesScreen();
 
@@ -5952,6 +5961,7 @@ function ensureSiActionsMenu(){
     menu.className = 'pinv-actions-menu';
     menu.innerHTML = `
       <button onclick="siMenuRun('view')">👁️ عرض</button>
+      <button onclick="siMenuRun('return')">↩️ مرتجع</button>
       <hr>
       <button class="danger" onclick="siMenuRun('cancel')">🗑️ إلغاء</button>
     `;
@@ -5979,9 +5989,27 @@ document.addEventListener('click', closeSiActionsMenu);
 function siMenuRun(action){
   const invNumber=siMenuCurrentInv; closeSiActionsMenu(); if(!invNumber) return;
   if(action==='view') openSalesInvoiceView(invNumber);
+  else if(action==='return') startSalesReturnFromInvoice(invNumber);
   else if(action==='cancel') cancelSalesInvoiceAction(invNumber);
 }
 window.siMenuRun = siMenuRun;
+
+function startSalesReturnFromInvoice(invNumber){
+  const inv=(salesInvoices||[]).find(i=>i.inv_number===invNumber);
+  if(!inv) return;
+  if(inv.status==='cancelled'){ alert('لا يمكن إنشاء مرتجع على فاتورة ملغاة'); return; }
+  if(typeof openSubModule==='function') openSubModule('المرتجعات');
+  setTimeout(()=>{
+    if(typeof toggleSrNewForm==='function') toggleSrNewForm(true);
+    const custSel=document.getElementById('srCustomer');
+    if(custSel){ custSel.value=inv.customer_code; if(typeof onSrCustomerChange==='function') onSrCustomerChange(); }
+    setTimeout(()=>{
+      const invSel=document.getElementById('srInvoice');
+      if(invSel){ invSel.value=inv.inv_number; if(typeof onSrInvoiceChange==='function') onSrInvoiceChange(); }
+    }, 60);
+  }, 60);
+}
+window.startSalesReturnFromInvoice = startSalesReturnFromInvoice;
 
 function openSalesInvoiceView(invNumber){
   const inv=(salesInvoices||[]).find(i=>i.inv_number===invNumber);
@@ -6176,6 +6204,208 @@ async function convertQuoteToOrder(quoteNumber){
   }catch(e){ alert(e.message); }
 }
 window.convertQuoteToOrder = convertQuoteToOrder;
+
+// ============================================================
+// مرتجعات المبيعات — نفس أسلوب مرتجعات المشتريات بالظبط: العميل أولاً
+// ثم فواتيره غير الملغاة، مع سقف قابل للإرجاع فعلي لكل صنف
+// ============================================================
+function srEsc(s){ return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+function toggleSrNewForm(forceOpen){
+  const box=document.getElementById('srNewFormBox');
+  if(!box) return;
+  const isHidden = box.style.display==='none' || !box.style.display;
+  const open = forceOpen===true ? true : (forceOpen===false ? false : isHidden);
+  box.style.display = open ? 'block' : 'none';
+  if(open){
+    const custSel=document.getElementById('srCustomer');
+    if(custSel){
+      const current=custSel.value;
+      custSel.innerHTML='<option value="">— اختر عميلاً —</option>'+
+        (customers||[]).filter(c=>c.is_active!==false).map(c=>`<option value="${srEsc(c.code)}">${srEsc(c.name)} (${srEsc(c.code)})</option>`).join('');
+      custSel.value=current;
+    }
+    const dt=document.getElementById('srDate');
+    if(dt && !dt.value) dt.value=new Date().toISOString().slice(0,10);
+    box.scrollIntoView({behavior:'smooth', block:'nearest'});
+  }
+}
+window.toggleSrNewForm = toggleSrNewForm;
+
+function onSrCustomerChange(){
+  const customerCode=document.getElementById('srCustomer').value;
+  const invSel=document.getElementById('srInvoice');
+  const custInvoices=(salesInvoices||[]).filter(i=>i.customer_code===customerCode && i.status!=='cancelled');
+  invSel.innerHTML = customerCode
+    ? ('<option value="">— اختر فاتورة —</option>' + custInvoices.map(i=>
+        `<option value="${srEsc(i.inv_number)}">${srEsc(i.inv_number)} — ${srEsc(i.inv_date)} — إجمالي ${fmt(i.total)}</option>`
+      ).join(''))
+    : '<option value="">— اختر عميلاً أولاً —</option>';
+  if(!custInvoices.length && customerCode){
+    invSel.innerHTML = '<option value="">— لا توجد فواتير مرحّلة لهذا العميل —</option>';
+  }
+  srCurrentLines=[];
+  document.getElementById('srLinesWrap').innerHTML='';
+  recalcSrTotals();
+}
+window.onSrCustomerChange = onSrCustomerChange;
+
+function srAlreadyReturnedQty(invNumber, itemId){
+  return (salesReturns||[])
+    .filter(r=>r.inv_number===invNumber && r.status!=='cancelled')
+    .flatMap(r=>r.lines||[])
+    .filter(l=>l.item_id===itemId)
+    .reduce((s,l)=>s+(Number(l.qty)||0),0);
+}
+
+function onSrInvoiceChange(){
+  const inv=(salesInvoices||[]).find(i=>i.inv_number===document.getElementById('srInvoice').value);
+  const wrap=document.getElementById('srLinesWrap');
+  if(!inv){ wrap.innerHTML=''; srCurrentLines=[]; recalcSrTotals(); return; }
+  srCurrentLines=(inv.lines||[]).map(l=>{
+    const it=(items||[]).find(i=>i.id===l.item_id);
+    const alreadyReturned=srAlreadyReturnedQty(inv.inv_number, l.item_id);
+    const maxQty=Math.max(0, (Number(l.qty)||0) - alreadyReturned);
+    return {item_code:it?it.code:'', item_name:it?it.name:String(l.item_id), unit_price:Number(l.unit_price)||0, max_qty:maxQty, qty:0};
+  });
+  renderSrLines();
+}
+window.onSrInvoiceChange = onSrInvoiceChange;
+
+function onSrQtyChange(itemCode, v){
+  const l=srCurrentLines.find(x=>x.item_code===itemCode);
+  if(!l) return;
+  let q=parseFloat(v)||0;
+  if(q<0) q=0; if(q>l.max_qty) q=l.max_qty;
+  l.qty=q;
+  renderSrLines();
+}
+window.onSrQtyChange = onSrQtyChange;
+
+function srAllocFull(itemCode){
+  const l=srCurrentLines.find(x=>x.item_code===itemCode);
+  if(!l) return;
+  l.qty=l.max_qty;
+  renderSrLines();
+}
+window.srAllocFull = srAllocFull;
+
+function renderSrLines(){
+  const wrap=document.getElementById('srLinesWrap');
+  if(!wrap) return;
+  if(!srCurrentLines.length){
+    wrap.innerHTML='<div class="hint">لا توجد أصناف بهذه الفاتورة.</div>';
+    recalcSrTotals();
+    return;
+  }
+  const rows=srCurrentLines.map(l=>`<tr>
+      <td>${srEsc(l.item_code)} — ${srEsc(l.item_name)}</td>
+      <td class="num" style="color:#7c8ba3">المتبقي القابل للإرجاع: ${fmt(l.max_qty)}</td>
+      <td>
+        <div style="display:flex;gap:6px;align-items:center">
+          <input type="number" step="0.01" min="0" max="${l.max_qty}" value="${l.qty}" style="width:100px" onchange="onSrQtyChange('${srEsc(l.item_code)}',this.value)" ${l.max_qty<=0?'disabled':''}>
+          <button type="button" class="btn secondary" style="padding:4px 8px;font-size:11px" onclick="srAllocFull('${srEsc(l.item_code)}')">الكل</button>
+        </div>
+      </td>
+      <td class="num">${fmt(l.unit_price)}</td>
+      <td class="linetotal">${fmt(l.qty*l.unit_price)}</td>
+    </tr>`).join('');
+  wrap.innerHTML=`<table class="line-items"><thead><tr><th>الصنف</th><th>الحد المتاح</th><th>كمية المرتجع</th><th>سعر البيع</th><th>الإجمالي</th></tr></thead><tbody>${rows}</tbody></table>`;
+  recalcSrTotals();
+}
+
+function recalcSrTotals(){
+  const subtotal = srCurrentLines.reduce((s,l)=>s+l.qty*l.unit_price,0);
+  const inv=(salesInvoices||[]).find(i=>i.inv_number===document.getElementById('srInvoice')?.value);
+  let tax=0, taxLabel='الضريبة (نصيب تناسبي)';
+  if(inv && inv.tax_type_code && Number(inv.subtotal)>0){
+    const effectiveRate = Number(inv.tax_amount||0) / Number(inv.subtotal);
+    tax = subtotal * effectiveRate;
+    const tt=(taxTypes||[]).find(t=>t.code===inv.tax_type_code);
+    if(tt) taxLabel = `الضريبة (نصيب تناسبي من ${tt.name_ar||tt.code} ${fmt(tt.rate)}%)`;
+  }
+  const subEl=document.getElementById('srSubtotal'); if(subEl) subEl.textContent=fmt(subtotal);
+  const taxEl=document.getElementById('srTaxAmount'); if(taxEl) taxEl.textContent=fmt(tax);
+  const taxLabelEl=document.getElementById('srTaxLabel'); if(taxLabelEl) taxLabelEl.textContent=taxLabel;
+  const totalEl=document.getElementById('srTotal'); if(totalEl) totalEl.textContent=fmt(subtotal+tax);
+}
+window.recalcSrTotals = recalcSrTotals;
+
+async function submitSalesReturn(){
+  const inv_number=document.getElementById('srInvoice').value;
+  const rt_date=document.getElementById('srDate').value;
+  const err=document.getElementById('srErr');
+  const valid=srCurrentLines.filter(l=>l.qty>0);
+  if(!document.getElementById('srCustomer').value){ err.textContent='يرجى اختيار العميل'; return; }
+  if(!inv_number){ err.textContent='يرجى اختيار الفاتورة'; return; }
+  if(!rt_date){ err.textContent='يرجى إدخال التاريخ'; return; }
+  if(!valid.length){ err.textContent='يرجى إدخال كمية مرتجع لصنف واحد على الأقل'; return; }
+  err.textContent='';
+  try{
+    await api('POST','/api/sales-returns',{
+      rt_date, inv_number,
+      lines: valid.map(l=>({item_code:l.item_code, qty:l.qty})),
+    });
+    document.getElementById('srCustomer').value='';
+    document.getElementById('srInvoice').innerHTML='<option value="">— اختر عميلاً أولاً —</option>';
+    document.getElementById('srLinesWrap').innerHTML='';
+    srCurrentLines=[];
+    recalcSrTotals();
+    toggleSrNewForm(false);
+    await loadAll();
+  }catch(e){ err.textContent=e.message; }
+}
+window.submitSalesReturn = submitSalesReturn;
+
+function getSrBadge(sr){
+  if(sr.status==='cancelled') return '<span class="badge returned">ملغى</span>';
+  return '<span class="badge posted">مرحّل</span>';
+}
+
+function renderSalesReturns(){
+  const body=document.getElementById('srBody');
+  if(!body) return;
+  const q=(document.getElementById('srSearch')?.value||'').trim().toLowerCase();
+  let data=Array.isArray(salesReturns)?[...salesReturns]:[];
+  if(q){
+    data=data.filter(r=>{
+      const cust=(customers||[]).find(c=>c.code===r.customer_code);
+      return (r.rt_number||'').toLowerCase().includes(q) ||
+        (r.inv_number||'').toLowerCase().includes(q) ||
+        (cust?.name||'').toLowerCase().includes(q);
+    });
+  }
+  data.sort((a,b)=> new Date(b.rt_date||0)-new Date(a.rt_date||0) || String(b.rt_number||'').localeCompare(String(a.rt_number||'')));
+  body.innerHTML=data.map(r=>{
+    const cust=(customers||[]).find(c=>c.code===r.customer_code);
+    return `<tr>
+      <td>${srEsc(r.rt_number)}</td>
+      <td>${srEsc(r.rt_date)}</td>
+      <td>${srEsc(cust?cust.name:r.customer_code)}</td>
+      <td>${srEsc(r.inv_number)}</td>
+      <td>${fmt(r.total)}${(r.tax_amount && Number(r.tax_amount)>0) ? `<div style="font-size:10.5px;color:#0b67c2;margin-top:2px">شامل ضريبة ${fmt(r.tax_amount)}</div>` : ''}</td>
+      <td>${getSrBadge(r)}</td>
+      <td style="text-align:center">
+        ${r.status!=='cancelled' ? `<button type="button" class="btn secondary" style="padding:4px 10px;font-size:12px;border-color:#c62828;color:#c62828" onclick="cancelSalesReturnAction('${srEsc(r.rt_number)}')">إلغاء</button>` : '-'}
+      </td>
+    </tr>`;
+  }).join('');
+  const empty=document.getElementById('srEmpty');
+  if(empty) empty.style.display = data.length ? 'none' : 'block';
+  const countEl=document.getElementById('srSavedCount');
+  if(countEl) countEl.textContent = (salesReturns||[]).length + ' مرتجع';
+}
+window.renderSalesReturns = renderSalesReturns;
+
+async function cancelSalesReturnAction(rtNumber){
+  if(!confirm(`سيتم إلغاء المرتجع ${rtNumber} — سيُخصَم من المخزون مرة أخرى ويُلغى قيده المحاسبي، ويعود مستحق العميل كما كان قبل هذا المرتجع. هل تريد المتابعة؟`)) return;
+  try{
+    await api('POST', `/api/sales-returns/${encodeURIComponent(rtNumber)}/cancel`, {});
+    await loadAll();
+  }catch(e){ alert(e.message); }
+}
+window.cancelSalesReturnAction = cancelSalesReturnAction;
+
 
 // ============================================================
 // أمر البيع

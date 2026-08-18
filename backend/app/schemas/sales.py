@@ -217,3 +217,42 @@ class SalesQuoteOut(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class SRLineIn(BaseModel):
+    item_code: str
+    qty: float = Field(gt=0)
+
+
+class SalesReturnIn(BaseModel):
+    rt_date: date
+    inv_number: str
+    lines: List[SRLineIn]
+
+
+class SRLineOut(BaseModel):
+    item_id: int
+    qty: float
+    unit_price: float
+    unit_cost: float
+
+    class Config:
+        from_attributes = True
+
+
+class SalesReturnOut(BaseModel):
+    rt_number: str
+    rt_date: date
+    customer_code: str
+    inv_number: str
+    subtotal: float = 0
+    tax_type_code: Optional[str] = None
+    tax_amount: float = 0
+    total: float
+    cogs_total: float = 0
+    status: str = "posted"
+    journal_entry_id: Optional[int] = None
+    lines: List[SRLineOut] = []
+
+    class Config:
+        from_attributes = True

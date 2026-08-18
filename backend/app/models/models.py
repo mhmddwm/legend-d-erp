@@ -900,3 +900,39 @@ class SalesQuoteLine(Base):
     item_id = Column(Integer, ForeignKey("items.id"), nullable=False)
     qty = Column(Numeric(18, 4), nullable=False)
     unit_price = Column(Numeric(18, 4), nullable=False)
+
+
+class SalesReturn(Base):
+    """مرتجع مبيعات — عكس تناسبي مزدوج لقيد فاتورة المبيعات: تخفيض
+    الإيراد والذمة من جهة (تناسبياً مع الضريبة)، وإرجاع البضاعة
+    للمخزون مقابل عكس تكلفة البضاعة المباعة من جهة أخرى، بنفس التكلفة
+    المسجَّلة على سطر الفاتورة الأصلية وقت البيع."""
+    __tablename__ = "sales_returns"
+
+    rt_number = Column(String(30), primary_key=True)
+    rt_date = Column(Date, nullable=False)
+    customer_code = Column(String(30), ForeignKey("customers.code"), nullable=False)
+    inv_number = Column(String(30), ForeignKey("sales_invoices.inv_number"), nullable=False)
+
+    subtotal = Column(Numeric(18, 2), nullable=False, default=0)
+    tax_type_code = Column(String(20), ForeignKey("tax_types.code"), nullable=True)
+    tax_amount = Column(Numeric(18, 2), nullable=False, default=0)
+    total = Column(Numeric(18, 2), nullable=False, default=0)
+    cogs_total = Column(Numeric(18, 2), nullable=False, default=0)
+
+    status = Column(String(20), nullable=False, default="posted")
+    journal_entry_id = Column(Integer, ForeignKey("journal_entries.id"), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    lines = relationship("SalesReturnLine", backref="return_doc", cascade="all, delete-orphan")
+
+
+class SalesReturnLine(Base):
+    __tablename__ = "sales_return_lines"
+
+    id = Column(Integer, primary_key=True)
+    rt_number = Column(String(30), ForeignKey("sales_returns.rt_number"), nullable=False)
+    item_id = Column(Integer, ForeignKey("items.id"), nullable=False)
+    qty = Column(Numeric(18, 4), nullable=False)
+    unit_price = Column(Numeric(18, 4), nullable=False)
+    unit_cost = Column(Numeric(18, 4), nullable=False, default=0)
