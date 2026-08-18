@@ -1194,6 +1194,16 @@ html[dir="ltr"] .brand-center{direction:ltr;}
 #panel-supplier_payments .po-hero p{font-size:12.5px;color:#4b5768}
 #panel-supplier_payments .po-trace{margin-bottom:12px}
 #panel-supplier_payments .hint{color:#48566b}
+
+#panel-customers .po-hero{padding:14px 18px}
+#panel-customers .po-hero h2{font-size:20px;margin:2px 0 4px}
+#panel-customers .po-hero p{font-size:12.5px;color:#4b5768}
+
+#panel-sales_invoices .po-hero{padding:14px 18px}
+#panel-sales_invoices .po-hero h2{font-size:20px;margin:2px 0 4px}
+#panel-sales_invoices .po-hero p{font-size:12.5px;color:#4b5768}
+#panel-sales_invoices .po-trace{margin-bottom:12px}
+#panel-sales_invoices .hint{color:#48566b}
 </style>
 </head>
 <body class="erp-body">
@@ -3048,8 +3058,71 @@ html[dir="ltr"] .brand-center{direction:ltr;}
   <div class="panel" id="panel-sales_quote"><div class="formcard"><h3>عرض سعر</h3><div class="empty-msg">جاهزة للتطوير</div></div></div>
   <div class="panel" id="panel-sales_order"><div class="formcard"><h3>أمر بيع</h3><div class="empty-msg">جاهزة للتطوير</div></div></div>
   <div class="panel" id="panel-delivery_note"><div class="formcard"><h3>إذن تسليم/صرف بضاعة</h3><div class="empty-msg">جاهزة للتطوير</div></div></div>
-  <div class="panel" id="panel-sales_invoice_create"><div class="formcard"><h3>إنشاء فاتورة</h3><div class="empty-msg">جاهزة للتطوير</div></div></div>
-  <div class="panel" id="panel-sales_invoices"><div class="formcard"><h3>إدارة الفواتير</h3><div class="empty-msg">جاهزة للتطوير</div></div></div>
+  <div class="panel" id="panel-sales_invoice_create"></div>
+  <div class="panel" id="panel-sales_invoices">
+  <div class="po-page erp-watermark-page">
+    <div class="po-watermark">LEGEND D ERP SYS<br><span>Sales Invoice</span></div>
+    <div class="po-hero">
+      <div>
+        <span class="mini-label">المبيعات</span>
+        <h2>فواتير المبيعات Sales Invoice</h2>
+        <p>ترحيل فاتورة بيع للعميل مباشرة، مع خصم المخزون فوراً وترحيل قيد محاسبي مزدوج تلقائي (الإيراد والذمة + تكلفة البضاعة المباعة).</p>
+      </div>
+      <div class="po-actions">
+        <button class="btn secondary" onclick="renderSalesInvoices()">تحديث</button>
+        <button class="btn" onclick="window.toggleSalesInvoiceNewForm()">+ فاتورة جديدة</button>
+      </div>
+    </div>
+    <div class="po-trace formcard rfq-timeline" id="siTraceBar"><span onclick="window.goSalesWorkflowStage('sales_quote')">عرض سعر</span><b>←</b><span onclick="window.goSalesWorkflowStage('sales_order')">أمر بيع</span><b>←</b><span onclick="window.goSalesWorkflowStage('delivery_note')">تسليم</span><b>←</b><span class="active" onclick="window.goSalesWorkflowStage('sales_invoices')">فاتورة</span><b>←</b><span onclick="window.goSalesWorkflowStage('sales_returns')">مرتجع</span><b>←</b><span onclick="window.goSalesWorkflowStage('customer_payments')">الدفع</span></div>
+
+    <div class="formcard rfq-card pinv-list-main" style="margin-top:14px">
+      <div class="rfq-saved-toolbar"><div><h3 style="margin:0">فواتير المبيعات المسجّلة</h3><small id="siSavedCount">0 فاتورة</small></div><input id="siSearch" placeholder="بحث برقم الفاتورة أو اسم العميل" oninput="renderSalesInvoices()"></div>
+      <div class="scrollx pinv-list-scroll"><table class="grid po-list-table"><thead><tr><th>رقم الفاتورة</th><th>التاريخ</th><th>العميل</th><th>الإجمالي</th><th>تاريخ الاستحقاق</th><th>الحالة</th><th style="text-align:center">الإجراءات</th></tr></thead><tbody id="siBody"></tbody></table></div>
+      <div id="siEmpty" class="pr-list-empty" style="display:none">لا توجد فواتير مبيعات مسجلة حتى الآن</div>
+    </div>
+
+    <div id="siNewFormBox" class="formcard" style="display:none;margin-top:14px;border:1.5px dashed #93c5fd">
+      <div class="rfq-section-head">
+        <h3>فاتورة مبيعات جديدة</h3>
+        <button class="btn secondary" onclick="toggleSalesInvoiceNewForm(false)">إلغاء</button>
+      </div>
+      <div class="frow two">
+        <div class="field"><label>العميل</label><select id="siCustomer" onchange="onSiCustomerChange()"><option value="">— اختر عميلاً —</option></select></div>
+        <div class="field"><label>تاريخ الفاتورة</label><input id="siDate" type="date"></div>
+      </div>
+      <div class="frow two">
+        <div class="field"><label>رقم مرجع العميل (اختياري)</label><input id="siCustomerRef" placeholder="رقم أمر الشراء لدى العميل مثلاً"></div>
+        <div class="field"><label>فترة السماح (أيام)</label><input id="siTerms" type="number" min="0" value="0"></div>
+      </div>
+      <div class="frow two">
+        <div class="field"><label>مركز التكلفة</label><select id="siCostCenter"><option value="">— بدون —</option></select></div>
+        <div class="field"><label>المستودع (يُخصَم منه المخزون)</label><select id="siWarehouse"><option value="">— بدون تحديد —</option></select></div>
+      </div>
+      <div class="frow two">
+        <div class="field"><label>نوع الضريبة</label><select id="siTaxType" onchange="recalcSiTotals()"><option value="">— بدون ضريبة —</option></select></div>
+        <div class="field"><label>طريقة الاحتساب</label>
+          <select id="siTaxCalcMethod" onchange="recalcSiTotals()">
+            <option value="exclusive">غير متضمنة (تُضاف على القيمة)</option>
+            <option value="inclusive">متضمنة (القيمة شاملة الضريبة)</option>
+          </select>
+        </div>
+      </div>
+      <table class="line-items">
+        <thead><tr><th style="width:30%">الصنف</th><th style="width:14%">الكمية</th><th style="width:12%">المتاح</th><th style="width:18%">سعر البيع</th><th style="width:16%">الإجمالي</th><th></th></tr></thead>
+        <tbody id="siLinesBody"></tbody>
+      </table>
+      <button class="add-line-btn" onclick="addSiLine()">+ إضافة سطر</button>
+      <div class="totals-box">
+        <div class="row"><span>الصافي قبل الضريبة</span><span id="siSubtotal">0.00</span></div>
+        <div class="row"><span id="siTaxLabel">الضريبة</span><span id="siTaxAmount">0.00</span></div>
+        <div class="row grand"><span>إجمالي الفاتورة</span><span id="siTotal">0.00</span></div>
+      </div>
+      <div style="margin-top:14px"><button class="btn" onclick="submitSalesInvoice()">ترحيل الفاتورة</button></div>
+      <div class="err" id="siErr"></div>
+      <div class="hint">سعر البيع يُعبَّأ تلقائياً من سعر الصنف الافتراضي، ويمكن تعديله لكل سطر. لا يمكن بيع كمية أكبر من الرصيد المتاح.</div>
+    </div>
+  </div>
+</div>
   <div class="panel" id="panel-sales_returns"><div class="formcard"><h3>المرتجعات</h3><div class="empty-msg">جاهزة للتطوير</div></div></div>
   <div class="panel" id="panel-credit_notes"><div class="formcard"><h3>إشعارات دائنة</h3><div class="empty-msg">جاهزة للتطوير</div></div></div>
   <div class="panel" id="panel-customer_payments"><div class="formcard"><h3>مدفوعات العملاء</h3><div class="empty-msg">جاهزة للتطوير</div></div></div>
@@ -3058,7 +3131,50 @@ html[dir="ltr"] .brand-center{direction:ltr;}
   <div class="panel" id="panel-pos_sessions"><div class="formcard"><h3>الجلسات</h3><div class="empty-msg">جاهزة للتطوير</div></div></div>
   <div class="panel" id="panel-pos_reports"><div class="formcard"><h3>تقارير نقاط البيع</h3><div class="empty-msg">جاهزة للتطوير</div></div></div>
   <div class="panel" id="panel-pos_settings"><div class="formcard"><h3>إعدادات نقاط البيع</h3><div class="empty-msg">جاهزة للتطوير</div></div></div>
-  <div class="panel" id="panel-customers"><div class="formcard"><h3>إدارة العملاء</h3><div class="empty-msg">جاهزة للتطوير</div></div></div>
+  <div class="panel" id="panel-customers">
+  <div class="po-page erp-watermark-page">
+    <div class="po-watermark">LEGEND D ERP SYS<br><span>Customers</span></div>
+    <div class="po-hero">
+      <div>
+        <span class="mini-label">المبيعات</span>
+        <h2>إدارة العملاء Customers</h2>
+        <p>قائمة العملاء وأرصدتهم المستحقة، مبنية مباشرة على فواتير المبيعات المرحّلة الفعلية.</p>
+      </div>
+      <div class="po-actions">
+        <button class="btn secondary" onclick="renderCustomers()">تحديث</button>
+        <button class="btn" onclick="window.toggleCustomerNewForm()">+ عميل جديد</button>
+      </div>
+    </div>
+
+    <div class="formcard rfq-card prt-list-main" style="margin-top:14px">
+      <div class="rfq-saved-toolbar"><div><h3 style="margin:0">العملاء المسجّلون</h3><small id="custSavedCount">0 عميل</small></div><input id="custSearch" placeholder="بحث بالاسم أو الكود أو الهاتف" oninput="renderCustomers()"></div>
+      <div class="scrollx prt-list-scroll"><table class="grid po-list-table"><thead><tr><th>الكود</th><th>الاسم</th><th>الهاتف</th><th>البريد</th><th>فترة السماح</th><th>الرصيد المستحق</th><th>الحالة</th><th style="text-align:center">الإجراءات</th></tr></thead><tbody id="custBody"></tbody></table></div>
+      <div id="custEmpty" class="pr-list-empty" style="display:none">لا يوجد عملاء مسجّلون حتى الآن</div>
+    </div>
+
+    <div id="custNewFormBox" class="formcard" style="display:none;margin-top:14px;border:1.5px dashed #93c5fd">
+      <div class="rfq-section-head">
+        <h3 id="custFormTitle">عميل جديد</h3>
+        <button class="btn secondary" onclick="toggleCustomerNewForm(false)">إلغاء</button>
+      </div>
+      <input type="hidden" id="custEditCode">
+      <div class="frow two">
+        <div class="field"><label>كود العميل</label><input id="custCode" placeholder="يُولَّد تلقائياً إن تُرك فارغاً"></div>
+        <div class="field"><label>اسم العميل</label><input id="custName"></div>
+      </div>
+      <div class="frow two">
+        <div class="field"><label>الهاتف</label><input id="custPhone"></div>
+        <div class="field"><label>البريد الإلكتروني</label><input id="custEmail"></div>
+      </div>
+      <div class="frow two">
+        <div class="field"><label>فترة السماح الافتراضية (أيام)</label><input id="custTerms" type="number" min="0" value="0"></div>
+        <div class="field"><label>ملاحظات</label><input id="custNotes"></div>
+      </div>
+      <div style="margin-top:14px"><button class="btn" onclick="submitCustomer()">حفظ</button></div>
+      <div class="err" id="custErr"></div>
+    </div>
+  </div>
+</div>
   <div class="panel" id="panel-customer_add"><div class="formcard"><h3>إضافة عميل جديد</h3><div class="empty-msg">جاهزة للتطوير</div></div></div>
   <div class="panel" id="panel-contact_lists"><div class="formcard"><h3>قوائم الاتصال</h3><div class="empty-msg">جاهزة للتطوير</div></div></div>
   <div class="panel" id="panel-customer_settings"><div class="formcard"><h3>إعدادات العملاء</h3><div class="empty-msg">جاهزة للتطوير</div></div></div>

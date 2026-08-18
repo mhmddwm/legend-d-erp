@@ -31,6 +31,9 @@ let appUsers=[]; // قائمة المستخدمين لاستخدامها في ح
 let costCenters=[]; // مراكز التكلفة
 let taxTypes=[]; // أنواع الضرائب المسجلة بالنظام
 let supplierPayments=[]; // مدفوعات الموردين
+let customers=[]; // عملاء المبيعات
+let salesInvoices=[]; // فواتير المبيعات
+let siLines=[]; // سطور نموذج فاتورة المبيعات الحالي
 let journalEditingId=null; // معرّف القيد الجاري تعديله (null = إنشاء قيد جديد)
 let journalPage=1; // الصفحة الحالية في قائمة القيود
 const JOURNAL_PAGE_SIZE=20;
@@ -251,6 +254,18 @@ supplierPayments = await safeLoad(
 );
 
 
+customers = await safeLoad(
+"العملاء",
+"/api/customers"
+);
+
+
+salesInvoices = await safeLoad(
+"فواتير المبيعات",
+"/api/sales-invoices"
+);
+
+
 warehouses = await safeLoad(
 "المستودعات",
 "/api/warehouses"
@@ -378,6 +393,9 @@ function renderAll(){
   renderReturns();
 
   if(typeof renderSupplierPayments === 'function') renderSupplierPayments();
+
+  if(typeof renderCustomers === 'function') renderCustomers();
+  if(typeof renderSalesInvoices === 'function') renderSalesInvoices();
 
   renderWarehousesScreen();
 
@@ -5550,6 +5568,395 @@ async function cancelSupplierPaymentAction(paymentNumber){
 }
 window.cancelSupplierPaymentAction = cancelSupplierPaymentAction;
 
+// ============================================================
+// إدارة العملاء
+// ============================================================
+function custEsc(s){ return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+function toggleCustomerNewForm(forceOpen){
+  const box=document.getElementById('custNewFormBox');
+  if(!box) return;
+  const isHidden = box.style.display==='none' || !box.style.display;
+  const open = forceOpen===true ? true : (forceOpen===false ? false : isHidden);
+  box.style.display = open ? 'block' : 'none';
+  if(open){
+    document.getElementById('custFormTitle').textContent='عميل جديد';
+    document.getElementById('custEditCode').value='';
+    document.getElementById('custCode').value=''; document.getElementById('custCode').disabled=false;
+    document.getElementById('custName').value='';
+    document.getElementById('custPhone').value='';
+    document.getElementById('custEmail').value='';
+    document.getElementById('custTerms').value='0';
+    document.getElementById('custNotes').value='';
+    document.getElementById('custErr').textContent='';
+    box.scrollIntoView({behavior:'smooth', block:'nearest'});
+  }
+}
+window.toggleCustomerNewForm = toggleCustomerNewForm;
+
+function slugifyCustomerCode(name){
+  const base=(name||'').trim().replace(/\s+/g,'-').slice(0,20) || 'CUST';
+  let code=base, n=1;
+  while((customers||[]).some(c=>c.code===code)){ code=`${base}-${n++}`; }
+  return code;
+}
+
+async function submitCustomer(){
+  const err=document.getElementById('custErr');
+  const editCode=document.getElementById('custEditCode').value;
+  let code=document.getElementById('custCode').value.trim();
+  const name=document.getElementById('custName').value.trim();
+  if(!name){ err.textContent='يرجى إدخال اسم العميل'; return; }
+  err.textContent='';
+  const payload={
+    name, phone: document.getElementById('custPhone').value||null,
+    email: document.getElementById('custEmail').value||null,
+    notes: document.getElementById('custNotes').value||null,
+    payment_terms_days: parseInt(document.getElementById('custTerms').value)||0,
+  };
+  try{
+    if(editCode){
+      await api('PUT', `/api/customers/${encodeURIComponent(editCode)}`, payload);
+    }else{
+      if(!code) code=slugifyCustomerCode(name);
+      await api('POST', '/api/customers', {code, ...payload});
+    }
+    toggleCustomerNewForm(false);
+    await loadAll();
+  }catch(e){ err.textContent=e.message; }
+}
+window.submitCustomer = submitCustomer;
+
+function editCustomer(code){
+  const c=(customers||[]).find(x=>x.code===code); if(!c) return;
+  toggleCustomerNewForm(true);
+  document.getElementById('custFormTitle').textContent='تعديل عميل';
+  document.getElementById('custEditCode').value=c.code;
+  document.getElementById('custCode').value=c.code; document.getElementById('custCode').disabled=true;
+  document.getElementById('custName').value=c.name||'';
+  document.getElementById('custPhone').value=c.phone||'';
+  document.getElementById('custEmail').value=c.email||'';
+  document.getElementById('custTerms').value=c.payment_terms_days||0;
+  document.getElementById('custNotes').value=c.notes||'';
+}
+window.editCustomer = editCustomer;
+
+async function deleteCustomer(code){
+  if(!confirm('سيتم حذف هذا العميل نهائياً. هل تريد المتابعة؟')) return;
+  try{
+    await api('DELETE', `/api/customers/${encodeURIComponent(code)}`);
+    await loadAll();
+  }catch(e){ alert('تعذر حذف العميل: '+e.message); }
+}
+window.deleteCustomer = deleteCustomer;
+
+function renderCustomers(){
+  const body=document.getElementById('custBody');
+  if(!body) return;
+  const q=(document.getElementById('custSearch')?.value||'').trim().toLowerCase();
+  let data=Array.isArray(customers)?[...customers]:[];
+  if(q) data=data.filter(c=>(c.name||'').toLowerCase().includes(q)||(c.code||'').toLowerCase().includes(q)||(c.phone||'').includes(q));
+  body.innerHTML=data.map(c=>`<tr>
+      <td>${custEsc(c.code)}</td>
+      <td>${custEsc(c.name)}</td>
+      <td>${custEsc(c.phone||'-')}</td>
+      <td>${custEsc(c.email||'-')}</td>
+      <td>${c.payment_terms_days||0} يوم</td>
+      <td style="font-weight:700;color:${c.receivable_balance>0?'#c62828':'#2e7d32'}">${fmt(c.receivable_balance||0)}</td>
+      <td>${c.is_active===false?'<span class="badge returned">موقّف</span>':'<span class="badge posted">نشط</span>'}</td>
+      <td style="text-align:center">
+        <button type="button" class="btn secondary" style="padding:4px 10px;font-size:12px" onclick="editCustomer('${custEsc(c.code)}')">تعديل</button>
+        <button type="button" class="btn secondary" style="padding:4px 10px;font-size:12px;border-color:#c62828;color:#c62828" onclick="deleteCustomer('${custEsc(c.code)}')">حذف</button>
+      </td>
+    </tr>`).join('');
+  const empty=document.getElementById('custEmpty');
+  if(empty) empty.style.display = data.length ? 'none' : 'block';
+  const countEl=document.getElementById('custSavedCount');
+  if(countEl) countEl.textContent=(customers||[]).length+' عميل';
+}
+window.renderCustomers = renderCustomers;
+
+// ============================================================
+// فواتير المبيعات
+// ============================================================
+function siEsc(s){ return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+function goSalesWorkflowStage(tabKey){ if(typeof activateTab==='function') activateTab(tabKey); }
+window.goSalesWorkflowStage = goSalesWorkflowStage;
+
+function toggleSalesInvoiceNewForm(forceOpen){
+  const box=document.getElementById('siNewFormBox');
+  if(!box) return;
+  const isHidden = box.style.display==='none' || !box.style.display;
+  const open = forceOpen===true ? true : (forceOpen===false ? false : isHidden);
+  box.style.display = open ? 'block' : 'none';
+  if(open){
+    const custSel=document.getElementById('siCustomer');
+    if(custSel){
+      const current=custSel.value;
+      custSel.innerHTML='<option value="">— اختر عميلاً —</option>'+
+        (customers||[]).filter(c=>c.is_active!==false).map(c=>`<option value="${siEsc(c.code)}">${siEsc(c.name)} (${siEsc(c.code)})</option>`).join('');
+      custSel.value=current;
+    }
+    const ccSel=document.getElementById('siCostCenter');
+    if(ccSel){
+      const current=ccSel.value;
+      ccSel.innerHTML='<option value="">— بدون —</option>'+(costCenters||[]).map(c=>`<option value="${siEsc(c.code)}">${siEsc(c.code)} — ${siEsc(c.name_ar)}</option>`).join('');
+      ccSel.value=current;
+    }
+    const whSel=document.getElementById('siWarehouse');
+    if(whSel){
+      const current=whSel.value;
+      whSel.innerHTML='<option value="">— بدون تحديد —</option>'+(warehouses||[]).filter(w=>w.is_active!==false).map(w=>`<option value="${w.id}">${siEsc(w.code)} — ${siEsc(w.name)}</option>`).join('');
+      whSel.value=current;
+    }
+    if(typeof populatePinvTaxTypeSelects==='function'){
+      const taxSel=document.getElementById('siTaxType');
+      if(taxSel && !taxSel.options.length){ /* no-op, filled below manually */ }
+    }
+    const taxSel=document.getElementById('siTaxType');
+    if(taxSel){
+      const current=taxSel.value;
+      taxSel.innerHTML='<option value="">— بدون ضريبة —</option>'+(taxTypes||[]).map(t=>`<option value="${siEsc(t.code)}">${siEsc(t.name_ar||t.code)} (${fmt(t.rate)}%)</option>`).join('');
+      taxSel.value=current;
+    }
+    const dt=document.getElementById('siDate');
+    if(dt && !dt.value) dt.value=new Date().toISOString().slice(0,10);
+    if(!siLines.length) addSiLine();
+    box.scrollIntoView({behavior:'smooth', block:'nearest'});
+  }
+}
+window.toggleSalesInvoiceNewForm = toggleSalesInvoiceNewForm;
+
+function onSiCustomerChange(){
+  const cust=(customers||[]).find(c=>c.code===document.getElementById('siCustomer').value);
+  const termsEl=document.getElementById('siTerms');
+  if(termsEl && cust) termsEl.value=cust.payment_terms_days||0;
+}
+window.onSiCustomerChange = onSiCustomerChange;
+
+function addSiLine(){
+  lineCounter++;
+  siLines.push({id:lineCounter, itemCode:'', qty:1, price:0});
+  renderSiLines();
+}
+window.addSiLine = addSiLine;
+
+function removeSiLine(id){
+  siLines=siLines.filter(l=>l.id!==id);
+  renderSiLines();
+}
+window.removeSiLine = removeSiLine;
+
+function onSiLineChange(id, field, value){
+  const l=siLines.find(x=>x.id===id);
+  if(!l) return;
+  if(field==='qty'||field==='price') l[field]=parseFloat(value)||0;
+  else l[field]=value;
+  if(field==='itemCode'){
+    const it=(items||[]).find(i=>i.code===value);
+    l.price = it ? Number(it.price)||0 : 0;
+  }
+  renderSiLines();
+}
+window.onSiLineChange = onSiLineChange;
+
+function renderSiLines(){
+  const body=document.getElementById('siLinesBody');
+  if(!body) return;
+  const itemOpts='<option value="">— اختر صنف —</option>'+(items||[]).filter(i=>i.is_active!==false).map(i=>`<option value="${i.code}">${i.code} — ${i.name}</option>`).join('');
+  body.innerHTML=siLines.map(l=>{
+    const it=(items||[]).find(i=>i.code===l.itemCode);
+    const available = it ? Number(it.qty)||0 : 0;
+    return `<tr>
+      <td><select onchange="onSiLineChange(${l.id},'itemCode',this.value)">${itemOpts.replace(`value="${l.itemCode}"`,`value="${l.itemCode}" selected`)}</select></td>
+      <td><input type="number" step="0.01" min="0" max="${available}" value="${l.qty}" onchange="onSiLineChange(${l.id},'qty',this.value)"></td>
+      <td class="num" style="color:${l.qty>available?'#c62828':'#7c8ba3'}">${fmt(available)}</td>
+      <td><input type="number" step="0.01" min="0" value="${l.price}" onchange="onSiLineChange(${l.id},'price',this.value)"></td>
+      <td class="linetotal">${fmt(l.qty*l.price)}</td>
+      <td><button class="rm-line" onclick="removeSiLine(${l.id})">✕</button></td>
+    </tr>`;
+  }).join('');
+  recalcSiTotals();
+}
+
+function recalcSiTotals(){
+  const linesTotal=siLines.reduce((s,l)=>s+l.qty*l.price,0);
+  const taxTypeCode=document.getElementById('siTaxType')?.value||'';
+  const calcMethod=document.getElementById('siTaxCalcMethod')?.value||'exclusive';
+  const r=(typeof pinvTaxPreview==='function') ? pinvTaxPreview(linesTotal, taxTypeCode, calcMethod) : {subtotal:linesTotal, tax:0, total:linesTotal, taxType:null};
+  const subEl=document.getElementById('siSubtotal'); if(subEl) subEl.textContent=fmt(r.subtotal);
+  const taxEl=document.getElementById('siTaxAmount'); if(taxEl) taxEl.textContent=fmt(r.tax);
+  const taxLabel=document.getElementById('siTaxLabel'); if(taxLabel) taxLabel.textContent = r.taxType ? `الضريبة (${r.taxType.name_ar||r.taxType.code} ${fmt(r.taxType.rate)}%)` : 'الضريبة';
+  const totalEl=document.getElementById('siTotal'); if(totalEl) totalEl.textContent=fmt(r.total);
+}
+window.recalcSiTotals = recalcSiTotals;
+
+async function submitSalesInvoice(){
+  const err=document.getElementById('siErr');
+  const customer_code=document.getElementById('siCustomer').value;
+  const inv_date=document.getElementById('siDate').value;
+  const customer_ref_number=document.getElementById('siCustomerRef').value.trim()||null;
+  const payment_terms_days=parseInt(document.getElementById('siTerms').value)||0;
+  const cost_center_code=document.getElementById('siCostCenter').value||null;
+  const warehouse_id=document.getElementById('siWarehouse').value?parseInt(document.getElementById('siWarehouse').value):null;
+  const tax_type_code=document.getElementById('siTaxType').value||null;
+  const tax_calc_method=document.getElementById('siTaxCalcMethod').value||'exclusive';
+  const valid=siLines.filter(l=>l.itemCode && l.qty>0);
+
+  if(!customer_code){ err.textContent='يرجى اختيار العميل'; return; }
+  if(!inv_date){ err.textContent='يرجى إدخال تاريخ الفاتورة'; return; }
+  if(!valid.length){ err.textContent='يرجى إضافة صنف واحد على الأقل'; return; }
+  err.textContent='';
+  try{
+    await api('POST','/api/sales-invoices',{
+      inv_date, customer_code, customer_ref_number, payment_terms_days, cost_center_code,
+      warehouse_id, tax_type_code, tax_calc_method,
+      lines: valid.map(l=>({item_code:l.itemCode, qty:l.qty, unit_price:l.price})),
+    });
+    siLines=[];
+    document.getElementById('siCustomerRef').value='';
+    toggleSalesInvoiceNewForm(false);
+    await loadAll();
+  }catch(e){ err.textContent=e.message; }
+}
+window.submitSalesInvoice = submitSalesInvoice;
+
+function getSiBadge(inv){
+  if(inv.status==='cancelled') return '<span class="badge returned">ملغاة</span>';
+  return '<span class="badge posted">مرحّلة</span>';
+}
+
+function renderSalesInvoices(){
+  const body=document.getElementById('siBody');
+  if(!body) return;
+  const q=(document.getElementById('siSearch')?.value||'').trim().toLowerCase();
+  let data=Array.isArray(salesInvoices)?[...salesInvoices]:[];
+  if(q){
+    data=data.filter(inv=>{
+      const cust=(customers||[]).find(c=>c.code===inv.customer_code);
+      return (inv.inv_number||'').toLowerCase().includes(q) || (cust?.name||'').toLowerCase().includes(q);
+    });
+  }
+  data.sort((a,b)=> new Date(b.inv_date||0)-new Date(a.inv_date||0) || String(b.inv_number||'').localeCompare(String(a.inv_number||'')));
+  body.innerHTML=data.map(inv=>{
+    const cust=(customers||[]).find(c=>c.code===inv.customer_code);
+    return `<tr>
+      <td><a href="javascript:void(0)" class="pinv-num-link" onclick="event.stopPropagation(); openSalesInvoiceView('${siEsc(inv.inv_number)}')">${siEsc(inv.inv_number)}</a></td>
+      <td>${siEsc(inv.inv_date)}</td>
+      <td>${siEsc(cust?cust.name:inv.customer_code)}</td>
+      <td>${fmt(inv.total)}${(inv.tax_amount && Number(inv.tax_amount)>0)?`<div style="font-size:10.5px;color:#0b67c2;margin-top:2px">شامل ضريبة ${fmt(inv.tax_amount)}</div>`:''}</td>
+      <td>${siEsc(inv.due_date||'-')}</td>
+      <td>${getSiBadge(inv)}</td>
+      <td style="text-align:center" onclick="event.stopPropagation()">
+        <button type="button" class="pinv-actions-btn" onclick="toggleSiActionsMenu(event,'${siEsc(inv.inv_number)}')" title="الإجراءات">⋮</button>
+      </td>
+    </tr>`;
+  }).join('');
+  const empty=document.getElementById('siEmpty');
+  if(empty) empty.style.display = data.length ? 'none' : 'block';
+  const countEl=document.getElementById('siSavedCount');
+  if(countEl) countEl.textContent=(salesInvoices||[]).length+' فاتورة';
+}
+window.renderSalesInvoices = renderSalesInvoices;
+
+// ---------- قائمة إجراءات فاتورة المبيعات (⋮) ----------
+let siMenuCurrentInv = null;
+
+function ensureSiActionsMenu(){
+  let menu = document.getElementById('siActionsMenu');
+  if(!menu){
+    menu = document.createElement('div');
+    menu.id = 'siActionsMenu';
+    menu.className = 'pinv-actions-menu';
+    menu.innerHTML = `
+      <button onclick="siMenuRun('view')">👁️ عرض</button>
+      <hr>
+      <button class="danger" onclick="siMenuRun('cancel')">🗑️ إلغاء</button>
+    `;
+    document.body.appendChild(menu);
+  }
+  return menu;
+}
+function toggleSiActionsMenu(e, invNumber){
+  e.stopPropagation();
+  const menu=ensureSiActionsMenu();
+  const wasOpenForThis = menu.classList.contains('show') && siMenuCurrentInv===invNumber;
+  closeSiActionsMenu();
+  if(wasOpenForThis) return;
+  const btn=e.currentTarget; const rect=btn.getBoundingClientRect();
+  menu.classList.add('show'); siMenuCurrentInv=invNumber;
+  const menuRect=menu.getBoundingClientRect();
+  const menuW=menuRect.width||190, menuH=menuRect.height||110, margin=8;
+  let top=rect.bottom+6; if(top+menuH>window.innerHeight-margin) top=Math.max(margin, rect.top-menuH-6);
+  let left=rect.left-menuW+rect.width; left=Math.min(Math.max(margin,left), window.innerWidth-menuW-margin);
+  menu.style.top=top+'px'; menu.style.left=left+'px';
+}
+window.toggleSiActionsMenu = toggleSiActionsMenu;
+function closeSiActionsMenu(){ const m=document.getElementById('siActionsMenu'); if(m) m.classList.remove('show'); siMenuCurrentInv=null; }
+document.addEventListener('click', closeSiActionsMenu);
+function siMenuRun(action){
+  const invNumber=siMenuCurrentInv; closeSiActionsMenu(); if(!invNumber) return;
+  if(action==='view') openSalesInvoiceView(invNumber);
+  else if(action==='cancel') cancelSalesInvoiceAction(invNumber);
+}
+window.siMenuRun = siMenuRun;
+
+function openSalesInvoiceView(invNumber){
+  const inv=(salesInvoices||[]).find(i=>i.inv_number===invNumber);
+  if(!inv) return;
+  const cust=(customers||[]).find(c=>c.code===inv.customer_code);
+  const taxType=(taxTypes||[]).find(t=>t.code===inv.tax_type_code);
+  const rows=(inv.lines||[]).map(l=>{
+    const it=(items||[]).find(i=>i.id===l.item_id);
+    return `<tr>
+      <td>${siEsc(it?it.code+' — '+it.name:l.item_id)}</td>
+      <td class="num">${fmt(l.qty)}</td>
+      <td class="num">${fmt(l.unit_price)}</td>
+      <td class="num">${fmt(l.qty*l.unit_price)}</td>
+    </tr>`;
+  }).join('');
+  const taxRowsHtml = (inv.tax_amount && Number(inv.tax_amount)>0)
+    ? `<div class="row"><span>الصافي قبل الضريبة</span><span>${fmt(inv.subtotal)}</span></div>
+       <div class="row"><span>الضريبة${taxType?` (${siEsc(taxType.name_ar||taxType.code)} ${fmt(taxType.rate)}%)`:''}</span><span>${fmt(inv.tax_amount)}</span></div>`
+    : '';
+  const html=`<div class="po-decision-dialog" id="siViewDialog"><div class="box">
+    <div class="rfq-section-head">
+      <h3>فاتورة مبيعات ${siEsc(inv.inv_number)}</h3>
+      <button class="btn secondary" onclick="document.getElementById('siViewDialog').remove()">إغلاق</button>
+    </div>
+    <div class="po-info-grid" style="margin-bottom:14px">
+      <div class="field"><label>العميل</label><input disabled value="${siEsc(cust?cust.name:inv.customer_code)}"></div>
+      <div class="field"><label>تاريخ الفاتورة</label><input disabled value="${siEsc(inv.inv_date)}"></div>
+      <div class="field"><label>تاريخ الاستحقاق</label><input disabled value="${siEsc(inv.due_date||'-')}"></div>
+      <div class="field"><label>رقم مرجع العميل</label><input disabled value="${siEsc(inv.customer_ref_number||'-')}"></div>
+      <div class="field"><label>تكلفة البضاعة المباعة</label><input disabled value="${fmt(inv.cogs_total)}"></div>
+      <div class="field"><label>هامش الربح التقديري</label><input disabled value="${fmt((inv.subtotal||0)-(inv.cogs_total||0))}"></div>
+    </div>
+    <table class="grid po-list-table"><thead><tr><th>الصنف</th><th>الكمية</th><th>السعر</th><th>الإجمالي</th></tr></thead><tbody>${rows}</tbody></table>
+    <div class="totals-box" style="margin-top:12px">
+      ${taxRowsHtml}
+      <div class="row grand"><span>إجمالي الفاتورة</span><span>${fmt(inv.total)}</span></div>
+    </div>
+    ${inv.journal_entry_id ? `<div class="hint pinv-journal-link" style="margin-top:10px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
+      <span>✅ تم ترحيل القيد المحاسبي رقم <b>#${inv.journal_entry_id}</b> تلقائياً (إيراد + ذمة عميل، وتكلفة بضاعة مباعة مقابل المخزون).</span>
+      <button class="btn secondary" onclick="document.getElementById('siViewDialog')?.remove(); openEntryDetail(${inv.journal_entry_id})">📒 فتح القيد المحاسبي</button>
+    </div>` : ''}
+  </div></div>`;
+  document.body.insertAdjacentHTML('beforeend', html);
+}
+window.openSalesInvoiceView = openSalesInvoiceView;
+
+async function cancelSalesInvoiceAction(invNumber){
+  if(!confirm(`سيتم إلغاء فاتورة المبيعات ${invNumber} — سترجع الكمية المباعة للمخزون ويُلغى قيدها المحاسبي. هل تريد المتابعة؟`)) return;
+  try{
+    await api('POST', `/api/sales-invoices/${encodeURIComponent(invNumber)}/cancel`, {});
+    await loadAll();
+  }catch(e){ alert(e.message); }
+}
+window.cancelSalesInvoiceAction = cancelSalesInvoiceAction;
+
+
 
 
 // ============================================================
@@ -5587,6 +5994,15 @@ const MODULE_TAGS = {
 
 // تفعيل تبويب محدد
 function activateTab(tabKey) {
+  // "إنشاء فاتورة" شاشة مستقلة بالقائمة، لكنها نفس شاشة "إدارة
+  // الفواتير" مع فتح نموذج الإنشاء مباشرة — تفادياً لتكرار نفس عناصر
+  // الـ id في شاشتين منفصلتين (مصدر أخطاء تكرّر أكتر من مرة بالنظام)
+  if (tabKey === 'sales_invoice_create') {
+    activateTab('sales_invoices');
+    setTimeout(()=>{ if (typeof toggleSalesInvoiceNewForm === 'function') toggleSalesInvoiceNewForm(true); }, 60);
+    return;
+  }
+
   if (tabKey === 'home') {
     if (typeof resetHomeState === 'function') resetHomeState();
     document.querySelectorAll('.sb-item').forEach(it => it.classList.toggle('active', it.dataset.tab === 'home'));
