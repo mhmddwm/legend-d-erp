@@ -194,15 +194,10 @@ items = await safeLoad(
 "الأصناف",
 "/api/items"
 );
-// في حالة عدم توفر الخادم أو رجوع بيانات قديمة، ندمج آخر تعديلات محفوظة محليًا
-try{
-  const cachedItems = JSON.parse(localStorage.getItem('items_cache') || '[]');
-  if(Array.isArray(cachedItems) && cachedItems.length){
-    const byCode = new Map((items||[]).map(x=>[String(x.code), x]));
-    cachedItems.forEach(x=>{ if(x && x.code) byCode.set(String(x.code), {...(byCode.get(String(x.code))||{}), ...x}); });
-    items = Array.from(byCode.values());
-  }
-}catch(e){}
+// ملاحظة: أُزيل هنا دمج نسخة "items_cache" المحلية القديمة (وضع تجريبي
+// سابق قبل ربط الباك إند الحقيقي) — كان بيرجّع المنتجات المحذوفة فعلياً
+// من السيرفر لأنه كان يدمج الكاش المحلي فوق نتيجة السيرفر بلا شرط، حتى
+// لو تم حذف الصنف بنجاح. الباك إند الآن هو المصدر الوحيد للحقيقة.
 
 
 stockMoves = await safeLoad(
