@@ -1210,6 +1210,11 @@ html[dir="ltr"] .brand-center{direction:ltr;}
 #panel-sales_order .po-hero p{font-size:12.5px;color:#4b5768}
 #panel-sales_order .po-trace{margin-bottom:12px}
 
+#panel-sales_quote .po-hero{padding:14px 18px}
+#panel-sales_quote .po-hero h2{font-size:20px;margin:2px 0 4px}
+#panel-sales_quote .po-hero p{font-size:12.5px;color:#4b5768}
+#panel-sales_quote .po-trace{margin-bottom:12px}
+
 #panel-delivery_note .po-hero{padding:14px 18px}
 #panel-delivery_note .po-hero h2{font-size:20px;margin:2px 0 4px}
 #panel-delivery_note .po-hero p{font-size:12.5px;color:#4b5768}
@@ -3066,7 +3071,52 @@ html[dir="ltr"] .brand-center{direction:ltr;}
     </div>
   </div>
 </div>
-  <div class="panel" id="panel-sales_quote"><div class="formcard"><h3>عرض سعر</h3><div class="empty-msg">جاهزة للتطوير</div></div></div>
+  <div class="panel" id="panel-sales_quote">
+  <div class="po-page erp-watermark-page">
+    <div class="po-watermark">LEGEND D ERP SYS<br><span>Sales Quote</span></div>
+    <div class="po-hero">
+      <div>
+        <span class="mini-label">المبيعات</span>
+        <h2>عرض سعر بيع Sales Quote</h2>
+        <p>عرض سعر يُقدَّم للعميل قبل أي التزام فعلي — بلا أي أثر محاسبي أو مخزني، مع تاريخ صلاحية، وقابل للتحويل مباشرة إلى أمر بيع حقيقي بضغطة واحدة عند القبول.</p>
+      </div>
+      <div class="po-actions">
+        <button class="btn secondary" onclick="renderSalesQuotes()">تحديث</button>
+        <button class="btn" onclick="window.toggleSqNewForm()">+ عرض سعر جديد</button>
+      </div>
+    </div>
+    <div class="po-trace formcard rfq-timeline" id="sqTraceBar"><span class="active" onclick="window.goSalesWorkflowStage('sales_quote')">عرض سعر</span><b>←</b><span onclick="window.goSalesWorkflowStage('sales_order')">أمر بيع</span><b>←</b><span onclick="window.goSalesWorkflowStage('delivery_note')">تسليم</span><b>←</b><span onclick="window.goSalesWorkflowStage('sales_invoices')">فاتورة</span><b>←</b><span onclick="window.goSalesWorkflowStage('sales_returns')">مرتجع</span><b>←</b><span onclick="window.goSalesWorkflowStage('customer_payments')">الدفع</span></div>
+
+    <div class="formcard rfq-card pinv-list-main" style="margin-top:14px">
+      <div class="rfq-saved-toolbar"><div><h3 style="margin:0">عروض الأسعار المسجّلة</h3><small id="sqSavedCount">0 عرض</small></div><input id="sqSearch" placeholder="بحث برقم العرض أو اسم العميل" oninput="renderSalesQuotes()"></div>
+      <div class="scrollx pinv-list-scroll"><table class="grid po-list-table"><thead><tr><th>رقم العرض</th><th>التاريخ</th><th>العميل</th><th>الإجمالي</th><th>صالح حتى</th><th>الحالة</th><th style="text-align:center">الإجراءات</th></tr></thead><tbody id="sqBody"></tbody></table></div>
+      <div id="sqEmpty" class="pr-list-empty" style="display:none">لا توجد عروض أسعار مسجلة حتى الآن</div>
+    </div>
+
+    <div id="sqNewFormBox" class="formcard" style="display:none;margin-top:14px;border:1.5px dashed #93c5fd">
+      <div class="rfq-section-head">
+        <h3>عرض سعر جديد</h3>
+        <button class="btn secondary" onclick="toggleSqNewForm(false)">إلغاء</button>
+      </div>
+      <div class="frow two">
+        <div class="field"><label>العميل</label><select id="sqCustomer"><option value="">— اختر عميلاً —</option></select></div>
+        <div class="field"><label>تاريخ العرض</label><input id="sqDate" type="date"></div>
+      </div>
+      <div class="frow two">
+        <div class="field"><label>صالح حتى (اختياري)</label><input id="sqValidUntil" type="date"></div>
+        <div class="field"><label>ملاحظات (اختياري)</label><input id="sqNotes"></div>
+      </div>
+      <table class="line-items">
+        <thead><tr><th style="width:34%">الصنف</th><th style="width:18%">الكمية</th><th style="width:22%">سعر البيع</th><th style="width:20%">الإجمالي</th><th></th></tr></thead>
+        <tbody id="sqLinesBody"></tbody>
+      </table>
+      <button class="add-line-btn" onclick="addSqLine()">+ إضافة سطر</button>
+      <div class="totals-box"><div class="row grand"><span>إجمالي العرض</span><span id="sqTotal">0.00</span></div></div>
+      <div style="margin-top:14px"><button class="btn" onclick="submitSalesQuote()">حفظ عرض السعر</button></div>
+      <div class="err" id="sqErr"></div>
+    </div>
+  </div>
+</div>
   <div class="panel" id="panel-sales_order">
   <div class="po-page erp-watermark-page">
     <div class="po-watermark">LEGEND D ERP SYS<br><span>Sales Order</span></div>

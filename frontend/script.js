@@ -38,6 +38,8 @@ let salesOrders=[]; // أوامر البيع
 let soLines=[]; // سطور نموذج أمر البيع الحالي
 let deliveryNotes=[]; // أذون التسليم
 let dnLines2=[]; // سطور نموذج إذن التسليم الحالي
+let salesQuotes=[]; // عروض أسعار البيع
+let sqLines=[]; // سطور نموذج عرض السعر الحالي
 let journalEditingId=null; // معرّف القيد الجاري تعديله (null = إنشاء قيد جديد)
 let journalPage=1; // الصفحة الحالية في قائمة القيود
 const JOURNAL_PAGE_SIZE=20;
@@ -282,6 +284,12 @@ deliveryNotes = await safeLoad(
 );
 
 
+salesQuotes = await safeLoad(
+"عروض أسعار البيع",
+"/api/sales-quotes"
+);
+
+
 warehouses = await safeLoad(
 "المستودعات",
 "/api/warehouses"
@@ -414,6 +422,7 @@ function renderAll(){
   if(typeof renderSalesInvoices === 'function') renderSalesInvoices();
   if(typeof renderSalesOrders === 'function') renderSalesOrders();
   if(typeof renderDeliveryNotes === 'function') renderDeliveryNotes();
+  if(typeof renderSalesQuotes === 'function') renderSalesQuotes();
 
   renderWarehousesScreen();
 
@@ -6027,6 +6036,146 @@ async function cancelSalesInvoiceAction(invNumber){
   }catch(e){ alert(e.message); }
 }
 window.cancelSalesInvoiceAction = cancelSalesInvoiceAction;
+
+// ============================================================
+// عرض سعر البيع
+// ============================================================
+function sqEsc(s){ return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+function toggleSqNewForm(forceOpen){
+  const box=document.getElementById('sqNewFormBox');
+  if(!box) return;
+  const isHidden = box.style.display==='none' || !box.style.display;
+  const open = forceOpen===true ? true : (forceOpen===false ? false : isHidden);
+  box.style.display = open ? 'block' : 'none';
+  if(open){
+    const custSel=document.getElementById('sqCustomer');
+    if(custSel){
+      const current=custSel.value;
+      custSel.innerHTML='<option value="">— اختر عميلاً —</option>'+(customers||[]).filter(c=>c.is_active!==false).map(c=>`<option value="${sqEsc(c.code)}">${sqEsc(c.name)} (${sqEsc(c.code)})</option>`).join('');
+      custSel.value=current;
+    }
+    const dt=document.getElementById('sqDate');
+    if(dt && !dt.value) dt.value=new Date().toISOString().slice(0,10);
+    if(!sqLines.length) addSqLine();
+    box.scrollIntoView({behavior:'smooth', block:'nearest'});
+  }
+}
+window.toggleSqNewForm = toggleSqNewForm;
+
+function addSqLine(){ lineCounter++; sqLines.push({id:lineCounter, itemCode:'', qty:1, price:0}); renderSqLines(); }
+window.addSqLine = addSqLine;
+function removeSqLine(id){ sqLines=sqLines.filter(l=>l.id!==id); renderSqLines(); }
+window.removeSqLine = removeSqLine;
+function onSqLineChange(id, field, value){
+  const l=sqLines.find(x=>x.id===id); if(!l) return;
+  if(field==='qty'||field==='price') l[field]=parseFloat(value)||0; else l[field]=value;
+  if(field==='itemCode'){ const it=(items||[]).find(i=>i.code===value); l.price = it ? Number(it.price)||0 : 0; }
+  renderSqLines();
+}
+window.onSqLineChange = onSqLineChange;
+
+function renderSqLines(){
+  const body=document.getElementById('sqLinesBody'); if(!body) return;
+  const itemOpts='<option value="">— اختر صنف —</option>'+(items||[]).filter(i=>i.is_active!==false).map(i=>`<option value="${i.code}">${i.code} — ${i.name}</option>`).join('');
+  body.innerHTML=sqLines.map(l=>`<tr>
+      <td><select onchange="onSqLineChange(${l.id},'itemCode',this.value)">${itemOpts.replace(`value="${l.itemCode}"`,`value="${l.itemCode}" selected`)}</select></td>
+      <td><input type="number" step="0.01" min="0" value="${l.qty}" onchange="onSqLineChange(${l.id},'qty',this.value)"></td>
+      <td><input type="number" step="0.01" min="0" value="${l.price}" onchange="onSqLineChange(${l.id},'price',this.value)"></td>
+      <td class="linetotal">${fmt(l.qty*l.price)}</td>
+      <td><button class="rm-line" onclick="removeSqLine(${l.id})">✕</button></td>
+    </tr>`).join('');
+  const total=sqLines.reduce((s,l)=>s+l.qty*l.price,0);
+  const el=document.getElementById('sqTotal'); if(el) el.textContent=fmt(total);
+}
+
+async function submitSalesQuote(){
+  const err=document.getElementById('sqErr');
+  const customer_code=document.getElementById('sqCustomer').value;
+  const quote_date=document.getElementById('sqDate').value;
+  const valid_until=document.getElementById('sqValidUntil').value||null;
+  const notes=document.getElementById('sqNotes').value.trim()||null;
+  const valid=sqLines.filter(l=>l.itemCode && l.qty>0);
+  if(!customer_code){ err.textContent='يرجى اختيار العميل'; return; }
+  if(!quote_date){ err.textContent='يرجى إدخال التاريخ'; return; }
+  if(!valid.length){ err.textContent='يرجى إضافة صنف واحد على الأقل'; return; }
+  err.textContent='';
+  try{
+    await api('POST','/api/sales-quotes',{
+      quote_date, customer_code, valid_until, notes,
+      lines: valid.map(l=>({item_code:l.itemCode, qty:l.qty, unit_price:l.price})),
+    });
+    sqLines=[];
+    document.getElementById('sqNotes').value='';
+    toggleSqNewForm(false);
+    await loadAll();
+  }catch(e){ err.textContent=e.message; }
+}
+window.submitSalesQuote = submitSalesQuote;
+
+const SQ_STATUS_LABELS = {
+  draft: {text:'مسودة', cls:'manual'}, sent: {text:'مُرسَل', cls:'system'},
+  accepted: {text:'مقبول', cls:'posted'}, rejected: {text:'مرفوض', cls:'returned'},
+  expired: {text:'منتهي الصلاحية', cls:'returned'}, converted: {text:'محوَّل لأمر بيع', cls:'posted'},
+};
+
+function renderSalesQuotes(){
+  const body=document.getElementById('sqBody'); if(!body) return;
+  const q=(document.getElementById('sqSearch')?.value||'').trim().toLowerCase();
+  let data=Array.isArray(salesQuotes)?[...salesQuotes]:[];
+  if(q){
+    data=data.filter(sq=>{
+      const cust=(customers||[]).find(c=>c.code===sq.customer_code);
+      return (sq.quote_number||'').toLowerCase().includes(q) || (cust?.name||'').toLowerCase().includes(q);
+    });
+  }
+  data.sort((a,b)=> new Date(b.quote_date||0)-new Date(a.quote_date||0) || String(b.quote_number||'').localeCompare(String(a.quote_number||'')));
+  body.innerHTML=data.map(sq=>{
+    const cust=(customers||[]).find(c=>c.code===sq.customer_code);
+    const st=SQ_STATUS_LABELS[sq.status]||{text:sq.status,cls:'manual'};
+    const canConvert = sq.status!=='converted' && sq.status!=='rejected';
+    const canManage = sq.status!=='converted';
+    return `<tr>
+      <td>${sqEsc(sq.quote_number)}</td>
+      <td>${sqEsc(sq.quote_date)}</td>
+      <td>${sqEsc(cust?cust.name:sq.customer_code)}</td>
+      <td>${fmt(sq.total)}</td>
+      <td>${sqEsc(sq.valid_until||'-')}</td>
+      <td><span class="badge ${st.cls}">${st.text}</span></td>
+      <td style="text-align:center">
+        ${canManage ? `<select onchange="updateSqStatus('${sqEsc(sq.quote_number)}',this.value)" style="font-size:11px;padding:3px 6px;margin-left:4px">
+            <option value="">— تغيير الحالة —</option>
+            <option value="draft">مسودة</option><option value="sent">مُرسَل</option>
+            <option value="accepted">مقبول</option><option value="rejected">مرفوض</option>
+            <option value="expired">منتهي الصلاحية</option>
+          </select>` : ''}
+        ${canConvert ? `<button type="button" class="btn secondary" style="padding:4px 10px;font-size:12px" onclick="convertQuoteToOrder('${sqEsc(sq.quote_number)}')">➜ تحويل لأمر بيع</button>` : ''}
+      </td>
+    </tr>`;
+  }).join('');
+  const empty=document.getElementById('sqEmpty'); if(empty) empty.style.display = data.length ? 'none' : 'block';
+  const countEl=document.getElementById('sqSavedCount'); if(countEl) countEl.textContent=(salesQuotes||[]).length+' عرض';
+}
+window.renderSalesQuotes = renderSalesQuotes;
+
+async function updateSqStatus(quoteNumber, status){
+  if(!status) return;
+  try{
+    await api('PUT', `/api/sales-quotes/${encodeURIComponent(quoteNumber)}/status`, {status});
+    await loadAll();
+  }catch(e){ alert(e.message); }
+}
+window.updateSqStatus = updateSqStatus;
+
+async function convertQuoteToOrder(quoteNumber){
+  if(!confirm(`سيتم تحويل عرض السعر ${quoteNumber} إلى أمر بيع حقيقي بنفس الأصناف والكميات والأسعار. هل تريد المتابعة؟`)) return;
+  try{
+    await api('POST', `/api/sales-quotes/${encodeURIComponent(quoteNumber)}/convert`, {});
+    await loadAll();
+    if(typeof openSubModule==='function') openSubModule('أمر بيع');
+  }catch(e){ alert(e.message); }
+}
+window.convertQuoteToOrder = convertQuoteToOrder;
 
 // ============================================================
 // أمر البيع

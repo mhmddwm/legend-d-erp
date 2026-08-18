@@ -872,3 +872,31 @@ class DeliveryNoteLine(Base):
     qty = Column(Numeric(18, 4), nullable=False)
     unit_cost = Column(Numeric(18, 4), nullable=False, default=0)
     unit_price = Column(Numeric(18, 4), nullable=False, default=0)
+
+
+class SalesQuote(Base):
+    """عرض سعر بيع — أول حلقة بدورة المبيعات، بلا أي أثر محاسبي أو
+    مخزني. يمكن تحويله إلى أمر بيع حقيقي عند قبول العميل."""
+    __tablename__ = "sales_quotes"
+
+    quote_number = Column(String(30), primary_key=True)
+    quote_date = Column(Date, nullable=False)
+    customer_code = Column(String(30), ForeignKey("customers.code"), nullable=False)
+    valid_until = Column(Date, nullable=True)
+    status = Column(String(20), nullable=False, default="draft")
+    total = Column(Numeric(18, 2), nullable=False, default=0)
+    so_number = Column(String(30), ForeignKey("sales_orders.so_number"), nullable=True)
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    lines = relationship("SalesQuoteLine", backref="quote", cascade="all, delete-orphan")
+
+
+class SalesQuoteLine(Base):
+    __tablename__ = "sales_quote_lines"
+
+    id = Column(Integer, primary_key=True)
+    quote_number = Column(String(30), ForeignKey("sales_quotes.quote_number"), nullable=False)
+    item_id = Column(Integer, ForeignKey("items.id"), nullable=False)
+    qty = Column(Numeric(18, 4), nullable=False)
+    unit_price = Column(Numeric(18, 4), nullable=False)

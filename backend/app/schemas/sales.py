@@ -175,3 +175,45 @@ class DeliveryNoteOut(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class SQLineIn(BaseModel):
+    item_code: str
+    qty: float = Field(gt=0)
+    unit_price: float = Field(ge=0)
+
+
+class SalesQuoteIn(BaseModel):
+    quote_date: date
+    customer_code: str
+    valid_until: Optional[date] = None
+    notes: Optional[str] = None
+    lines: List[SQLineIn]
+
+
+class SalesQuoteStatusUpdate(BaseModel):
+    status: str  # draft / sent / accepted / rejected / expired
+
+
+class SQLineOut(BaseModel):
+    item_id: int
+    qty: float
+    unit_price: float
+
+    class Config:
+        from_attributes = True
+
+
+class SalesQuoteOut(BaseModel):
+    quote_number: str
+    quote_date: date
+    customer_code: str
+    valid_until: Optional[date] = None
+    status: str
+    total: float
+    so_number: Optional[str] = None
+    notes: Optional[str] = None
+    lines: List[SQLineOut] = []
+
+    class Config:
+        from_attributes = True

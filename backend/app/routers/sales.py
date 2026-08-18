@@ -18,6 +18,8 @@ from app.models.models import (
     SalesInvoiceLine,
     SalesOrder,
     SalesOrderLine,
+    SalesQuote,
+    SalesQuoteLine,
     StockMove,
     TaxType,
 )
@@ -33,12 +35,16 @@ from app.schemas.sales import (
     SalesOrderOut,
     DeliveryNoteIn,
     DeliveryNoteOut,
+    SalesQuoteIn,
+    SalesQuoteOut,
+    SalesQuoteStatusUpdate,
 )
 
 customer_router = APIRouter(prefix="/api/customers", tags=["Customers"])
 si_router = APIRouter(prefix="/api/sales-invoices", tags=["SalesInvoices"])
 so_router = APIRouter(prefix="/api/sales-orders", tags=["SalesOrders"])
 dn_router = APIRouter(prefix="/api/delivery-notes", tags=["DeliveryNotes"])
+sq_router = APIRouter(prefix="/api/sales-quotes", tags=["SalesQuotes"])
 
 
 # =========================================================
@@ -260,6 +266,98 @@ def _post_sales_invoice_journal(db: Session, invoice: SalesInvoice, subtotal, ta
 
     invoice.journal_entry_id = entry.id
     return entry
+
+
+# =========================================================
+# SALES QUOTE (عرض سعر بيع) — بلا أثر محاسبي أو مخزني، قابل للتحويل لأمر بيع
+# =========================================================
+_SQ_VALID_STATUSES = {"draft", "sent", "accepted", "rejected", "expired"}
+
+
+@sq_router.get("", response_model=list[SalesQuoteOut])
+def list_sales_quotes(db: Session = Depends(get_db)):
+    return db.query(SalesQuote).order_by(SalesQuote.quote_date.desc(), SalesQuote.quote_number.desc()).all()
+
+
+@sq_router.post("", response_model=SalesQuoteOut, status_code=201)
+def create_sales_quote(payload: SalesQuoteIn, db: Session = Depends(get_db)):
+    if not payload.lines:
+        raise HTTPException(400, "يجب إضافة صنف واحد على الأقل لعرض السعر")
+    customer = db.query(Customer).filter(Customer.code == payload.customer_code, Customer.is_active.is_(True)).first()
+    if not customer:
+        raise HTTPException(404, "العميل غير موجود أو غير نشط")
+
+    prepared = []
+    for line in payload.lines:
+        item = db.query(Item).filter(Item.code == line.item_code, Item.is_active.is_(True)).first()
+        if not item:
+            raise HTTPException(404, f"الصنف {line.item_code} غير موجود أو غير نشط")
+        prepared.append((item, line.qty, line.unit_price))
+
+    quote = SalesQuote(
+        quote_number=_next_document_number(db, SalesQuote, "quote_number", "SQ"),
+        quote_date=payload.quote_date, customer_code=customer.code,
+        valid_until=payload.valid_until, notes=payload.notes, status="draft", total=0,
+    )
+    db.add(quote)
+    db.flush()
+
+    total = 0.0
+    for item, qty, unit_price in prepared:
+        db.add(SalesQuoteLine(quote_number=quote.quote_number, item_id=item.id, qty=qty, unit_price=unit_price))
+        total += qty * unit_price
+    quote.total = round(total, 2)
+
+    db.commit()
+    db.refresh(quote)
+    return quote
+
+
+@sq_router.put("/{quote_number}/status", response_model=SalesQuoteOut)
+def update_sales_quote_status(quote_number: str, payload: SalesQuoteStatusUpdate, db: Session = Depends(get_db)):
+    quote = db.query(SalesQuote).filter(SalesQuote.quote_number == quote_number).first()
+    if not quote:
+        raise HTTPException(404, "عرض السعر غير موجود")
+    if quote.status == "converted":
+        raise HTTPException(400, "لا يمكن تعديل حالة عرض سعر تم تحويله بالفعل لأمر بيع")
+    if payload.status not in _SQ_VALID_STATUSES:
+        raise HTTPException(400, f"حالة غير صحيحة — القيم المسموحة: {', '.join(sorted(_SQ_VALID_STATUSES))}")
+    quote.status = payload.status
+    db.commit()
+    db.refresh(quote)
+    return quote
+
+
+@sq_router.post("/{quote_number}/convert", response_model=SalesOrderOut)
+def convert_sales_quote_to_order(quote_number: str, db: Session = Depends(get_db)):
+    """يحوّل عرض سعر مقبول إلى أمر بيع حقيقي بضغطة واحدة، بنفس العميل
+    والأصناف والكميات والأسعار — دون إعادة إدخالها يدوياً."""
+    quote = db.query(SalesQuote).filter(SalesQuote.quote_number == quote_number).first()
+    if not quote:
+        raise HTTPException(404, "عرض السعر غير موجود")
+    if quote.status == "converted":
+        raise HTTPException(400, "تم تحويل عرض السعر هذا لأمر بيع بالفعل")
+    if quote.status == "rejected":
+        raise HTTPException(400, "لا يمكن تحويل عرض سعر مرفوض — يجب تحديث حالته أولاً إن كان القرار قد تغيّر")
+    if not quote.lines:
+        raise HTTPException(400, "عرض السعر لا يحتوي على أصناف")
+
+    order = SalesOrder(
+        so_number=_next_document_number(db, SalesOrder, "so_number", "SO"),
+        so_date=date.today(), customer_code=quote.customer_code, status="open", total=quote.total,
+    )
+    db.add(order)
+    db.flush()
+
+    for line in quote.lines:
+        db.add(SalesOrderLine(so_number=order.so_number, item_id=line.item_id, qty=line.qty, unit_price=line.unit_price))
+
+    quote.status = "converted"
+    quote.so_number = order.so_number
+
+    db.commit()
+    db.refresh(order)
+    return order
 
 
 # =========================================================
