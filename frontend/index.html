@@ -2103,18 +2103,37 @@ html[dir="ltr"] .brand-center{direction:ltr;}
       <button class="btn secondary" onclick="nextItemPage()">التالي</button>
     </div>
 
-    <div class="frow">
-      <div class="field"><label>اسم المنتج عربي</label><input id="searchItemAr"></div>
-      <div class="field"><label>اسم المنتج انجليزي</label><input id="searchItemEn"></div>
-      <div class="field"><label>كود المنتج</label><input id="searchItemCode"></div>
-      <div class="field"><label>التصنيف</label><select id="searchItemCategory"><option value="">الكل</option></select></div>
-      <div class="field"><label>الماركة</label><select id="searchItemBrand"><option value="">كل الماركات</option></select></div>
-      <div class="field"><label>المورد</label><input id="searchItemSupplier"></div>
-      <div class="field"><label>كود المنتج عند المورد</label><input id="searchItemSupplierCode"></div>
-      <div class="field" style="grid-column:1/-1;text-align:left;margin-top:10px">
-        <button type="button" class="btn" id="itemSearchBtn" onclick="applyItemSearch()">🔍 بحث</button>
+    <!-- شريط بحث مضغوط + بحث متقدم قابل للطي (يوفّر مساحة أكبر لقائمة المنتجات) -->
+    <div class="formcard" style="padding:12px 16px;margin-top:14px">
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <input id="searchItemQuick" placeholder="بحث سريع بالاسم أو الكود..." style="flex:1;min-width:220px;height:40px;border:1px solid var(--line);border-radius:9px;padding:0 12px;font-family:inherit" oninput="applyItemQuickSearch()">
+        <button type="button" class="btn secondary" id="itemAdvSearchToggleBtn" onclick="toggleAdvancedItemSearch()">🔧 بحث متقدم</button>
         <button type="button" class="btn secondary" id="itemClearSearchBtn" onclick="clearItemSearch()">✖ إلغاء الفلتر</button>
       </div>
+      <div class="frow" id="itemAdvancedSearchBox" style="display:none;margin-top:14px">
+        <div class="field"><label>اسم المنتج عربي</label><input id="searchItemAr"></div>
+        <div class="field"><label>اسم المنتج انجليزي</label><input id="searchItemEn"></div>
+        <div class="field"><label>كود المنتج</label><input id="searchItemCode"></div>
+        <div class="field"><label>التصنيف</label><select id="searchItemCategory"><option value="">الكل</option></select></div>
+        <div class="field"><label>الماركة</label><select id="searchItemBrand"><option value="">كل الماركات</option></select></div>
+        <div class="field"><label>المورد</label><input id="searchItemSupplier"></div>
+        <div class="field"><label>كود المنتج عند المورد</label><input id="searchItemSupplierCode"></div>
+        <div class="field" style="grid-column:1/-1;text-align:left;margin-top:10px">
+          <button type="button" class="btn" id="itemSearchBtn" onclick="applyItemSearch()">🔍 بحث</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- شريط الإجراءات الجماعية — يظهر فقط عند تحديد أكتر من منتج -->
+  <div id="itemBulkActionsBar" class="formcard" style="display:none;margin:10px 0;padding:10px 16px;align-items:center;gap:10px;flex-wrap:wrap;background:#eef6ff;border:1px solid #cfe4ff">
+    <span id="itemBulkCount" style="font-weight:800;color:#0b5db8;white-space:nowrap">0 محدد</span>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-inline-start:auto">
+      <button type="button" class="btn secondary" onclick="bulkSetItemStatus('active')">✅ تنشيط</button>
+      <button type="button" class="btn secondary" onclick="bulkSetItemStatus('paused')">⏸️ تعطيل</button>
+      <button type="button" class="btn secondary" onclick="bulkSetItemStatus('inactive')">⛔ إيقاف</button>
+      <button type="button" class="btn secondary" onclick="bulkExportItems()">⭳ تصدير</button>
+      <button type="button" class="btn secondary" style="border-color:#c62828;color:#c62828" onclick="bulkDeleteItems()">🗑️ حذف</button>
     </div>
   </div>
 

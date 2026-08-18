@@ -6066,11 +6066,109 @@ function clearItemSearch(){
   });
   const cat=document.getElementById('searchItemCategory');
   if(cat) cat.value='';
+  const quick=document.getElementById('searchItemQuick');
+  if(quick) quick.value='';
   itemFiltered=[...(items||[])];
   itemFiltered.isFiltered=false;
   itemPage=1;
   renderItemsTable();
 }
+
+// طي/فتح البحث المتقدم — يبقى مطوياً افتراضياً حتى تأخذ قائمة المنتجات
+// معظم مساحة الشاشة، ولا يظهر إلا عند الضغط على "بحث متقدم"
+function toggleAdvancedItemSearch(){
+  const box=document.getElementById('itemAdvancedSearchBox');
+  const btn=document.getElementById('itemAdvSearchToggleBtn');
+  if(!box) return;
+  const open = box.style.display==='none' || !box.style.display;
+  box.style.display = open ? 'grid' : 'none';
+  if(btn) btn.textContent = open ? '🔧 إخفاء البحث المتقدم' : '🔧 بحث متقدم';
+}
+window.toggleAdvancedItemSearch = toggleAdvancedItemSearch;
+
+// بحث سريع بالاسم (عربي/إنجليزي) أو الكود فقط — بديل خفيف عن البحث
+// المتقدم الكامل، يعمل مباشرة أثناء الكتابة
+function applyItemQuickSearch(){
+  const q=normalizeSearchValue(document.getElementById('searchItemQuick')?.value||'');
+  if(!q){ itemFiltered=[...(items||[])]; itemFiltered.isFiltered=false; itemPage=1; renderItemsTable(); return; }
+  itemFiltered=(items||[]).filter(x=>
+    normalizeSearchValue(x.name).includes(q) ||
+    normalizeSearchValue(x.name_en).includes(q) ||
+    normalizeSearchValue(x.code).includes(q)
+  );
+  itemFiltered.isFiltered=true;
+  itemPage=1;
+  renderItemsTable();
+}
+window.applyItemQuickSearch = applyItemQuickSearch;
+
+// ============================================================
+// الإجراءات الجماعية على المنتجات المحدَّدة (تنشيط/تعطيل/إيقاف/تصدير/حذف)
+// ============================================================
+function getSelectedItemCodes(){
+  return [...document.querySelectorAll('.itemCheck:checked')].map(x=>x.value);
+}
+
+function updateItemBulkActionsBar(){
+  const bar=document.getElementById('itemBulkActionsBar');
+  const countEl=document.getElementById('itemBulkCount');
+  if(!bar) return;
+  const codes=getSelectedItemCodes();
+  if(codes.length){
+    bar.style.display='flex';
+    if(countEl) countEl.textContent=`${codes.length} محدد`;
+  }else{
+    bar.style.display='none';
+  }
+}
+window.updateItemBulkActionsBar = updateItemBulkActionsBar;
+
+async function bulkSetItemStatus(status){
+  const codes=getSelectedItemCodes();
+  if(!codes.length) return;
+  const labels={active:'تنشيط', paused:'تعطيل', inactive:'إيقاف'};
+  if(!confirm(`سيتم ${labels[status]||status} ${codes.length} منتج. هل تريد المتابعة؟`)) return;
+  let ok=0, failed=[];
+  for(const code of codes){
+    try{ await api('PUT', `/api/items/${encodeURIComponent(code)}`, {status}); ok++; }
+    catch(e){ failed.push(code); }
+  }
+  await loadAll();
+  if(failed.length) alert(`تم تحديث ${ok} منتج، وتعذّر تحديث ${failed.length}: ${failed.join('، ')}`);
+}
+window.bulkSetItemStatus = bulkSetItemStatus;
+
+function bulkExportItems(){
+  const codes=getSelectedItemCodes();
+  if(!codes.length) return;
+  const rows=(items||[]).filter(x=>codes.includes(String(x.code)));
+  const headers=['كود المنتج','اسم المنتج','التصنيف','الوحدة','الكمية','سعر الشراء','سعر البيع','متوسط الشراء'];
+  const csvRows=[headers.join(',')].concat(rows.map(x=>{
+    const dv=getItemDisplayValues(x);
+    return [x.code, x.name, findCategoryName(x.category_code, x), x.unit, dv.qty, dv.purchase, dv.sale, dv.avg]
+      .map(v=>{const t=String(v??''); return /[",\n]/.test(t)?'"'+t.replace(/"/g,'""')+'"':t;}).join(',');
+  }));
+  const csv='\ufeff'+csvRows.join('\r\n');
+  const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='products_export.csv';
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(a.href),500);
+}
+window.bulkExportItems = bulkExportItems;
+
+async function bulkDeleteItems(){
+  const codes=getSelectedItemCodes();
+  if(!codes.length) return;
+  if(!confirm(`سيتم حذف ${codes.length} منتج نهائياً. هل تريد المتابعة؟`)) return;
+  let ok=0, failed=[];
+  for(const code of codes){
+    try{ await api('DELETE', `/api/items/${encodeURIComponent(code)}`); ok++; }
+    catch(e){ failed.push(`${code} (${e.message})`); }
+  }
+  await loadAll();
+  if(failed.length) alert(`تم حذف ${ok} منتج، وتعذّر حذف ${failed.length}:\n${failed.join('\n')}`);
+}
+window.bulkDeleteItems = bulkDeleteItems;
 
 function normalizeSearchValue(v){
  return String(v||'').trim().toLowerCase();
@@ -6230,7 +6328,7 @@ function copyItem(code){
  alert('تم فتح نسخة جديدة من المنتج، قم بتغيير الكود قبل الحفظ');
 }
 
-function toggleAllItems(c){document.querySelectorAll('.itemCheck').forEach(x=>x.checked=c.checked);}
+function toggleAllItems(c){document.querySelectorAll('.itemCheck').forEach(x=>x.checked=c.checked); if(typeof updateItemBulkActionsBar==='function') updateItemBulkActionsBar();}
 function prevItemPage(){if(itemPage>1)itemPage--;document.getElementById('itemPageInfo').textContent=itemPage;}
 function nextItemPage(){itemPage++;document.getElementById('itemPageInfo').textContent=itemPage;}
 
@@ -6521,7 +6619,7 @@ window.openSubModule=openSubModule;
       const x=window.__normalizeProductRow(raw);
       const dv=getItemDisplayValues(x);
       return `<tr>
-        <td><input class="itemCheck" type="checkbox" value="${esc(x.code)}"></td>
+        <td><input class="itemCheck" type="checkbox" value="${esc(x.code)}" onchange="updateItemBulkActionsBar()"></td>
         <td>${esc(x.code)}</td>
         <td>${esc(x.name)}</td>
         <td>${esc(findCategoryName(x.category||x.category_id||x.category_name||x.categoryName, x))}</td>
@@ -6536,6 +6634,7 @@ window.openSubModule=openSubModule;
             <div id="menu-${esc(x.code)}" class="menu-popup" style="display:none">
               <button onclick="viewItem('${String(x.code).replace(/'/g,'&#39;')}')"><b>👁</b><span>عرض</span></button>
               <button onclick="editItem('${String(x.code).replace(/'/g,'&#39;')}')"><b>✎</b><span>تعديل</span></button>
+              <button onclick="openItemWarehouseStockView('${String(x.code).replace(/'/g,'&#39;')}')"><b>📦</b><span>الأرصدة حسب المستودع</span></button>
               <button onclick="copyItem('${String(x.code).replace(/'/g,'&#39;')}')"><b>⧉</b><span>نسخ</span></button>
               <button class="danger" onclick="deleteItemSafe('${String(x.code).replace(/'/g,'&#39;')}')"><b>🗑</b><span>حذف</span></button>
             </div>
@@ -6543,6 +6642,7 @@ window.openSubModule=openSubModule;
         </td>
       </tr>`;
     }).join('');
+    if(typeof updateItemBulkActionsBar==='function') updateItemBulkActionsBar();
   };
 
   window.submitItem = submitItem = async function(){
@@ -6557,76 +6657,67 @@ window.openSubModule=openSubModule;
     const unitTemplate=findUnitTemplateByValue(val('itemUnit'));
     const baseUnit=unitTemplate ? (unitTemplate.base || unitTemplate.name || unitTemplate.id) : val('itemUnit');
     const categoryValue=val('itemCategory');
-    const payload=window.__normalizeProductRow({
+    const payload={
       code: editCode || code,
-      name,
-      name_en:val('itemNameEn'),
-      description:val('itemDesc'),
-      category:categoryValue,
-      category_id:categoryValue,
-      category_name:findCategoryName(categoryValue),
-      brand:val('itemBrand'),
-      supplier:val('itemSupplier'),
-      barcode:val('itemBarcode'),
-      price_lists:val('itemPriceLists'),
-      status:val('itemStatus') || 'تنشيط',
-      unit:baseUnit,
-      base_unit:baseUnit,
-      unit_template:unitTemplate ? (unitTemplate.id||unitTemplate.name||unitTemplate.base) : val('itemUnit'),
-      unit_template_name:unitTemplate ? (unitTemplate.name||'') : '',
-      display_unit:baseUnit,
-      default_cost:num('itemCost'),
-      purchase_price:num('itemCost'),
-      cost:num('itemCost'),
-      sale_price:num('itemPrice'),
-      price:num('itemPrice'),
-      opening_qty:num('itemOpenQty'),
-      qty_on_hand:num('itemOpenQty'),
-      quantity:num('itemOpenQty'),
-      avg_price:num('itemAvgPrice'),
-      avg_cost:num('itemAvgPrice'),
-      last_purchase:num('itemLastPurchase'),
-      reorder_point:num('itemReorder')
-    });
+      name, name_en: val('itemNameEn') || null,
+      description: val('itemDesc') || null,
+      barcode: val('itemBarcode') || null,
+      category_code: categoryValue || null,
+      brand_code: val('itemBrand') || null,
+      supplier_code: val('itemSupplier') || null,
+      supplier_item_code: val('itemSupplierProductCode') || null,
+      status: val('itemStatus') || 'active',
+      default_warehouse_id: val('itemWarehouse') ? parseInt(val('itemWarehouse')) : null,
+      default_location_id: val('itemLocation') ? parseInt(val('itemLocation')) : null,
+      unit: baseUnit,
+      default_cost: num('itemCost'),
+      price: num('itemPrice'),
+      reorder_level: num('itemReorder'),
+    };
     try{
-      if(editCode){ try{ await api('PUT',`/api/items/${encodeURIComponent(editCode)}`,payload); }catch(e){ console.warn('حفظ محلي للمنتج بعد تعذر الخادم', e.message); } }
-      else { try{ await api('POST','/api/items',payload); }catch(e){ console.warn('إضافة محلية للمنتج بعد تعذر الخادم', e.message); } }
-      const target=String(editCode || code);
-      const exists=(items||[]).some(x=>String(x.code)===target);
-      items = exists ? (items||[]).map(x=>String(x.code)===target ? window.__normalizeProductRow({...x,...payload}) : x) : [...(items||[]), payload];
-      if(itemFiltered && Array.isArray(itemFiltered)) itemFiltered = itemFiltered.map(x=>String(x.code)===target ? window.__normalizeProductRow({...x,...payload}) : x);
-      try{ localStorage.setItem('items_cache', JSON.stringify(items||[])); }catch(e){}
+      if(editCode){
+        await api('PUT',`/api/items/${encodeURIComponent(editCode)}`,payload);
+      }else{
+        payload.opening_qty = num('itemOpenQty');
+        await api('POST','/api/items',payload);
+      }
+      await loadAll();
       cancelItemEdit();
-      itemFiltered=[...(items||[])]; itemFiltered.isFiltered=false;
-      renderItemsTable();
-      loadSearchCategories();
     }catch(e){ if(err) err.textContent=e.message; }
   };
 
   window.editItem = editItem = function(code){
     const f=document.getElementById('itemFormBox'); if(f) f.style.display='block';
-    const raw=(items||[]).find(i=>String(i.code)===String(code)); if(!raw) return;
-    const it=window.__normalizeProductRow(raw);
+    const it=(items||[]).find(i=>String(i.code)===String(code)); if(!it) return;
     document.getElementById('itemEditCode').value=it.code;
     document.getElementById('itemCode').value=it.code; document.getElementById('itemCode').disabled=true;
     document.getElementById('itemName').value=it.name||'';
-    document.getElementById('itemNameEn').value=it.name_en||it.nameEn||'';
+    document.getElementById('itemNameEn').value=it.name_en||'';
     document.getElementById('itemDesc').value=it.description||'';
-    document.getElementById('itemBrand').value=it.brand||'';
-    document.getElementById('itemSupplier').value=it.supplier||it.supplier_name||it.vendor||'';
     document.getElementById('itemBarcode').value=it.barcode||'';
-    document.getElementById('itemPriceLists').value=it.price_lists||'';
-    document.getElementById('itemAvgPrice').value=it.avg_price||it.avg_cost||0;
-    document.getElementById('itemLastPurchase').value=it.last_purchase||0;
-    document.getElementById('itemStatus').value=it.status||'تنشيط';
+    document.getElementById('itemSupplierProductCode').value=it.supplier_item_code||'';
+    document.getElementById('itemAvgPrice').value=it.avg_cost||0;
+    document.getElementById('itemLastPurchase').value=it.avg_cost||0;
+    document.getElementById('itemStatus').value=it.status||'active';
     loadProductDropdowns();
-    setSelectValueSmart('itemCategory', it.category||it.category_id||it.category_name||it.categoryName||'');
-    const tpl=findUnitTemplateByValue(it.unit_template||it.unit_template_id||it.unit);
+    if(typeof refreshBrandDropdown==='function') refreshBrandDropdown();
+    if(typeof refreshSupplierDropdown==='function') refreshSupplierDropdown();
+    if(typeof refreshItemWarehouseOptions==='function') refreshItemWarehouseOptions();
+    setSelectValueSmart('itemCategory', it.category_code||'');
+    setSelectValueSmart('itemBrand', it.brand_code||'');
+    setSelectValueSmart('itemSupplier', it.supplier_code||'');
+    if(it.default_warehouse_id){
+      const whEl=document.getElementById('itemWarehouse');
+      if(whEl){ whEl.value=String(it.default_warehouse_id); if(typeof onItemWarehouseChange==='function') onItemWarehouseChange(); }
+      if(it.default_location_id){ const locEl=document.getElementById('itemLocation'); if(locEl) locEl.value=String(it.default_location_id); }
+    }
+    const tpl=findUnitTemplateByValue(it.unit_template||it.unit);
     const unitEl=document.getElementById('itemUnit'); if(unitEl) unitEl.value=tpl ? String(tpl.id||tpl.name||tpl.base) : (it.unit||'');
-    document.getElementById('itemCost').value=it.default_cost||it.purchase_price||it.cost||0;
-    document.getElementById('itemPrice').value=it.sale_price||it.price||0;
-    document.getElementById('itemOpenQty').value=it.opening_qty||it.qty_on_hand||it.quantity||0;
-    document.getElementById('itemReorder').value=it.reorder_point||0;
+    document.getElementById('itemCost').value=it.default_cost||0;
+    document.getElementById('itemPrice').value=it.price||0;
+    document.getElementById('itemOpenQty').value=it.qty||0;
+    document.getElementById('itemOpenQty').disabled=true;
+    document.getElementById('itemReorder').value=it.reorder_level||0;
     document.getElementById('itemFormTitle').textContent='تعديل: '+(it.name||'');
     document.getElementById('itemSubmitBtn').textContent='حفظ التعديلات';
     document.getElementById('itemSubmitBtn').style.display='inline-block';
