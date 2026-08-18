@@ -9,11 +9,15 @@ from app.database import get_db
 from app.models.models import (
     Account,
     Customer,
+    DeliveryNote,
+    DeliveryNoteLine,
     Item,
     JournalEntry,
     JournalEntryLine,
     SalesInvoice,
     SalesInvoiceLine,
+    SalesOrder,
+    SalesOrderLine,
     StockMove,
     TaxType,
 )
@@ -25,10 +29,16 @@ from app.schemas.sales import (
     SalesInvoiceIn,
     SalesInvoiceOut,
     SalesInvoiceUpdate,
+    SalesOrderIn,
+    SalesOrderOut,
+    DeliveryNoteIn,
+    DeliveryNoteOut,
 )
 
 customer_router = APIRouter(prefix="/api/customers", tags=["Customers"])
 si_router = APIRouter(prefix="/api/sales-invoices", tags=["SalesInvoices"])
+so_router = APIRouter(prefix="/api/sales-orders", tags=["SalesOrders"])
+dn_router = APIRouter(prefix="/api/delivery-notes", tags=["DeliveryNotes"])
 
 
 # =========================================================
@@ -158,21 +168,26 @@ def _resolve_invoice_tax(db: Session, lines_total: float, tax_type_code, tax_cal
     return subtotal, tax_amount, total, tax_type
 
 
-def _post_sales_invoice_journal(db: Session, invoice: SalesInvoice, subtotal, tax_amount, total, tax_type, cogs_total):
-    """يرحّل قيدين مزدوجين لفاتورة المبيعات:
+def _post_sales_invoice_journal(db: Session, invoice: SalesInvoice, subtotal, tax_amount, total, tax_type, cogs_total, include_cogs_journal: bool = True):
+    """يرحّل قيد فاتورة المبيعات:
     1) مدين حساب العميل (إجمالي شامل الضريبة) / دائن إيرادات المبيعات
        (41) [+ دائن ضريبة المبيعات المستحقة إن كان نوع الضريبة مرتبطاً بحساب]
-    2) مدين تكلفة البضاعة المباعة (51) / دائن المخزون (123) — بالتكلفة
-       المتوسطة الحالية للأصناف المباعة، دون تعديل التكلفة المتوسطة نفسها."""
+       — يُرحَّل دائماً.
+    2) مدين تكلفة البضاعة المباعة (51) / دائن المخزون (123) — يُرحَّل
+       فقط عند include_cogs_journal=True (الفاتورة المباشرة بلا إذن
+       تسليم سابق). عند وجود إذن تسليم مرتبط، هذا القيد يكون قد رُحِّل
+       بالفعل وقت التسليم، فلا يُكرَّر هنا."""
     revenue_account = db.query(Account).filter(Account.code == "41").first()
     if not revenue_account:
         raise HTTPException(400, "حساب إيرادات المبيعات (41) غير موجود بدليل الحسابات.")
-    cogs_account = db.query(Account).filter(Account.code == "51").first()
-    if not cogs_account:
-        raise HTTPException(400, "حساب تكلفة البضاعة المباعة (51) غير موجود بدليل الحسابات.")
-    inventory_account = db.query(Account).filter(Account.code == "123").first()
-    if not inventory_account:
-        raise HTTPException(400, "حساب المخزون (123) غير موجود بدليل الحسابات.")
+    inventory_account = cogs_account = None
+    if include_cogs_journal:
+        cogs_account = db.query(Account).filter(Account.code == "51").first()
+        if not cogs_account:
+            raise HTTPException(400, "حساب تكلفة البضاعة المباعة (51) غير موجود بدليل الحسابات.")
+        inventory_account = db.query(Account).filter(Account.code == "123").first()
+        if not inventory_account:
+            raise HTTPException(400, "حساب المخزون (123) غير موجود بدليل الحسابات.")
 
     customer = db.query(Customer).filter(Customer.code == invoice.customer_code).first()
     receivable_account_code = (customer.account_code if customer and customer.account_code else None) or "1121"
@@ -229,7 +244,7 @@ def _post_sales_invoice_journal(db: Session, invoice: SalesInvoice, subtotal, ta
         db.add(JournalEntryLine(**line_kwargs))
         line_no += 1
 
-    if cogs_total:
+    if include_cogs_journal and cogs_total:
         db.add(JournalEntryLine(
             entry_id=entry.id, line_no=line_no, account_code=cogs_account.code,
             debit=cogs_total, credit=0,
@@ -245,6 +260,165 @@ def _post_sales_invoice_journal(db: Session, invoice: SalesInvoice, subtotal, ta
 
     invoice.journal_entry_id = entry.id
     return entry
+
+
+# =========================================================
+# SALES ORDER (أمر بيع — بلا أثر محاسبي أو مخزني، مجرد التزام)
+# =========================================================
+@so_router.get("", response_model=list[SalesOrderOut])
+def list_sales_orders(db: Session = Depends(get_db)):
+    return db.query(SalesOrder).order_by(SalesOrder.so_date.desc(), SalesOrder.so_number.desc()).all()
+
+
+@so_router.post("", response_model=SalesOrderOut, status_code=201)
+def create_sales_order(payload: SalesOrderIn, db: Session = Depends(get_db)):
+    if not payload.lines:
+        raise HTTPException(400, "يجب إضافة صنف واحد على الأقل لأمر البيع")
+    customer = db.query(Customer).filter(Customer.code == payload.customer_code, Customer.is_active.is_(True)).first()
+    if not customer:
+        raise HTTPException(404, "العميل غير موجود أو غير نشط")
+
+    prepared = []
+    for line in payload.lines:
+        item = db.query(Item).filter(Item.code == line.item_code, Item.is_active.is_(True)).first()
+        if not item:
+            raise HTTPException(404, f"الصنف {line.item_code} غير موجود أو غير نشط")
+        prepared.append((item, line.qty, line.unit_price))
+
+    order = SalesOrder(
+        so_number=_next_document_number(db, SalesOrder, "so_number", "SO"),
+        so_date=payload.so_date, customer_code=customer.code, status="open", total=0,
+    )
+    db.add(order)
+    db.flush()
+
+    total = 0.0
+    for item, qty, unit_price in prepared:
+        db.add(SalesOrderLine(so_number=order.so_number, item_id=item.id, qty=qty, unit_price=unit_price))
+        total += qty * unit_price
+    order.total = round(total, 2)
+
+    db.commit()
+    db.refresh(order)
+    return order
+
+
+# =========================================================
+# DELIVERY NOTE (إذن تسليم/صرف بضاعة) — يُخفِّض المخزون ويُرحِّل قيد
+# تكلفة البضاعة المباعة فوراً وقت خروج البضاعة الفعلي
+# =========================================================
+def _post_delivery_note_journal(db: Session, delivery: DeliveryNote, cogs_total: float):
+    cogs_account = db.query(Account).filter(Account.code == "51").first()
+    if not cogs_account:
+        raise HTTPException(400, "حساب تكلفة البضاعة المباعة (51) غير موجود بدليل الحسابات.")
+    inventory_account = db.query(Account).filter(Account.code == "123").first()
+    if not inventory_account:
+        raise HTTPException(400, "حساب المخزون (123) غير موجود بدليل الحسابات.")
+    if not cogs_total:
+        return None
+
+    entry = JournalEntry(
+        entry_date=delivery.dn_date,
+        description=f"تسليم بضاعة {delivery.dn_number} — العميل {delivery.customer_code}",
+        source_type="delivery_note",
+        source_ref=delivery.dn_number,
+        status="posted",
+        total_amount=cogs_total,
+    )
+    db.add(entry)
+    db.flush()
+
+    db.add(JournalEntryLine(
+        entry_id=entry.id, line_no=1, account_code=cogs_account.code,
+        debit=cogs_total, credit=0,
+        line_description=f"تكلفة بضاعة مباعة — تسليم {delivery.dn_number}",
+    ))
+    db.add(JournalEntryLine(
+        entry_id=entry.id, line_no=2, account_code=inventory_account.code,
+        debit=0, credit=cogs_total,
+        line_description=f"مخزون (خروج بضاعة) — تسليم {delivery.dn_number}",
+    ))
+    delivery.journal_entry_id = entry.id
+    return entry
+
+
+@dn_router.get("", response_model=list[DeliveryNoteOut])
+def list_delivery_notes(db: Session = Depends(get_db)):
+    return db.query(DeliveryNote).order_by(DeliveryNote.dn_date.desc(), DeliveryNote.dn_number.desc()).all()
+
+
+@dn_router.post("", response_model=DeliveryNoteOut, status_code=201)
+def create_delivery_note(payload: DeliveryNoteIn, db: Session = Depends(get_db)):
+    if not payload.lines:
+        raise HTTPException(400, "يجب إضافة صنف واحد على الأقل لإذن التسليم")
+    customer = db.query(Customer).filter(Customer.code == payload.customer_code, Customer.is_active.is_(True)).first()
+    if not customer:
+        raise HTTPException(404, "العميل غير موجود أو غير نشط")
+    if payload.so_number and not db.query(SalesOrder).filter(SalesOrder.so_number == payload.so_number).first():
+        raise HTTPException(404, "أمر البيع غير موجود")
+
+    prepared = []
+    for line in payload.lines:
+        item = db.query(Item).filter(Item.code == line.item_code, Item.is_active.is_(True)).first()
+        if not item:
+            raise HTTPException(404, f"الصنف {line.item_code} غير موجود أو غير نشط")
+        if _to_float(item.qty) < line.qty:
+            raise HTTPException(400, f"الكمية المتاحة من الصنف {item.code} ({item.qty}) أقل من الكمية المطلوبة ({line.qty})")
+        prepared.append((item, line.qty, line.unit_price))
+
+    try:
+        delivery = DeliveryNote(
+            dn_number=_next_document_number(db, DeliveryNote, "dn_number", "DN"),
+            dn_date=payload.dn_date, customer_code=customer.code, so_number=payload.so_number,
+            warehouse_id=payload.warehouse_id, location_id=payload.location_id,
+            invoice_status="not_invoiced", cogs_total=0,
+        )
+        db.add(delivery)
+        db.flush()
+
+        cogs_total = 0.0
+        for item, qty, unit_price in prepared:
+            unit_cost = _to_float(item.avg_cost)
+            db.add(DeliveryNoteLine(
+                dn_number=delivery.dn_number, item_id=item.id, qty=qty,
+                unit_cost=unit_cost, unit_price=unit_price,
+            ))
+            cogs_total += qty * unit_cost
+
+            new_qty = _to_float(item.qty) - qty
+            item.qty = new_qty
+            db.add(StockMove(
+                move_date=payload.dn_date, item_id=item.id, move_type="تسليم بضاعة",
+                reference=f"DN-{delivery.dn_number}", warehouse_id=payload.warehouse_id,
+                qty=-qty, unit_cost=unit_cost, balance_after=new_qty,
+            ))
+
+            wh_id = payload.warehouse_id or item.default_warehouse_id
+            if wh_id:
+                row = (
+                    db.query(WarehouseStock)
+                    .filter(
+                        WarehouseStock.item_id == item.id, WarehouseStock.warehouse_id == wh_id,
+                        WarehouseStock.location_id == (payload.location_id or item.default_location_id),
+                    )
+                    .first()
+                )
+                if row:
+                    row.quantity = max(_to_float(row.quantity) - qty, 0)
+
+        delivery.cogs_total = round(cogs_total, 2)
+        _post_delivery_note_journal(db, delivery, delivery.cogs_total)
+
+        db.commit()
+        db.refresh(delivery)
+        return delivery
+
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception:
+        db.rollback()
+        raise
 
 
 # =========================================================
@@ -265,12 +439,71 @@ def create_sales_invoice(
     db: Session = Depends(get_db),
     actor: Optional[str] = Query(None),
 ):
-    if not payload.lines:
-        raise HTTPException(400, "يجب إضافة صنف واحد على الأقل للفاتورة")
-
     customer = db.query(Customer).filter(Customer.code == payload.customer_code, Customer.is_active.is_(True)).first()
     if not customer:
         raise HTTPException(404, "العميل غير موجود أو غير نشط")
+
+    payment_terms_days = payload.payment_terms_days if payload.payment_terms_days is not None else (customer.payment_terms_days or 0)
+
+    # ===== الحالة 1: فاتورة مرتبطة بإذن تسليم سابق (الدورة الكاملة) =====
+    if payload.delivery_number:
+        delivery = db.query(DeliveryNote).filter(DeliveryNote.dn_number == payload.delivery_number).first()
+        if not delivery:
+            raise HTTPException(404, "إذن التسليم غير موجود")
+        if delivery.customer_code != customer.code:
+            raise HTTPException(400, "إذن التسليم لا يخص هذا العميل")
+        if delivery.invoice_status == "invoiced":
+            raise HTTPException(400, "تم ترحيل فاتورة على إذن التسليم هذا بالفعل")
+        if not delivery.lines:
+            raise HTTPException(400, "إذن التسليم لا يحتوي على أصناف")
+
+        try:
+            invoice = SalesInvoice(
+                inv_number=_next_document_number(db, SalesInvoice, "inv_number", "SINV"),
+                inv_date=payload.inv_date, customer_code=customer.code,
+                customer_ref_number=payload.customer_ref_number,
+                delivery_number=delivery.dn_number, so_number=delivery.so_number,
+                warehouse_id=delivery.warehouse_id, location_id=delivery.location_id,
+                payment_terms_days=payment_terms_days, cost_center_code=payload.cost_center_code,
+                notes=payload.notes, status="posted",
+                subtotal=0, tax_amount=0, total=0, cogs_total=delivery.cogs_total,
+            )
+            db.add(invoice)
+            db.flush()
+
+            lines_total = 0.0
+            for dline in delivery.lines:
+                db.add(SalesInvoiceLine(
+                    inv_number=invoice.inv_number, item_id=dline.item_id,
+                    qty=dline.qty, unit_price=dline.unit_price, unit_cost=dline.unit_cost,
+                ))
+                lines_total += _to_float(dline.qty) * _to_float(dline.unit_price)
+
+            subtotal, tax_amount, total, tax_type = _resolve_invoice_tax(
+                db, lines_total, payload.tax_type_code, payload.tax_calc_method
+            )
+            invoice.subtotal = subtotal
+            invoice.tax_amount = tax_amount
+            invoice.tax_type_code = tax_type.code if tax_type else None
+            invoice.total = total
+
+            _post_sales_invoice_journal(db, invoice, subtotal, tax_amount, total, tax_type, 0, include_cogs_journal=False)
+            delivery.invoice_status = "invoiced"
+
+            db.commit()
+            db.refresh(invoice)
+            return invoice
+
+        except HTTPException:
+            db.rollback()
+            raise
+        except Exception:
+            db.rollback()
+            raise
+
+    # ===== الحالة 2: فاتورة مباشرة بلا إذن تسليم (تخصم المخزون فوراً) =====
+    if not payload.lines:
+        raise HTTPException(400, "يجب إضافة صنف واحد على الأقل للفاتورة")
 
     prepared_lines = []
     for line in payload.lines:
@@ -280,8 +513,6 @@ def create_sales_invoice(
         if _to_float(item.qty) < line.qty:
             raise HTTPException(400, f"الكمية المتاحة من الصنف {item.code} ({item.qty}) أقل من الكمية المطلوبة ({line.qty})")
         prepared_lines.append((item, line.qty, line.unit_price))
-
-    payment_terms_days = payload.payment_terms_days if payload.payment_terms_days is not None else (customer.payment_terms_days or 0)
 
     try:
         invoice = SalesInvoice(
@@ -342,7 +573,7 @@ def create_sales_invoice(
         invoice.total = total
         invoice.cogs_total = round(cogs_total, 2)
 
-        _post_sales_invoice_journal(db, invoice, subtotal, tax_amount, total, tax_type, invoice.cogs_total)
+        _post_sales_invoice_journal(db, invoice, subtotal, tax_amount, total, tax_type, invoice.cogs_total, include_cogs_journal=True)
 
         db.commit()
         db.refresh(invoice)
@@ -358,30 +589,39 @@ def create_sales_invoice(
 
 @si_router.post("/{inv_number}/cancel", response_model=SalesInvoiceOut)
 def cancel_sales_invoice(inv_number: str, db: Session = Depends(get_db)):
-    """إلغاء فاتورة مبيعات: يعيد الكمية المباعة للمخزون (إضافة آمنة
-    لا تخاطر برصيد سالب أبداً)، ويُلغي قيدها المزدوج."""
+    """إلغاء فاتورة مبيعات:
+    - فاتورة مباشرة (بلا إذن تسليم): تعيد الكمية المباعة للمخزون
+      وتُلغي قيدها المزدوج (إيراد + تكلفة بضاعة معاً).
+    - فاتورة مرتبطة بإذن تسليم: لا تُعيد أي كمية للمخزون (لم تخصمه
+      أصلاً — إذن التسليم هو من فعل ذلك)، فقط تُلغي قيد الإيراد
+      الخاص بها وتعيد فتح إذن التسليم ليصبح قابلاً للفوترة من جديد."""
     invoice = db.query(SalesInvoice).filter(SalesInvoice.inv_number == inv_number).first()
     if not invoice:
         raise HTTPException(404, "فاتورة المبيعات غير موجودة")
     if invoice.status == "cancelled":
         raise HTTPException(400, "الفاتورة ملغاة بالفعل")
 
-    for line in invoice.lines:
-        item = db.query(Item).filter(Item.id == line.item_id).first()
-        if item:
-            item.qty = _to_float(item.qty) + _to_float(line.qty)
-            wh_id = invoice.warehouse_id or item.default_warehouse_id
-            if wh_id:
-                row = (
-                    db.query(WarehouseStock)
-                    .filter(
-                        WarehouseStock.item_id == item.id, WarehouseStock.warehouse_id == wh_id,
-                        WarehouseStock.location_id == (invoice.location_id or item.default_location_id),
+    if invoice.delivery_number:
+        delivery = db.query(DeliveryNote).filter(DeliveryNote.dn_number == invoice.delivery_number).first()
+        if delivery:
+            delivery.invoice_status = "not_invoiced"
+    else:
+        for line in invoice.lines:
+            item = db.query(Item).filter(Item.id == line.item_id).first()
+            if item:
+                item.qty = _to_float(item.qty) + _to_float(line.qty)
+                wh_id = invoice.warehouse_id or item.default_warehouse_id
+                if wh_id:
+                    row = (
+                        db.query(WarehouseStock)
+                        .filter(
+                            WarehouseStock.item_id == item.id, WarehouseStock.warehouse_id == wh_id,
+                            WarehouseStock.location_id == (invoice.location_id or item.default_location_id),
+                        )
+                        .first()
                     )
-                    .first()
-                )
-                if row:
-                    row.quantity = _to_float(row.quantity) + _to_float(line.qty)
+                    if row:
+                        row.quantity = _to_float(row.quantity) + _to_float(line.qty)
 
     if invoice.journal_entry_id:
         entry = db.query(JournalEntry).filter(JournalEntry.id == invoice.journal_entry_id).first()

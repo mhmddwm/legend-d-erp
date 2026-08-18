@@ -191,6 +191,14 @@ app.include_router(
     sales.si_router
 )
 
+app.include_router(
+    sales.so_router
+)
+
+app.include_router(
+    sales.dn_router
+)
+
 
 # Users / Roles / Permissions
 app.include_router(

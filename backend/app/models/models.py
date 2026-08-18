@@ -779,6 +779,8 @@ class SalesInvoice(Base):
     inv_date = Column(Date, nullable=False)
     customer_code = Column(String(30), ForeignKey("customers.code"), nullable=False)
     customer_ref_number = Column(String(60), nullable=True)
+    delivery_number = Column(String(30), ForeignKey("delivery_notes.dn_number"), nullable=True)
+    so_number = Column(String(30), ForeignKey("sales_orders.so_number"), nullable=True)
     warehouse_id = Column(Integer, ForeignKey("warehouses.id"), nullable=True)
     location_id = Column(Integer, ForeignKey("warehouse_locations.id"), nullable=True)
 
@@ -813,3 +815,60 @@ class SalesInvoiceLine(Base):
     qty = Column(Numeric(18, 4), nullable=False)
     unit_price = Column(Numeric(18, 4), nullable=False)
     unit_cost = Column(Numeric(18, 4), nullable=False, default=0)
+
+
+class SalesOrder(Base):
+    """أمر بيع — نظير أمر الشراء بالكامل: التزام بلا أثر محاسبي أو
+    مخزني مباشر، يُستخدم لاحقاً كمرجع عند إنشاء إذن التسليم."""
+    __tablename__ = "sales_orders"
+
+    so_number = Column(String(30), primary_key=True)
+    so_date = Column(Date, nullable=False)
+    customer_code = Column(String(30), ForeignKey("customers.code"), nullable=False)
+    status = Column(String(20), nullable=False, default="open")
+    total = Column(Numeric(18, 2), nullable=False, default=0)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    lines = relationship("SalesOrderLine", backref="order", cascade="all, delete-orphan")
+
+
+class SalesOrderLine(Base):
+    __tablename__ = "sales_order_lines"
+
+    id = Column(Integer, primary_key=True)
+    so_number = Column(String(30), ForeignKey("sales_orders.so_number"), nullable=False)
+    item_id = Column(Integer, ForeignKey("items.id"), nullable=False)
+    qty = Column(Numeric(18, 4), nullable=False)
+    unit_price = Column(Numeric(18, 4), nullable=False)
+
+
+class DeliveryNote(Base):
+    """إذن تسليم/صرف بضاعة — نظير إذن الاستلام (GRN) لكن معكوس: يُخفِّض
+    المخزون فوراً ويُرحِّل قيد تكلفة البضاعة المباعة وقت خروج البضاعة
+    الفعلي (بدل تأجيله للفاتورة)، تماماً كما يُرحِّل GRN قيد المخزون
+    وقت الاستلام الفعلي بدل تأجيله."""
+    __tablename__ = "delivery_notes"
+
+    dn_number = Column(String(30), primary_key=True)
+    dn_date = Column(Date, nullable=False)
+    customer_code = Column(String(30), ForeignKey("customers.code"), nullable=False)
+    so_number = Column(String(30), ForeignKey("sales_orders.so_number"), nullable=True)
+    warehouse_id = Column(Integer, ForeignKey("warehouses.id"), nullable=True)
+    location_id = Column(Integer, ForeignKey("warehouse_locations.id"), nullable=True)
+    cogs_total = Column(Numeric(18, 2), nullable=False, default=0)
+    invoice_status = Column(String(20), nullable=False, default="not_invoiced")
+    journal_entry_id = Column(Integer, ForeignKey("journal_entries.id"), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    lines = relationship("DeliveryNoteLine", backref="delivery", cascade="all, delete-orphan")
+
+
+class DeliveryNoteLine(Base):
+    __tablename__ = "delivery_note_lines"
+
+    id = Column(Integer, primary_key=True)
+    dn_number = Column(String(30), ForeignKey("delivery_notes.dn_number"), nullable=False)
+    item_id = Column(Integer, ForeignKey("items.id"), nullable=False)
+    qty = Column(Numeric(18, 4), nullable=False)
+    unit_cost = Column(Numeric(18, 4), nullable=False, default=0)
+    unit_price = Column(Numeric(18, 4), nullable=False, default=0)
