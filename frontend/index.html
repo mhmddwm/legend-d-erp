@@ -1204,6 +1204,17 @@ html[dir="ltr"] .brand-center{direction:ltr;}
 #panel-sales_invoices .po-hero p{font-size:12.5px;color:#4b5768}
 #panel-sales_invoices .po-trace{margin-bottom:12px}
 #panel-sales_invoices .hint{color:#48566b}
+
+#panel-sales_order .po-hero{padding:14px 18px}
+#panel-sales_order .po-hero h2{font-size:20px;margin:2px 0 4px}
+#panel-sales_order .po-hero p{font-size:12.5px;color:#4b5768}
+#panel-sales_order .po-trace{margin-bottom:12px}
+
+#panel-delivery_note .po-hero{padding:14px 18px}
+#panel-delivery_note .po-hero h2{font-size:20px;margin:2px 0 4px}
+#panel-delivery_note .po-hero p{font-size:12.5px;color:#4b5768}
+#panel-delivery_note .po-trace{margin-bottom:12px}
+#panel-delivery_note .hint{color:#48566b}
 </style>
 </head>
 <body class="erp-body">
@@ -3056,8 +3067,95 @@ html[dir="ltr"] .brand-center{direction:ltr;}
   </div>
 </div>
   <div class="panel" id="panel-sales_quote"><div class="formcard"><h3>عرض سعر</h3><div class="empty-msg">جاهزة للتطوير</div></div></div>
-  <div class="panel" id="panel-sales_order"><div class="formcard"><h3>أمر بيع</h3><div class="empty-msg">جاهزة للتطوير</div></div></div>
-  <div class="panel" id="panel-delivery_note"><div class="formcard"><h3>إذن تسليم/صرف بضاعة</h3><div class="empty-msg">جاهزة للتطوير</div></div></div>
+  <div class="panel" id="panel-sales_order">
+  <div class="po-page erp-watermark-page">
+    <div class="po-watermark">LEGEND D ERP SYS<br><span>Sales Order</span></div>
+    <div class="po-hero">
+      <div>
+        <span class="mini-label">المبيعات</span>
+        <h2>أمر بيع Sales Order</h2>
+        <p>التزام ببيع أصناف لعميل بكمية وسعر محدَّدين — بلا أي أثر محاسبي أو مخزني مباشر، يُستخدم كمرجع عند إنشاء إذن التسليم لاحقاً.</p>
+      </div>
+      <div class="po-actions">
+        <button class="btn secondary" onclick="renderSalesOrders()">تحديث</button>
+        <button class="btn" onclick="window.toggleSoNewForm()">+ أمر بيع جديد</button>
+      </div>
+    </div>
+    <div class="po-trace formcard rfq-timeline" id="soTraceBar"><span onclick="window.goSalesWorkflowStage('sales_quote')">عرض سعر</span><b>←</b><span class="active" onclick="window.goSalesWorkflowStage('sales_order')">أمر بيع</span><b>←</b><span onclick="window.goSalesWorkflowStage('delivery_note')">تسليم</span><b>←</b><span onclick="window.goSalesWorkflowStage('sales_invoices')">فاتورة</span><b>←</b><span onclick="window.goSalesWorkflowStage('sales_returns')">مرتجع</span><b>←</b><span onclick="window.goSalesWorkflowStage('customer_payments')">الدفع</span></div>
+
+    <div class="formcard rfq-card pinv-list-main" style="margin-top:14px">
+      <div class="rfq-saved-toolbar"><div><h3 style="margin:0">أوامر البيع المسجّلة</h3><small id="soSavedCount">0 أمر</small></div><input id="soSearch" placeholder="بحث برقم الأمر أو اسم العميل" oninput="renderSalesOrders()"></div>
+      <div class="scrollx pinv-list-scroll"><table class="grid po-list-table"><thead><tr><th>رقم الأمر</th><th>التاريخ</th><th>العميل</th><th>الإجمالي</th><th>الحالة</th><th style="text-align:center">الإجراءات</th></tr></thead><tbody id="soBody"></tbody></table></div>
+      <div id="soEmpty" class="pr-list-empty" style="display:none">لا توجد أوامر بيع مسجلة حتى الآن</div>
+    </div>
+
+    <div id="soNewFormBox" class="formcard" style="display:none;margin-top:14px;border:1.5px dashed #93c5fd">
+      <div class="rfq-section-head">
+        <h3>أمر بيع جديد</h3>
+        <button class="btn secondary" onclick="toggleSoNewForm(false)">إلغاء</button>
+      </div>
+      <div class="frow two">
+        <div class="field"><label>العميل</label><select id="soCustomer"><option value="">— اختر عميلاً —</option></select></div>
+        <div class="field"><label>تاريخ الأمر</label><input id="soDate" type="date"></div>
+      </div>
+      <table class="line-items">
+        <thead><tr><th style="width:34%">الصنف</th><th style="width:18%">الكمية</th><th style="width:22%">سعر البيع</th><th style="width:20%">الإجمالي</th><th></th></tr></thead>
+        <tbody id="soLinesBody"></tbody>
+      </table>
+      <button class="add-line-btn" onclick="addSoLine()">+ إضافة سطر</button>
+      <div class="totals-box"><div class="row grand"><span>إجمالي الأمر</span><span id="soTotal">0.00</span></div></div>
+      <div style="margin-top:14px"><button class="btn" onclick="submitSalesOrder()">حفظ أمر البيع</button></div>
+      <div class="err" id="soErr"></div>
+    </div>
+  </div>
+</div>
+  <div class="panel" id="panel-delivery_note">
+  <div class="po-page erp-watermark-page">
+    <div class="po-watermark">LEGEND D ERP SYS<br><span>Delivery Note</span></div>
+    <div class="po-hero">
+      <div>
+        <span class="mini-label">المبيعات</span>
+        <h2>إذن تسليم/صرف بضاعة Delivery Note</h2>
+        <p>تسجيل خروج بضاعة فعلياً للعميل — يخصم المخزون فوراً ويرحّل قيد تكلفة البضاعة المباعة تلقائياً، قبل ترحيل الفاتورة.</p>
+      </div>
+      <div class="po-actions">
+        <button class="btn secondary" onclick="renderDeliveryNotes()">تحديث</button>
+        <button class="btn" onclick="window.toggleDnNewForm()">+ إذن تسليم جديد</button>
+      </div>
+    </div>
+    <div class="po-trace formcard rfq-timeline" id="dnTraceBar"><span onclick="window.goSalesWorkflowStage('sales_quote')">عرض سعر</span><b>←</b><span onclick="window.goSalesWorkflowStage('sales_order')">أمر بيع</span><b>←</b><span class="active" onclick="window.goSalesWorkflowStage('delivery_note')">تسليم</span><b>←</b><span onclick="window.goSalesWorkflowStage('sales_invoices')">فاتورة</span><b>←</b><span onclick="window.goSalesWorkflowStage('sales_returns')">مرتجع</span><b>←</b><span onclick="window.goSalesWorkflowStage('customer_payments')">الدفع</span></div>
+
+    <div class="formcard rfq-card pinv-list-main" style="margin-top:14px">
+      <div class="rfq-saved-toolbar"><div><h3 style="margin:0">أذون التسليم المسجّلة</h3><small id="dnSavedCount">0 إذن</small></div><input id="dnSearch" placeholder="بحث برقم الإذن أو اسم العميل" oninput="renderDeliveryNotes()"></div>
+      <div class="scrollx pinv-list-scroll"><table class="grid po-list-table"><thead><tr><th>رقم الإذن</th><th>التاريخ</th><th>العميل</th><th>أمر البيع</th><th>تكلفة البضاعة</th><th>حالة الفوترة</th><th style="text-align:center">الإجراءات</th></tr></thead><tbody id="dnBody"></tbody></table></div>
+      <div id="dnEmpty" class="pr-list-empty" style="display:none">لا توجد أذون تسليم مسجلة حتى الآن</div>
+    </div>
+
+    <div id="dnNewFormBox" class="formcard" style="display:none;margin-top:14px;border:1.5px dashed #93c5fd">
+      <div class="rfq-section-head">
+        <h3>إذن تسليم جديد</h3>
+        <button class="btn secondary" onclick="toggleDnNewForm(false)">إلغاء</button>
+      </div>
+      <div class="frow two">
+        <div class="field"><label>أمر البيع المرتبط (اختياري)</label><select id="dnSalesOrder" onchange="onDnSalesOrderChange()"><option value="">— تسليم مباشر بدون أمر بيع —</option></select></div>
+        <div class="field"><label>العميل</label><select id="dnCustomer" onchange="onDnCustomerChange()"><option value="">— اختر عميلاً —</option></select></div>
+      </div>
+      <div class="frow two">
+        <div class="field"><label>تاريخ التسليم</label><input id="dnDate" type="date"></div>
+        <div class="field"><label>المستودع (يُخصَم منه)</label><select id="dnWarehouse"><option value="">— بدون تحديد —</option></select></div>
+      </div>
+      <table class="line-items">
+        <thead><tr><th style="width:34%">الصنف</th><th style="width:18%">الكمية</th><th style="width:22%">سعر البيع (مرجعي)</th><th style="width:20%">الإجمالي</th><th></th></tr></thead>
+        <tbody id="dnLinesBody"></tbody>
+      </table>
+      <button class="add-line-btn" onclick="addDnLine()">+ إضافة سطر</button>
+      <div class="totals-box"><div class="row grand"><span>إجمالي مرجعي</span><span id="dnTotal">0.00</span></div></div>
+      <div style="margin-top:14px"><button class="btn" onclick="submitDeliveryNote()">ترحيل إذن التسليم</button></div>
+      <div class="err" id="dnErr"></div>
+      <div class="hint">اختيار أمر بيع يعبّئ الأصناف تلقائياً من بنوده. سعر البيع هنا مرجعي فقط لتجهيز الفاتورة لاحقاً — لا يُرحَّل كإيراد إلا عند إنشاء الفاتورة.</div>
+    </div>
+  </div>
+</div>
   <div class="panel" id="panel-sales_invoice_create"></div>
   <div class="panel" id="panel-sales_invoices">
   <div class="po-page erp-watermark-page">
@@ -3087,6 +3185,10 @@ html[dir="ltr"] .brand-center{direction:ltr;}
         <button class="btn secondary" onclick="toggleSalesInvoiceNewForm(false)">إلغاء</button>
       </div>
       <div class="frow two">
+        <div class="field"><label>إذن التسليم المرتبط (اختياري)</label><select id="siDeliveryNote" onchange="onSiDeliveryChange()"><option value="">— فاتورة مباشرة بدون إذن تسليم —</option></select></div>
+        <div></div>
+      </div>
+      <div class="frow two">
         <div class="field"><label>العميل</label><select id="siCustomer" onchange="onSiCustomerChange()"><option value="">— اختر عميلاً —</option></select></div>
         <div class="field"><label>تاريخ الفاتورة</label><input id="siDate" type="date"></div>
       </div>
@@ -3107,11 +3209,14 @@ html[dir="ltr"] .brand-center{direction:ltr;}
           </select>
         </div>
       </div>
-      <table class="line-items">
-        <thead><tr><th style="width:30%">الصنف</th><th style="width:14%">الكمية</th><th style="width:12%">المتاح</th><th style="width:18%">سعر البيع</th><th style="width:16%">الإجمالي</th><th></th></tr></thead>
-        <tbody id="siLinesBody"></tbody>
-      </table>
-      <button class="add-line-btn" onclick="addSiLine()">+ إضافة سطر</button>
+      <div id="siManualLinesWrap">
+        <table class="line-items">
+          <thead><tr><th style="width:30%">الصنف</th><th style="width:14%">الكمية</th><th style="width:12%">المتاح</th><th style="width:18%">سعر البيع</th><th style="width:16%">الإجمالي</th><th></th></tr></thead>
+          <tbody id="siLinesBody"></tbody>
+        </table>
+        <button class="add-line-btn" id="siAddLineBtn" onclick="addSiLine()">+ إضافة سطر</button>
+      </div>
+      <div id="siDeliveryLinesWrap" style="display:none"></div>
       <div class="totals-box">
         <div class="row"><span>الصافي قبل الضريبة</span><span id="siSubtotal">0.00</span></div>
         <div class="row"><span id="siTaxLabel">الضريبة</span><span id="siTaxAmount">0.00</span></div>
@@ -3119,7 +3224,7 @@ html[dir="ltr"] .brand-center{direction:ltr;}
       </div>
       <div style="margin-top:14px"><button class="btn" onclick="submitSalesInvoice()">ترحيل الفاتورة</button></div>
       <div class="err" id="siErr"></div>
-      <div class="hint">سعر البيع يُعبَّأ تلقائياً من سعر الصنف الافتراضي، ويمكن تعديله لكل سطر. لا يمكن بيع كمية أكبر من الرصيد المتاح.</div>
+      <div class="hint" id="siHint">سعر البيع يُعبَّأ تلقائياً من سعر الصنف الافتراضي، ويمكن تعديله لكل سطر. لا يمكن بيع كمية أكبر من الرصيد المتاح.</div>
     </div>
   </div>
 </div>

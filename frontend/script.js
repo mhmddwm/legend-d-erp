@@ -34,6 +34,10 @@ let supplierPayments=[]; // مدفوعات الموردين
 let customers=[]; // عملاء المبيعات
 let salesInvoices=[]; // فواتير المبيعات
 let siLines=[]; // سطور نموذج فاتورة المبيعات الحالي
+let salesOrders=[]; // أوامر البيع
+let soLines=[]; // سطور نموذج أمر البيع الحالي
+let deliveryNotes=[]; // أذون التسليم
+let dnLines2=[]; // سطور نموذج إذن التسليم الحالي
 let journalEditingId=null; // معرّف القيد الجاري تعديله (null = إنشاء قيد جديد)
 let journalPage=1; // الصفحة الحالية في قائمة القيود
 const JOURNAL_PAGE_SIZE=20;
@@ -266,6 +270,18 @@ salesInvoices = await safeLoad(
 );
 
 
+salesOrders = await safeLoad(
+"أوامر البيع",
+"/api/sales-orders"
+);
+
+
+deliveryNotes = await safeLoad(
+"أذون التسليم",
+"/api/delivery-notes"
+);
+
+
 warehouses = await safeLoad(
 "المستودعات",
 "/api/warehouses"
@@ -396,6 +412,8 @@ function renderAll(){
 
   if(typeof renderCustomers === 'function') renderCustomers();
   if(typeof renderSalesInvoices === 'function') renderSalesInvoices();
+  if(typeof renderSalesOrders === 'function') renderSalesOrders();
+  if(typeof renderDeliveryNotes === 'function') renderDeliveryNotes();
 
   renderWarehousesScreen();
 
@@ -5691,6 +5709,17 @@ function toggleSalesInvoiceNewForm(forceOpen){
   const open = forceOpen===true ? true : (forceOpen===false ? false : isHidden);
   box.style.display = open ? 'block' : 'none';
   if(open){
+    const delSel=document.getElementById('siDeliveryNote');
+    if(delSel){
+      const current=delSel.value;
+      const openDeliveries=(deliveryNotes||[]).filter(dn=>dn.invoice_status!=='invoiced');
+      delSel.innerHTML='<option value="">— فاتورة مباشرة بدون إذن تسليم —</option>'+
+        openDeliveries.map(dn=>{
+          const cust=(customers||[]).find(c=>c.code===dn.customer_code);
+          return `<option value="${siEsc(dn.dn_number)}">${siEsc(dn.dn_number)} — ${siEsc(cust?cust.name:dn.customer_code)}</option>`;
+        }).join('');
+      delSel.value=current;
+    }
     const custSel=document.getElementById('siCustomer');
     if(custSel){
       const current=custSel.value;
@@ -5734,6 +5763,41 @@ function onSiCustomerChange(){
   if(termsEl && cust) termsEl.value=cust.payment_terms_days||0;
 }
 window.onSiCustomerChange = onSiCustomerChange;
+
+// عند اختيار إذن تسليم: تُقفل الأصناف يدوية الإدخال (لأنها ستؤخذ من
+// إذن التسليم نفسه بالباك إند تلقائياً)، ويُعرض ملخص للقراءة فقط،
+// والمخزون لن يُخصَم مرة أخرى لأنه خُصم بالفعل عند التسليم
+function onSiDeliveryChange(){
+  const dnNumber=document.getElementById('siDeliveryNote').value;
+  const manualWrap=document.getElementById('siManualLinesWrap');
+  const previewWrap=document.getElementById('siDeliveryLinesWrap');
+  const hint=document.getElementById('siHint');
+  if(!dnNumber){
+    if(manualWrap) manualWrap.style.display='block';
+    if(previewWrap){ previewWrap.style.display='none'; previewWrap.innerHTML=''; }
+    if(hint) hint.textContent='سعر البيع يُعبَّأ تلقائياً من سعر الصنف الافتراضي، ويمكن تعديله لكل سطر. لا يمكن بيع كمية أكبر من الرصيد المتاح.';
+    return;
+  }
+  const dn=(deliveryNotes||[]).find(x=>x.dn_number===dnNumber);
+  if(!dn) return;
+  const custSel=document.getElementById('siCustomer');
+  if(custSel) custSel.value=dn.customer_code;
+  onSiCustomerChange();
+
+  if(manualWrap) manualWrap.style.display='none';
+  siLines=[];
+  if(previewWrap){
+    const rows=(dn.lines||[]).map(l=>{
+      const it=(items||[]).find(i=>i.id===l.item_id);
+      return `<tr><td>${siEsc(it?it.code+' — '+it.name:l.item_id)}</td><td class="num">${fmt(l.qty)}</td><td class="num">${fmt(l.unit_price)}</td><td class="num">${fmt(l.qty*l.unit_price)}</td></tr>`;
+    }).join('');
+    previewWrap.style.display='block';
+    previewWrap.innerHTML=`<table class="line-items"><thead><tr><th>الصنف</th><th>الكمية</th><th>سعر البيع</th><th>الإجمالي</th></tr></thead><tbody>${rows}</tbody></table>`;
+  }
+  if(hint) hint.textContent='الأصناف والكميات مأخوذة من إذن التسليم المحدَّد أعلاه ولا يمكن تعديلها هنا — المخزون خُصم بالفعل عند ترحيل إذن التسليم.';
+  recalcSiTotals();
+}
+window.onSiDeliveryChange = onSiDeliveryChange;
 
 function addSiLine(){
   lineCounter++;
@@ -5781,7 +5845,14 @@ function renderSiLines(){
 }
 
 function recalcSiTotals(){
-  const linesTotal=siLines.reduce((s,l)=>s+l.qty*l.price,0);
+  const dnNumber=document.getElementById('siDeliveryNote')?.value||'';
+  let linesTotal;
+  if(dnNumber){
+    const dn=(deliveryNotes||[]).find(x=>x.dn_number===dnNumber);
+    linesTotal = dn ? (dn.lines||[]).reduce((s,l)=>s+Number(l.qty)*Number(l.unit_price),0) : 0;
+  }else{
+    linesTotal = siLines.reduce((s,l)=>s+l.qty*l.price,0);
+  }
   const taxTypeCode=document.getElementById('siTaxType')?.value||'';
   const calcMethod=document.getElementById('siTaxCalcMethod')?.value||'exclusive';
   const r=(typeof pinvTaxPreview==='function') ? pinvTaxPreview(linesTotal, taxTypeCode, calcMethod) : {subtotal:linesTotal, tax:0, total:linesTotal, taxType:null};
@@ -5794,6 +5865,7 @@ window.recalcSiTotals = recalcSiTotals;
 
 async function submitSalesInvoice(){
   const err=document.getElementById('siErr');
+  const delivery_number=document.getElementById('siDeliveryNote').value||null;
   const customer_code=document.getElementById('siCustomer').value;
   const inv_date=document.getElementById('siDate').value;
   const customer_ref_number=document.getElementById('siCustomerRef').value.trim()||null;
@@ -5806,13 +5878,13 @@ async function submitSalesInvoice(){
 
   if(!customer_code){ err.textContent='يرجى اختيار العميل'; return; }
   if(!inv_date){ err.textContent='يرجى إدخال تاريخ الفاتورة'; return; }
-  if(!valid.length){ err.textContent='يرجى إضافة صنف واحد على الأقل'; return; }
+  if(!delivery_number && !valid.length){ err.textContent='يرجى إضافة صنف واحد على الأقل'; return; }
   err.textContent='';
   try{
     await api('POST','/api/sales-invoices',{
-      inv_date, customer_code, customer_ref_number, payment_terms_days, cost_center_code,
+      inv_date, customer_code, customer_ref_number, delivery_number, payment_terms_days, cost_center_code,
       warehouse_id, tax_type_code, tax_calc_method,
-      lines: valid.map(l=>({item_code:l.itemCode, qty:l.qty, unit_price:l.price})),
+      lines: delivery_number ? [] : valid.map(l=>({item_code:l.itemCode, qty:l.qty, unit_price:l.price})),
     });
     siLines=[];
     document.getElementById('siCustomerRef').value='';
@@ -5955,6 +6027,279 @@ async function cancelSalesInvoiceAction(invNumber){
   }catch(e){ alert(e.message); }
 }
 window.cancelSalesInvoiceAction = cancelSalesInvoiceAction;
+
+// ============================================================
+// أمر البيع
+// ============================================================
+function soEsc(s){ return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+function toggleSoNewForm(forceOpen){
+  const box=document.getElementById('soNewFormBox');
+  if(!box) return;
+  const isHidden = box.style.display==='none' || !box.style.display;
+  const open = forceOpen===true ? true : (forceOpen===false ? false : isHidden);
+  box.style.display = open ? 'block' : 'none';
+  if(open){
+    const custSel=document.getElementById('soCustomer');
+    if(custSel){
+      const current=custSel.value;
+      custSel.innerHTML='<option value="">— اختر عميلاً —</option>'+(customers||[]).filter(c=>c.is_active!==false).map(c=>`<option value="${soEsc(c.code)}">${soEsc(c.name)} (${soEsc(c.code)})</option>`).join('');
+      custSel.value=current;
+    }
+    const dt=document.getElementById('soDate');
+    if(dt && !dt.value) dt.value=new Date().toISOString().slice(0,10);
+    if(!soLines.length) addSoLine();
+    box.scrollIntoView({behavior:'smooth', block:'nearest'});
+  }
+}
+window.toggleSoNewForm = toggleSoNewForm;
+
+function addSoLine(){ lineCounter++; soLines.push({id:lineCounter, itemCode:'', qty:1, price:0}); renderSoLines(); }
+window.addSoLine = addSoLine;
+function removeSoLine(id){ soLines=soLines.filter(l=>l.id!==id); renderSoLines(); }
+window.removeSoLine = removeSoLine;
+function onSoLineChange(id, field, value){
+  const l=soLines.find(x=>x.id===id); if(!l) return;
+  if(field==='qty'||field==='price') l[field]=parseFloat(value)||0; else l[field]=value;
+  if(field==='itemCode'){ const it=(items||[]).find(i=>i.code===value); l.price = it ? Number(it.price)||0 : 0; }
+  renderSoLines();
+}
+window.onSoLineChange = onSoLineChange;
+
+function renderSoLines(){
+  const body=document.getElementById('soLinesBody'); if(!body) return;
+  const itemOpts='<option value="">— اختر صنف —</option>'+(items||[]).filter(i=>i.is_active!==false).map(i=>`<option value="${i.code}">${i.code} — ${i.name}</option>`).join('');
+  body.innerHTML=soLines.map(l=>`<tr>
+      <td><select onchange="onSoLineChange(${l.id},'itemCode',this.value)">${itemOpts.replace(`value="${l.itemCode}"`,`value="${l.itemCode}" selected`)}</select></td>
+      <td><input type="number" step="0.01" min="0" value="${l.qty}" onchange="onSoLineChange(${l.id},'qty',this.value)"></td>
+      <td><input type="number" step="0.01" min="0" value="${l.price}" onchange="onSoLineChange(${l.id},'price',this.value)"></td>
+      <td class="linetotal">${fmt(l.qty*l.price)}</td>
+      <td><button class="rm-line" onclick="removeSoLine(${l.id})">✕</button></td>
+    </tr>`).join('');
+  const total=soLines.reduce((s,l)=>s+l.qty*l.price,0);
+  const el=document.getElementById('soTotal'); if(el) el.textContent=fmt(total);
+}
+
+async function submitSalesOrder(){
+  const err=document.getElementById('soErr');
+  const customer_code=document.getElementById('soCustomer').value;
+  const so_date=document.getElementById('soDate').value;
+  const valid=soLines.filter(l=>l.itemCode && l.qty>0);
+  if(!customer_code){ err.textContent='يرجى اختيار العميل'; return; }
+  if(!so_date){ err.textContent='يرجى إدخال التاريخ'; return; }
+  if(!valid.length){ err.textContent='يرجى إضافة صنف واحد على الأقل'; return; }
+  err.textContent='';
+  try{
+    await api('POST','/api/sales-orders',{
+      so_date, customer_code,
+      lines: valid.map(l=>({item_code:l.itemCode, qty:l.qty, unit_price:l.price})),
+    });
+    soLines=[];
+    toggleSoNewForm(false);
+    await loadAll();
+  }catch(e){ err.textContent=e.message; }
+}
+window.submitSalesOrder = submitSalesOrder;
+
+function renderSalesOrders(){
+  const body=document.getElementById('soBody'); if(!body) return;
+  const q=(document.getElementById('soSearch')?.value||'').trim().toLowerCase();
+  let data=Array.isArray(salesOrders)?[...salesOrders]:[];
+  if(q){
+    data=data.filter(so=>{
+      const cust=(customers||[]).find(c=>c.code===so.customer_code);
+      return (so.so_number||'').toLowerCase().includes(q) || (cust?.name||'').toLowerCase().includes(q);
+    });
+  }
+  data.sort((a,b)=> new Date(b.so_date||0)-new Date(a.so_date||0) || String(b.so_number||'').localeCompare(String(a.so_number||'')));
+  body.innerHTML=data.map(so=>{
+    const cust=(customers||[]).find(c=>c.code===so.customer_code);
+    return `<tr>
+      <td>${soEsc(so.so_number)}</td>
+      <td>${soEsc(so.so_date)}</td>
+      <td>${soEsc(cust?cust.name:so.customer_code)}</td>
+      <td>${fmt(so.total)}</td>
+      <td>${so.status==='open'?'<span class="badge posted">مفتوح</span>':'<span class="badge returned">'+soEsc(so.status)+'</span>'}</td>
+      <td style="text-align:center">
+        <button type="button" class="btn secondary" style="padding:4px 10px;font-size:12px" onclick="startDeliveryFromOrder('${soEsc(so.so_number)}')">📦 إنشاء إذن تسليم</button>
+      </td>
+    </tr>`;
+  }).join('');
+  const empty=document.getElementById('soEmpty'); if(empty) empty.style.display = data.length ? 'none' : 'block';
+  const countEl=document.getElementById('soSavedCount'); if(countEl) countEl.textContent=(salesOrders||[]).length+' أمر';
+}
+window.renderSalesOrders = renderSalesOrders;
+
+function startDeliveryFromOrder(soNumber){
+  if(typeof openSubModule==='function') openSubModule('إذن تسليم/صرف بضاعة');
+  setTimeout(()=>{
+    if(typeof toggleDnNewForm==='function') toggleDnNewForm(true);
+    const sel=document.getElementById('dnSalesOrder');
+    if(sel){ sel.value=soNumber; if(typeof onDnSalesOrderChange==='function') onDnSalesOrderChange(); }
+  }, 60);
+}
+window.startDeliveryFromOrder = startDeliveryFromOrder;
+
+// ============================================================
+// إذن التسليم
+// ============================================================
+function dnEsc(s){ return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+function toggleDnNewForm(forceOpen){
+  const box=document.getElementById('dnNewFormBox');
+  if(!box) return;
+  const isHidden = box.style.display==='none' || !box.style.display;
+  const open = forceOpen===true ? true : (forceOpen===false ? false : isHidden);
+  box.style.display = open ? 'block' : 'none';
+  if(open){
+    const soSel=document.getElementById('dnSalesOrder');
+    if(soSel){
+      const current=soSel.value;
+      const openOrders=(salesOrders||[]).filter(so=>so.status==='open');
+      soSel.innerHTML='<option value="">— تسليم مباشر بدون أمر بيع —</option>'+
+        openOrders.map(so=>{
+          const cust=(customers||[]).find(c=>c.code===so.customer_code);
+          return `<option value="${dnEsc(so.so_number)}">${dnEsc(so.so_number)} — ${dnEsc(cust?cust.name:so.customer_code)}</option>`;
+        }).join('');
+      soSel.value=current;
+    }
+    const custSel=document.getElementById('dnCustomer');
+    if(custSel){
+      const current=custSel.value;
+      custSel.innerHTML='<option value="">— اختر عميلاً —</option>'+(customers||[]).filter(c=>c.is_active!==false).map(c=>`<option value="${dnEsc(c.code)}">${dnEsc(c.name)} (${dnEsc(c.code)})</option>`).join('');
+      custSel.value=current;
+    }
+    const whSel=document.getElementById('dnWarehouse');
+    if(whSel){
+      const current=whSel.value;
+      whSel.innerHTML='<option value="">— بدون تحديد —</option>'+(warehouses||[]).filter(w=>w.is_active!==false).map(w=>`<option value="${w.id}">${dnEsc(w.code)} — ${dnEsc(w.name)}</option>`).join('');
+      whSel.value=current;
+    }
+    const dt=document.getElementById('dnDate');
+    if(dt && !dt.value) dt.value=new Date().toISOString().slice(0,10);
+    if(!dnLines2.length) addDnLine();
+    box.scrollIntoView({behavior:'smooth', block:'nearest'});
+  }
+}
+window.toggleDnNewForm = toggleDnNewForm;
+
+function onDnSalesOrderChange(){
+  const soNumber=document.getElementById('dnSalesOrder').value;
+  const so=(salesOrders||[]).find(x=>x.so_number===soNumber);
+  if(!so) return;
+  const custSel=document.getElementById('dnCustomer');
+  if(custSel) custSel.value=so.customer_code;
+  dnLines2=(so.lines||[]).map(l=>{
+    lineCounter++;
+    const it=(items||[]).find(i=>i.id===l.item_id);
+    return {id:lineCounter, itemCode: it?it.code:'', qty:Number(l.qty)||0, price:Number(l.unit_price)||0};
+  });
+  if(!dnLines2.length) addDnLine();
+  renderDnLines();
+}
+window.onDnSalesOrderChange = onDnSalesOrderChange;
+
+function onDnCustomerChange(){ /* لا حاجة لمنطق إضافي حالياً، الحقل مستقل */ }
+window.onDnCustomerChange = onDnCustomerChange;
+
+function addDnLine(){ lineCounter++; dnLines2.push({id:lineCounter, itemCode:'', qty:1, price:0}); renderDnLines(); }
+window.addDnLine = addDnLine;
+function removeDnLine(id){ dnLines2=dnLines2.filter(l=>l.id!==id); renderDnLines(); }
+window.removeDnLine = removeDnLine;
+function onDnLineChange2(id, field, value){
+  const l=dnLines2.find(x=>x.id===id); if(!l) return;
+  if(field==='qty'||field==='price') l[field]=parseFloat(value)||0; else l[field]=value;
+  if(field==='itemCode'){ const it=(items||[]).find(i=>i.code===value); l.price = it ? Number(it.price)||0 : 0; }
+  renderDnLines();
+}
+window.onDnLineChange2 = onDnLineChange2;
+
+function renderDnLines(){
+  const body=document.getElementById('dnLinesBody'); if(!body) return;
+  const itemOpts='<option value="">— اختر صنف —</option>'+(items||[]).filter(i=>i.is_active!==false).map(i=>`<option value="${i.code}">${i.code} — ${i.name}</option>`).join('');
+  body.innerHTML=dnLines2.map(l=>{
+    const it=(items||[]).find(i=>i.code===l.itemCode);
+    const available=it?Number(it.qty)||0:0;
+    return `<tr>
+      <td><select onchange="onDnLineChange2(${l.id},'itemCode',this.value)">${itemOpts.replace(`value="${l.itemCode}"`,`value="${l.itemCode}" selected`)}</select></td>
+      <td><input type="number" step="0.01" min="0" max="${available}" value="${l.qty}" onchange="onDnLineChange2(${l.id},'qty',this.value)"></td>
+      <td><input type="number" step="0.01" min="0" value="${l.price}" onchange="onDnLineChange2(${l.id},'price',this.value)"></td>
+      <td class="linetotal">${fmt(l.qty*l.price)}</td>
+      <td><button class="rm-line" onclick="removeDnLine(${l.id})">✕</button></td>
+    </tr>`;
+  }).join('');
+  const total=dnLines2.reduce((s,l)=>s+l.qty*l.price,0);
+  const el=document.getElementById('dnTotal'); if(el) el.textContent=fmt(total);
+}
+
+async function submitDeliveryNote(){
+  const err=document.getElementById('dnErr');
+  const so_number=document.getElementById('dnSalesOrder').value||null;
+  const customer_code=document.getElementById('dnCustomer').value;
+  const dn_date=document.getElementById('dnDate').value;
+  const warehouse_id=document.getElementById('dnWarehouse').value?parseInt(document.getElementById('dnWarehouse').value):null;
+  const valid=dnLines2.filter(l=>l.itemCode && l.qty>0);
+  if(!customer_code){ err.textContent='يرجى اختيار العميل'; return; }
+  if(!dn_date){ err.textContent='يرجى إدخال التاريخ'; return; }
+  if(!valid.length){ err.textContent='يرجى إضافة صنف واحد على الأقل'; return; }
+  err.textContent='';
+  try{
+    await api('POST','/api/delivery-notes',{
+      dn_date, customer_code, so_number, warehouse_id,
+      lines: valid.map(l=>({item_code:l.itemCode, qty:l.qty, unit_price:l.price})),
+    });
+    dnLines2=[];
+    toggleDnNewForm(false);
+    await loadAll();
+  }catch(e){ err.textContent=e.message; }
+}
+window.submitDeliveryNote = submitDeliveryNote;
+
+function renderDeliveryNotes(){
+  const body=document.getElementById('dnBody'); if(!body) return;
+  const q=(document.getElementById('dnSearch')?.value||'').trim().toLowerCase();
+  let data=Array.isArray(deliveryNotes)?[...deliveryNotes]:[];
+  if(q){
+    data=data.filter(dn=>{
+      const cust=(customers||[]).find(c=>c.code===dn.customer_code);
+      return (dn.dn_number||'').toLowerCase().includes(q) || (cust?.name||'').toLowerCase().includes(q);
+    });
+  }
+  data.sort((a,b)=> new Date(b.dn_date||0)-new Date(a.dn_date||0) || String(b.dn_number||'').localeCompare(String(a.dn_number||'')));
+  body.innerHTML=data.map(dn=>{
+    const cust=(customers||[]).find(c=>c.code===dn.customer_code);
+    const invoiced=dn.invoice_status==='invoiced';
+    return `<tr>
+      <td>${dnEsc(dn.dn_number)}</td>
+      <td>${dnEsc(dn.dn_date)}</td>
+      <td>${dnEsc(cust?cust.name:dn.customer_code)}</td>
+      <td>${dnEsc(dn.so_number||'-')}</td>
+      <td>${fmt(dn.cogs_total)}</td>
+      <td>${invoiced?'<span class="badge returned">مفوتر</span>':'<span class="badge posted">لم يُفوتر</span>'}</td>
+      <td style="text-align:center">
+        ${invoiced ? '-' : `<button type="button" class="btn secondary" style="padding:4px 10px;font-size:12px" onclick="startInvoiceFromDelivery('${dnEsc(dn.dn_number)}')">🧾 إنشاء فاتورة</button>`}
+      </td>
+    </tr>`;
+  }).join('');
+  const empty=document.getElementById('dnEmpty'); if(empty) empty.style.display = data.length ? 'none' : 'block';
+  const countEl=document.getElementById('dnSavedCount'); if(countEl) countEl.textContent=(deliveryNotes||[]).length+' إذن';
+}
+window.renderDeliveryNotes = renderDeliveryNotes;
+
+function startInvoiceFromDelivery(dnNumber){
+  const dn=(deliveryNotes||[]).find(x=>x.dn_number===dnNumber);
+  if(!dn) return;
+  if(typeof openSubModule==='function') openSubModule('إدارة الفواتير');
+  setTimeout(()=>{
+    if(typeof toggleSalesInvoiceNewForm==='function') toggleSalesInvoiceNewForm(true);
+    setTimeout(()=>{
+      const delSel=document.getElementById('siDeliveryNote');
+      if(delSel){ delSel.value=dnNumber; if(typeof onSiDeliveryChange==='function') onSiDeliveryChange(); }
+    }, 60);
+  }, 60);
+}
+window.startInvoiceFromDelivery = startInvoiceFromDelivery;
+
 
 
 
