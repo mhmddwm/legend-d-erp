@@ -5469,8 +5469,23 @@ table.uz-matrix input[type=checkbox]{width:16px;height:16px;cursor:pointer;accen
     if(window.XLSX){
       const wb=XLSX.utils.book_new(); const ws=XLSX.utils.aoa_to_sheet(rows);
       ws['!cols']=headers.map(h=>({wch:Math.max(16,String(h).length+4)}));
-      XLSX.utils.book_append_sheet(wb,ws,'Items'); XLSX.writeFile(wb,'items_import_template.xlsx');
-      msg('تم تنزيل نموذج Excel. بعد التعديل احفظه بنفس الصيغة وارفعه من زر رفع الملف / اختيار ملف.', true);
+      XLSX.utils.book_append_sheet(wb,ws,'Items');
+
+      // شيت مرجعي: أكواد قوالب الوحدات/التصنيفات/الماركات/الموردين/المستودعات
+      // الصحيحة القابلة للاستخدام بالأعمدة المقابلة — بديل عملي عن الدروب
+      // ليست الحقيقي داخل الخلية (غير متاح بالنسخة المجانية من مكتبة Excel المستخدمة).
+      const refRows=[['نوع القائمة','الكود','الاسم']];
+      (window.unitTemplates||[]).forEach(t=>refRows.push(['قالب الوحدة', t.id||t.code||'', t.name||'']));
+      (window.categories||[]).forEach(c=>refRows.push(['التصنيف', c.code||'', c.name_ar||'']));
+      (window.brands||[]).forEach(b=>refRows.push(['الماركة', b.code||'', b.name_ar||'']));
+      (window.suppliers||[]).forEach(s=>refRows.push(['المورد', s.code||'', s.name||'']));
+      (window.warehouses||[]).forEach(w=>refRows.push(['المستودع', w.code||'', w.name||'']));
+      const refWs=XLSX.utils.aoa_to_sheet(refRows);
+      refWs['!cols']=[{wch:16},{wch:20},{wch:30}];
+      XLSX.utils.book_append_sheet(wb,refWs,'القوائم المرجعية');
+
+      XLSX.writeFile(wb,'items_import_template.xlsx');
+      msg('تم تنزيل نموذج Excel. راجع شيت "القوائم المرجعية" داخل نفس الملف لنسخ الأكواد الصحيحة (قالب الوحدة، التصنيف، الماركة...)، ثم احفظ بنفس الصيغة وارفعه من زر رفع الملف / اختيار ملف.', true);
       return;
     }
     const csv=rows.map(r=>r.map(v=>{const t=String(v??''); return /[",;\n]/.test(t)?'"'+t.replace(/"/g,'""')+'"':t;}).join(';')).join('\r\n');

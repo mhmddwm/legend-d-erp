@@ -13,6 +13,7 @@ from app.routers import (
     accounting,
     inventory,
     purchasing,
+    sales,
     localization,
     users,
     roles,
@@ -178,6 +179,16 @@ app.include_router(
 
 app.include_router(
     purchasing.spay_router
+)
+
+
+# Sales
+app.include_router(
+    sales.customer_router
+)
+
+app.include_router(
+    sales.si_router
 )
 
 

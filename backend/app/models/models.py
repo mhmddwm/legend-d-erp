@@ -751,3 +751,65 @@ class PriceListItem(Base):
     __table_args__ = (
         UniqueConstraint("price_list_code", "item_id", name="uq_price_list_item"),
     )
+
+
+class Customer(Base):
+    """عميل — نظير المورد بالكامل. account_code يشير افتراضياً لحساب
+    "عملاء" (1121) الفرعي تحت الذمم المدينة (112)."""
+    __tablename__ = "customers"
+
+    code = Column(String(30), primary_key=True)
+    name = Column(String(200), nullable=False)
+    phone = Column(String(30), nullable=True)
+    email = Column(String(120), nullable=True)
+    notes = Column(Text, nullable=True)
+    account_code = Column(String(20), ForeignKey("accounts.code"), nullable=True)
+    payment_terms_days = Column(Integer, nullable=False, default=0)
+    is_active = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class SalesInvoice(Base):
+    """فاتورة مبيعات مباشرة — نظير فاتورة المشتريات المباشرة، لكنها
+    تُنقص المخزون فوراً (بدل زيادته) وتُنشئ قيداً محاسبياً مزدوجاً:
+    الإيراد والذمة من جهة، وتكلفة البضاعة المباعة من جهة أخرى."""
+    __tablename__ = "sales_invoices"
+
+    inv_number = Column(String(30), primary_key=True)
+    inv_date = Column(Date, nullable=False)
+    customer_code = Column(String(30), ForeignKey("customers.code"), nullable=False)
+    customer_ref_number = Column(String(60), nullable=True)
+    warehouse_id = Column(Integer, ForeignKey("warehouses.id"), nullable=True)
+    location_id = Column(Integer, ForeignKey("warehouse_locations.id"), nullable=True)
+
+    subtotal = Column(Numeric(18, 2), nullable=False, default=0)
+    tax_type_code = Column(String(20), ForeignKey("tax_types.code"), nullable=True)
+    tax_amount = Column(Numeric(18, 2), nullable=False, default=0)
+    total = Column(Numeric(18, 2), nullable=False, default=0)
+    cogs_total = Column(Numeric(18, 2), nullable=False, default=0)
+
+    payment_terms_days = Column(Integer, nullable=False, default=0)
+    cost_center_code = Column(String(20), ForeignKey("cost_centers.code"), nullable=True)
+    status = Column(String(20), nullable=False, default="posted")
+    journal_entry_id = Column(Integer, ForeignKey("journal_entries.id"), nullable=True)
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    @property
+    def due_date(self):
+        if self.inv_date is None:
+            return None
+        return self.inv_date + timedelta(days=self.payment_terms_days or 0)
+
+    lines = relationship("SalesInvoiceLine", backref="invoice", cascade="all, delete-orphan")
+
+
+class SalesInvoiceLine(Base):
+    __tablename__ = "sales_invoice_lines"
+
+    id = Column(Integer, primary_key=True)
+    inv_number = Column(String(30), ForeignKey("sales_invoices.inv_number"), nullable=False)
+    item_id = Column(Integer, ForeignKey("items.id"), nullable=False)
+    qty = Column(Numeric(18, 4), nullable=False)
+    unit_price = Column(Numeric(18, 4), nullable=False)
+    unit_cost = Column(Numeric(18, 4), nullable=False, default=0)
