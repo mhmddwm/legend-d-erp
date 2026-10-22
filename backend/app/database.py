@@ -30,8 +30,11 @@ print(f"DATABASE CONNECTED TO: {safe_url}")
 
 # إعداد SSL لـ Supabase
 connect_args = {}
+IS_SQLITE = DATABASE_URL.startswith("sqlite")  # للاختبارات فقط
 
-if (
+if IS_SQLITE:
+    connect_args = {"check_same_thread": False}
+elif (
     "localhost" not in DATABASE_URL
     and "127.0.0.1" not in DATABASE_URL
 ):
@@ -41,11 +44,15 @@ if (
 
 
 # إنشاء الاتصال
-engine = create_engine(
-    DATABASE_URL,
-    pool_pre_ping=True,
-    connect_args=connect_args
-)
+if IS_SQLITE:
+    from sqlalchemy.pool import StaticPool
+    engine = create_engine(DATABASE_URL, connect_args=connect_args, poolclass=StaticPool)
+else:
+    engine = create_engine(
+        DATABASE_URL,
+        pool_pre_ping=True,
+        connect_args=connect_args
+    )
 
 
 # ==========================
@@ -53,6 +60,7 @@ engine = create_engine(
 # ==========================
 
 try:
+  if not IS_SQLITE:
     with engine.connect() as conn:
 
         print("\n===== DATABASE INFO =====")

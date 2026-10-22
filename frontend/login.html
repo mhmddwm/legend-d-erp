@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>تسجيل الدخول — LEGEND D ERP</title>
+<link rel="icon" href="data:,">
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{--ink:#0D1B2E;--accent:#1565C0;--accent-hover:#0D47A1;--bg:#EEF2F7;--err:#C62828;--line:#D5DDE8}
+  *{box-sizing:border-box}
+  body{margin:0;min-height:100vh;display:grid;place-items:center;background:var(--bg);
+       font-family:'Cairo',system-ui,sans-serif;color:var(--ink)}
+  .card{width:min(400px,92vw);background:#fff;border-radius:14px;padding:32px 28px;
+        box-shadow:0 10px 30px rgba(13,27,46,.12)}
+  .brand{display:flex;flex-direction:column;align-items:center;gap:8px;margin-bottom:22px}
+  .brand img{height:64px;width:64px;object-fit:contain}
+  .brand h1{margin:0;font-size:20px;font-weight:700}
+  .brand p{margin:0;font-size:13px;color:#5b6b82}
+  label{display:block;font-size:13px;font-weight:600;margin:14px 0 6px}
+  input{width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;
+        direction:ltr;text-align:left}
+  input:focus{outline:2px solid var(--accent);outline-offset:1px;border-color:var(--accent)}
+  button{width:100%;margin-top:20px;padding:12px;border:0;border-radius:8px;background:var(--accent);
+         color:#fff;font:inherit;font-weight:700;cursor:pointer}
+  button:hover{background:var(--accent-hover)}
+  button:disabled{opacity:.6;cursor:wait}
+  .err{min-height:20px;margin-top:12px;font-size:13px;color:var(--err);text-align:center}
+</style>
+</head>
+<body>
+<form class="card" id="f" autocomplete="on">
+  <div class="brand">
+    <img src="legend_logo.png" alt="" onerror="this.style.display='none'">
+    <h1>LEGEND D ERP</h1>
+    <p>سجّل الدخول للمتابعة</p>
+  </div>
+  <label for="email">البريد الإلكتروني</label>
+  <input id="email" name="email" type="email" autocomplete="username" required autofocus>
+  <label for="pw">كلمة المرور</label>
+  <input id="pw" name="password" type="password" autocomplete="current-password" required>
+  <button id="btn" type="submit">دخول</button>
+  <div class="err" id="err" role="alert"></div>
+</form>
+<script src="auth.js"></script>
+<script>
+(function(){
+  var API = LegendAuth.API;
+  // إن كان مسجّلاً أصلاً وجلسته صالحة، انتقل مباشرة
+  if (LegendAuth.getToken()) {
+    fetch(API + '/api/auth/me', {headers:{Authorization:'Bearer ' + LegendAuth.getToken()}})
+      .then(function(r){ if (r.ok) go(); else LegendAuth.clearSession(); }).catch(function(){});
+  }
+  function go(){
+    var next = new URLSearchParams(location.search).get('next') || 'index.html';
+    // نسمح فقط بصفحات نسبية من نفس الموقع (منع التحويل لمواقع خارجية)
+    if (!/^[\w\-.]+(\?[\w\-.=&%]*)?$/.test(next)) next = 'index.html';
+    location.replace(next);
+  }
+  document.getElementById('f').addEventListener('submit', function(e){
+    e.preventDefault();
+    var btn = document.getElementById('btn'), err = document.getElementById('err');
+    err.textContent = ''; btn.disabled = true;
+    fetch(API + '/api/auth/login', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({email: document.getElementById('email').value,
+                            password: document.getElementById('pw').value})
+    }).then(function(r){ return r.json().catch(function(){return {};}).then(function(j){ return {ok:r.ok, j:j}; }); })
+      .then(function(x){
+        if (!x.ok) { err.textContent = x.j.detail || 'تعذر تسجيل الدخول'; btn.disabled = false; return; }
+        LegendAuth.setSession(x.j.access_token, x.j.user);
+        go();
+      }).catch(function(){ err.textContent = 'تعذر الاتصال بالخادم'; btn.disabled = false; });
+  });
+})();
+</script>
+</body>
+</html>

@@ -82,6 +82,25 @@ CORS_ORIGINS=*
 
 ---
 
+## الخطوة 3.5: الأمان وتسجيل الدخول (PF-01.3)
+
+النظام الآن يتطلب تسجيل دخول. أضف إلى `backend/.env` (راجع `backend/.env.example`):
+
+```
+DATABASE_URL=postgresql://...
+JWT_SECRET=<سر عشوائي طويل>        # python -c "import secrets; print(secrets.token_urlsafe(48))"
+ADMIN_EMAIL=you@example.com         # يُنشأ المدير الأول تلقائياً إن كان جدول المستخدمين فارغاً
+ADMIN_PASSWORD=<8 أحرف فأكثر>
+```
+
+- إن كان لديك مستخدمون سابقون فادخل بحساب موجود، أو أنشئ/أعد ضبط مديراً بالأمر:
+  `python ../scripts/create_admin.py you@example.com` (من مجلد backend).
+- الصلاحيات تُفرض بالخادم حسب دور المستخدم (شاشة الأدوار والصلاحيات).
+- **لا ترفع `.env` إلى git أبداً** (مُدرج في `.gitignore`).
+- تشغيل الاختبارات: `cd backend && pip install -r requirements-dev.txt && pytest ../tests -q`
+
+---
+
 ## الخطوة 4: تشغيل الخادم
 
 ```bash
@@ -104,7 +123,7 @@ INFO:     Application startup complete.
 http://localhost:8000
 ```
 
-ستجد النظام يعمل مع شريط اتصال أخضر يؤكد الاتصال بقاعدة البيانات.
+ستظهر صفحة تسجيل الدخول أولاً، وبعد الدخول ستجد النظام يعمل مع شريط اتصال أخضر يؤكد الاتصال بقاعدة البيانات.
 
 ---
 

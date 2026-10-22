@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from app.core.security import require_admin
 from app.database import get_db
 from app.models.models import (
     Item,
@@ -37,7 +38,11 @@ class ResetTransactionsIn(BaseModel):
 
 
 @router.post("/reset-transactions")
-def reset_all_transactions(payload: ResetTransactionsIn, db: Session = Depends(get_db)):
+def reset_all_transactions(
+    payload: ResetTransactionsIn,
+    db: Session = Depends(get_db),
+    _admin=Depends(require_admin),  # مدير النظام فقط
+):
     """تصفير شامل لكل الحركات التشغيلية والمحاسبية بالنظام، مع الإبقاء
     الكامل على البيانات الأساسية (دليل الحسابات، الموردين، تعريفات
     الأصناف، المستودعات، مراكز التكلفة، أنواع الضرائب، الفروع).

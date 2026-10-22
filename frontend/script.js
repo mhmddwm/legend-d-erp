@@ -3919,9 +3919,10 @@ function buildPinvDetailPageHtml(inv){
   }
 
   async function apiCall(method, path, body){
-    const opts={method, headers:{'Content-Type':'application/json'}};
+    const opts={method, headers:{'Content-Type':'application/json','Authorization':'Bearer '+(localStorage.getItem('legend_token')||'')}};
     if(body) opts.body=JSON.stringify(body);
     const res=await fetch(API_BASE+path, opts);
+    if(res.status===401){ localStorage.removeItem('legend_token'); location.href='login.html'; }
     const json=await res.json().catch(()=>({}));
     if(!res.ok) throw new Error(json.detail || json.message || 'خطأ في الخادم');
     return json;

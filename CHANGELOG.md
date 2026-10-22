@@ -1,5 +1,23 @@
 # CHANGELOG
 
+## PF-01.3 — Security Hardening
+### Added
+- تسجيل دخول حقيقي بـ JWT: `POST /api/auth/login`, `GET /api/auth/me`, `POST /api/auth/change-password` + شاشة `login.html` و`auth.js` (إضافة الرمز تلقائياً لكل طلب، وتحويل لصفحة الدخول عند انتهاء الجلسة، وزر تسجيل الخروج في الهيدر).
+- فرض صلاحيات مركزي على كل الراوترات (`enforce_route_permission`): وحدة + إجراء من المسار ونوع الطلب. القراءة من البيانات المرجعية (أصناف، عملاء، حسابات...) تتطلب تسجيل دخول فقط؛ الكتابة تتطلب صلاحية الوحدة. أي مسار غير مصنَّف مغلق لغير المدير.
+- `POST /api/system/reset-transactions` لمدير النظام فقط.
+- حد محاولات الدخول الفاشلة (5 محاولات ← قفل 5 دقائق).
+- إنشاء المدير الأول تلقائياً من `ADMIN_EMAIL/ADMIN_PASSWORD` + `scripts/create_admin.py`.
+- اختبارات `tests/test_auth.py` (15 اختباراً).
+- `.gitignore` و`backend/.env.example`.
+### Changed
+- أُزيلت ترويسة `X-User-Id` غير الآمنة.
+- CORS: لم يعد `*`؛ يُسمح بـ localhost/127.0.0.1 للتطوير + ما يُضبط في `CORS_ORIGINS`.
+- رسائل الأخطاء الداخلية لا تكشف التفاصيل إلا مع `DEBUG=1`.
+### Removed
+- `backend/.env` و`__pycache__` من المشروع (كانت متتبَّعة في git).
+### ⚠ مطلوب منك
+- غيّر كلمة مرور قاعدة البيانات في Supabase (كانت ضمن تاريخ git)، وأنشئ `.env` جديداً، واضبط `JWT_SECRET`.
+
 ## PF-01.1 — Platform Foundation
 
 ### Added
