@@ -16,3 +16,5 @@ venv/
 .DS_Store
 *.log
 *.sqlite3
+backups/
+*.zip
