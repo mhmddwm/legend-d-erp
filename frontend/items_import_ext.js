@@ -214,13 +214,18 @@
       ' promptTitle="' + escXml(dv.promptTitle) + '" prompt="' + escXml(dv.prompt) + '"' +
       ' sqref="' + dv.col + '2:' + dv.col + (MAX_ROWS + 1) + '"><formula1>' + f + '</formula1></dataValidation>';
   }
+  /* ترتيب عناصر ورقة العمل في معيار OOXML صارم في Excel: dataValidations يجب أن يأتي بعد
+     sheetData/mergeCells وقبل hyperlinks/printOptions/pageMargins/.../ignoredErrors/drawing/tableParts. */
+  var AFTER_DV = /<(hyperlinks|printOptions|pageMargins|pageSetup|headerFooter|rowBreaks|colBreaks|customProperties|cellWatches|ignoredErrors|smartTags|drawing|legacyDrawing|legacyDrawingHF|drawingHF|picture|oleObjects|controls|webPublishItems|tableParts|extLst)[\s\/>]/;
   function injectValidations(sheetXml, dvs) {
     if (!dvs.length) return sheetXml;
     var body = '<dataValidations count="' + dvs.length + '">' + dvs.map(dvXml).join('') + '</dataValidations>';
-    if (/<pageMargins/.test(sheetXml)) return sheetXml.replace(/<pageMargins/, body + '<pageMargins');
-    return sheetXml.replace('</worksheet>', body + '</worksheet>');
+    var later = AFTER_DV.exec(sheetXml);
+    var at = later ? later.index : sheetXml.lastIndexOf('</worksheet>');
+    if (at < 0) return sheetXml;
+    return sheetXml.slice(0, at) + body + sheetXml.slice(at);
   }
-
+  
   /* lists: {categories:[{code,name_ar}], brands, suppliers, templates:[{code,name,base_unit,higher_unit}], warehouses} */
   function buildWorkbookSpec(lists) {
     var cat = (lists.categories || []).map(function (x) { return labelOf(x.code, x.name_ar); });
