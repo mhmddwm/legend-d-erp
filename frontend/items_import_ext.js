@@ -1,10 +1,9 @@
-/* LEGEND D ERP — تحسين استيراد المنتجات (PF-01.5)
-   ما يضيفه (فوق شاشة الاستيراد الحالية دون تعديل index.html الأصلي):
+/* LEGEND D ERP — تحسين استيراد المنتجات وقائمة المنتجات (PF-01.5)
    1) تحقق مسبق عند «تحليل الملف»: التصنيف / الماركة / المورد / قالب الوحدة / المستودع
       يجب أن تكون مسجّلة في النظام. يُقبل الكود أو الاسم أو الصيغة «الكود — الاسم»،
       وتُعرض الأكواد المفقودة مجمّعة مع عدد صفوفها قبل أن تضغط «استيراد».
-   2) نموذج Excel فيه قوائم منسدلة حقيقية في أعمدة التصنيف والماركة والمورد وقالب الوحدة
-      والمستودع والوحدة والحالة، مبنية من المسجَّل في النظام لحظة التنزيل.
+   2) نموذج Excel فيه قوائم منسدلة حقيقية مبنية من المسجَّل في النظام لحظة التنزيل.
+   3) ترقيم حقيقي لمعاينة الاستيراد ولقائمة المنتجات (السابق/التالي).
    يُحمَّل هذا الملف في آخر index.html (قبل </body>). */
 (function (root) {
   'use strict';
@@ -223,9 +222,9 @@
     var later = AFTER_DV.exec(sheetXml);
     var at = later ? later.index : sheetXml.lastIndexOf('</worksheet>');
     if (at < 0) return sheetXml;
-    return sheetXml.slice(0, at) + body + sheetXml.slice(at);
+    return sheetXml.slice(0, at) + body + sheetXml.slice(at); // slice بدل replace لتفادي رموز $ الخاصة
   }
-  
+
   /* lists: {categories:[{code,name_ar}], brands, suppliers, templates:[{code,name,base_unit,higher_unit}], warehouses} */
   function buildWorkbookSpec(lists) {
     var cat = (lists.categories || []).map(function (x) { return labelOf(x.code, x.name_ar); });
@@ -319,7 +318,8 @@
   if (typeof module !== 'undefined' && module.exports) { module.exports = exported; }
   if (typeof document === 'undefined') return; // بيئة اختبار بلا متصفح
 
-  var state = { file: null, analysis: { valid: [], errors: [], total: 0, missing: {} } };
+  var IMPORT_PAGE_SIZE = 20;
+  var state = { file: null, page: 1, failed: [], analysis: { valid: [], errors: [], total: 0, missing: {} } };
   function byId(id) { return document.getElementById(id); }
   function esc(v) { return String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
   function msg(t, ok) {
@@ -330,7 +330,7 @@
     el.style.borderRadius = '12px'; el.style.padding = '10px 12px'; el.textContent = t;
   }
   function clearUi() {
-    state.analysis = { valid: [], errors: [], total: 0, missing: {} };
+    state.analysis = { valid: [], errors: [], total: 0, missing: {} }; state.page = 1; state.failed = [];
     var sum = byId('itemImportSummary'); if (sum) { sum.style.display = 'none'; sum.innerHTML = ''; }
     var prev = byId('itemImportPreview'); if (prev) { prev.style.display = 'none'; prev.innerHTML = ''; }
     var btn = byId('itemImportCommitBtn'); if (btn) btn.disabled = true;
@@ -403,6 +403,13 @@
       warehouses: r[4], items: r[5] };
   }
 
+  function pagerHtml(page, pages, from, to, total, fn) {
+    return '<div style="display:flex;gap:10px;align-items:center;justify-content:center;margin-top:12px;flex-wrap:wrap">' +
+      '<button type="button" class="btn secondary"' + (page <= 1 ? ' disabled' : '') + ' onclick="' + fn + '(-1)">السابق</button>' +
+      '<span>صفحة ' + page + ' من ' + pages + ' — الصفوف ' + from + '–' + to + ' من ' + total + '</span>' +
+      '<button type="button" class="btn secondary"' + (page >= pages ? ' disabled' : '') + ' onclick="' + fn + '(1)">التالي</button></div>';
+  }
+
   function render() {
     var a = state.analysis;
     var sum = byId('itemImportSummary'), prev = byId('itemImportPreview'), btn = byId('itemImportCommitBtn');
@@ -426,16 +433,25 @@
     var box = (miss || warn) ? '<div style="background:#fff7ed;border:1px solid #fed7aa;color:#9a3412;border-radius:12px;padding:10px 12px;margin-bottom:10px">' +
       (miss ? miss + '<div style="margin-top:6px">أنشئ هذه العناصر أولاً من شاشاتها (المخزون ← التصنيفات / الماركات ...) بنفس الكود تماماً، ثم أعد تحليل الملف. ' +
         'أو اترك الخانة فارغة في الملف.</div>' : '') + warn + '</div>' : '';
-    var vr = a.valid.slice(0, 30).map(function (x) {
-      return '<tr><td>' + x.rowNo + '</td><td>✅ صحيح</td><td>' + esc(x.payload.name) + '</td><td>' + esc(x.payload.code) + '</td></tr>';
-    }).join('');
-    var er = a.errors.map(function (x) {
+    // كل الصفوف (الأخطاء أولاً ثم الصحيحة) مقسَّمة على صفحات حقيقية — لا إخفاء لأي صف
+    var all = a.errors.map(function (x) {
       return '<tr><td>' + x.rowNo + '</td><td>❌ خطأ</td><td colspan="2">' + esc(x.name ? x.name + ' — ' : '') + esc(x.reasons.join(' - ')) + '</td></tr>';
-    }).join('');
+    }).concat(a.valid.map(function (x) {
+      return '<tr><td>' + x.rowNo + '</td><td>✅ صحيح</td><td>' + esc(x.payload.name) + '</td><td>' + esc(x.payload.code) + '</td></tr>';
+    }));
+    var total = all.length, pages = Math.max(1, Math.ceil(total / IMPORT_PAGE_SIZE));
+    state.page = Math.min(Math.max(1, state.page), pages);
+    var from = total ? (state.page - 1) * IMPORT_PAGE_SIZE + 1 : 0, to = Math.min(total, state.page * IMPORT_PAGE_SIZE);
+    var failedHtml = (state.failed || []).length ?
+      '<div class="scrollx" style="margin-top:14px"><table class="grid"><thead><tr><th>الصف</th><th>الحالة</th><th colspan="2">سبب فشل الحفظ بالخادم</th></tr></thead><tbody>' +
+      state.failed.map(function (f) { return '<tr><td>' + f.rowNo + '</td><td>❌ فشل الحفظ</td><td colspan="2">' + esc(f.name) + ' — ' + esc(f.reason) + '</td></tr>'; }).join('') +
+      '</tbody></table></div>' : '';
     prev.style.display = 'block';
     prev.innerHTML = box + '<div class="scrollx"><table class="grid"><thead><tr><th>الصف</th><th>الحالة</th><th>اسم المنتج / سبب الخطأ</th><th>الكود</th></tr></thead><tbody>' +
-      er + vr + '</tbody></table></div>';
+      all.slice(from ? from - 1 : 0, to).join('') + '</tbody></table></div>' +
+      (pages > 1 ? pagerHtml(state.page, pages, from, to, total, 'itemImportGoPage') : '') + failedHtml;
   }
+  root.itemImportGoPage = function (delta) { state.page += delta; render(); };
 
   root.selectItemImportFile = function (file) {
     state.file = file || null; clearUi();
@@ -455,7 +471,7 @@
         msg('الملف لا يحتوي على بيانات منتجات. تأكد من وجود صف عناوين وصف بيانات واحد على الأقل.', false); return;
       }
       var refs = await fetchRefs();
-      state.analysis = analyzeRows(rows, refs);
+      state.analysis = analyzeRows(rows, refs); state.page = 1; state.failed = [];
       render();
       var a = state.analysis;
       msg('تم تحليل الملف: ' + a.valid.length + ' صف صحيح، ' + a.errors.length + ' صف به أخطاء.' +
@@ -475,13 +491,7 @@
     }
     try { await root.loadAll(); } catch (e) { try { if (typeof root.renderItems === 'function') root.renderItems(); } catch (_) { /* ignore */ } }
     if (failed.length) {
-      var prev = byId('itemImportPreview');
-      if (prev) {
-        prev.style.display = 'block';
-        prev.innerHTML += '<div class="scrollx"><table class="grid"><thead><tr><th>الصف</th><th>الحالة</th><th colspan="2">سبب فشل الحفظ بالخادم</th></tr></thead><tbody>' +
-          failed.map(function (f) { return '<tr><td>' + f.rowNo + '</td><td>❌ فشل الحفظ</td><td colspan="2">' + esc(f.name) + ' — ' + esc(f.reason) + '</td></tr>'; }).join('') +
-          '</tbody></table></div>';
-      }
+      state.failed = failed; render();
       msg('تم حفظ ' + ok + ' منتج بنجاح، وفشل حفظ ' + failed.length + ' صف فعلياً بالخادم (انظر التفاصيل أسفله).', ok > 0);
       if (btn) btn.disabled = false;
     } else {
@@ -525,4 +535,53 @@
         (empty.length ? ' تنبيه: لا توجد ' + empty.join(' و') + ' مسجَّلة بعد، فلن تظهر لها قائمة — أنشئها أولاً ثم أعد تنزيل النموذج.' : ''), true);
     } catch (e) { msg('تعذر تنزيل النموذج: ' + (e.message || e), false); }
   };
+
+  /* ===================== ترقيم حقيقي لقائمة المنتجات =====================
+     الأزرار الأصلية (prevItemPage/nextItemPage) كانت تغيّر الرقم فقط دون إعادة رسم الجدول،
+     والجدول كان يعرض كل المنتجات دفعة واحدة. هنا نغلّف دالة الرسم الأصلية لتعرض صفحة واحدة. */
+  var ITEM_SIZES = [25, 50, 100, 200];
+  function itemPageSize() {
+    var v = 50; try { v = parseInt(root.localStorage.getItem('itemPageSize') || '50', 10); } catch (e) { /* ignore */ }
+    return ITEM_SIZES.indexOf(v) >= 0 ? v : 50;
+  }
+  function itemsSource() { // نفس منطق الاختيار الأصلي لمصدر الصفوف (مفلتر أو الكل)
+    return itemFiltered.isFiltered ? itemFiltered :
+      (Array.isArray(itemFiltered) && itemFiltered.length ? itemFiltered : (items || []));
+  }
+  function paintItemPager(page, pages, from, to, total) {
+    var info = byId('itemPageInfo'); if (!info) return;
+    info.textContent = total ? 'صفحة ' + page + ' من ' + pages + ' — عرض ' + from + '–' + to + ' من ' + total : 'لا توجد منتجات';
+    var box = info.parentNode, btns = box.querySelectorAll('button');
+    if (btns.length >= 2) { btns[0].disabled = page <= 1; btns[btns.length - 1].disabled = page >= pages; }
+    var sel = byId('itemPageSizeSel');
+    if (!sel) {
+      sel = document.createElement('select'); sel.id = 'itemPageSizeSel'; sel.className = 'field';
+      sel.style.cssText = 'width:auto;display:inline-block;margin-inline-start:12px';
+      sel.title = 'عدد المنتجات في الصفحة';
+      sel.innerHTML = ITEM_SIZES.map(function (n) { return '<option value="' + n + '">' + n + ' في الصفحة</option>'; }).join('');
+      sel.onchange = function () {
+        try { root.localStorage.setItem('itemPageSize', sel.value); } catch (e) { /* ignore */ }
+        itemPage = 1; root.renderItemsTable();
+      };
+      box.appendChild(sel);
+    }
+    sel.value = String(itemPageSize());
+  }
+  if (typeof root.renderItemsTable === 'function' && typeof itemPage !== 'undefined' && typeof itemFiltered !== 'undefined') {
+    var origRenderItems = root.renderItemsTable;
+    root.renderItemsTable = function () {
+      var all = itemsSource(), size = itemPageSize(), total = all.length;
+      var pages = Math.max(1, Math.ceil(total / size));
+      if (itemPage > pages) itemPage = pages;
+      if (itemPage < 1) itemPage = 1;
+      var start = (itemPage - 1) * size, slice = all.slice(start, start + size);
+      slice.isFiltered = true; // الدالة الأصلية ترسم هذه الشريحة فقط
+      var saved = itemFiltered; itemFiltered = slice;
+      try { origRenderItems.apply(this, arguments); } finally { itemFiltered = saved; }
+      paintItemPager(itemPage, pages, total ? start + 1 : 0, Math.min(total, start + size), total);
+    };
+    root.prevItemPage = function () { if (itemPage > 1) { itemPage--; root.renderItemsTable(); } };
+    root.nextItemPage = function () { itemPage++; root.renderItemsTable(); }; // يُقيَّد داخل الرسم
+    try { root.renderItemsTable(); } catch (e) { /* قد لا تكون البيانات محمّلة بعد */ }
+  }
 })(typeof window !== 'undefined' ? window : globalThis);
