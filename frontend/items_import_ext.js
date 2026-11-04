@@ -584,4 +584,26 @@
     root.nextItemPage = function () { itemPage++; root.renderItemsTable(); }; // يُقيَّد داخل الرسم
     try { root.renderItemsTable(); } catch (e) { /* قد لا تكون البيانات محمّلة بعد */ }
   }
+    /* ===================== ربط window.items / suppliers / warehouses بالبيانات الحيّة =====================
+     script.js يعرّف هذه القوائم بـ let فلا تصبح خصائص على window، بينما قائمة بحث المنتجات في
+     «طلب الشراء» و«طلب عرض السعر» وأكثر من 30 موضعاً في index.html تقرأ window.items / window.suppliers.
+     فكانت تجد فراغاً أو نسخة localStorage قديمة، فلا تظهر المنتجات المحفوظة. هنا نجعل window.items وأخواتها
+     «مرآة حيّة» للمتغيرات الأصلية (قراءة وكتابة)، ونُحدّث نسخة items_cache بعد كل تحميل من الخادم. */
+  function liveGlobal(name, get, set) {
+    try { Object.defineProperty(root, name, { configurable: true, enumerable: true, get: get, set: set }); }
+    catch (e) { /* ignore */ }
+  }
+  if (typeof items !== 'undefined') liveGlobal('items', function () { return items; }, function (v) { items = v; });
+  if (typeof suppliers !== 'undefined') liveGlobal('suppliers', function () { return suppliers; }, function (v) { suppliers = v; });
+  if (typeof warehouses !== 'undefined') liveGlobal('warehouses', function () { return warehouses; }, function (v) { warehouses = v; });
+  if (typeof root.loadAll === 'function') {
+    var origLoadAll = root.loadAll;
+    root.loadAll = async function () {
+      var result = await origLoadAll.apply(this, arguments);
+      try { // لا نلمس suppliers_cache: script.js يدمجها عمداً فوق نتيجة الخادم
+        if (typeof items !== 'undefined') root.localStorage.setItem('items_cache', JSON.stringify(items || []));
+      } catch (e) { /* مساحة التخزين ممتلئة: لا يهم */ }
+      return result;
+    };
+  }
 })(typeof window !== 'undefined' ? window : globalThis);
