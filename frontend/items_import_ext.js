@@ -606,4 +606,92 @@
       return result;
     };
   }
+    /* ===================== قالب الوحدات يُحفظ مع المنتج (PF-01.6) =====================
+     المشكلة: عند حفظ المنتج كان يُرسَل للخادم اسم الوحدة الأساسية فقط («حبة») دون أي إشارة إلى القالب
+     المختار، فتعرض طلبات الشراء وعرض السعر وحدة «حبة» وحدها. الحل بثلاث خطوات:
+       1) الاستيراد: عمود «كود قالب الوحدة» يُحفظ مع المنتج (unit_template).
+       2) نموذج المنتج اليدوي: القالب المختار يُرسَل مع المنتج عند الإضافة والتعديل.
+       3) window.productUnits: تعرض وحدات القالب (الأساسية والأعلى) في طلب الشراء وعرض السعر.
+     يتطلب الخادم حقل unit_template (migration 034 + patch_unit_template.py). */
+  var TPL_HEADERS = ['كود قالب الوحدة (اختياري)', 'كود قالب الوحدة', 'قالب الوحدة', 'Unit Template'];
+
+  function allUnitTemplates() {
+    return mergeTemplates(Array.isArray(root.unitTemplates) ? root.unitTemplates : [], localUnitTemplates());
+  }
+  function findTemplate(key, tpls) {
+    key = String(key == null ? '' : key).trim();
+    if (!key) return null;
+    var nk = normText(key);
+    return (tpls || allUnitTemplates()).filter(function (t) {
+      return String(t.code) === key || normText(t.name) === nk;
+    })[0] || null;
+  }
+
+  // (1) الاستيراد: ضع اسم القالب المسجَّل في payload.unit_template للصفوف الصحيحة
+  var analyzeRowsBase = analyzeRows;
+  analyzeRows = function (rows, refs) {
+    var res = analyzeRowsBase(rows, refs);
+    try {
+      var head = (rows[0] || []).map(normHeader), col = -1;
+      TPL_HEADERS.forEach(function (n) { if (col < 0) col = head.indexOf(normHeader(n)); });
+      if (col >= 0 && refs && refs.templates) {
+        var idx = buildIndex(refs.templates, function (x) { return x.code; }, function (x) { return [x.name]; });
+        res.valid.forEach(function (v) {
+          var cell = (rows[v.rowNo - 1] || [])[col];
+          var raw = String(cell == null ? '' : cell).trim();
+          if (!raw) return;
+          var r = resolveRef(raw, idx);
+          if (r.ok && r.item && r.item.name) v.payload.unit_template = r.item.name;
+        });
+      }
+    } catch (e) { /* لا يمنع الاستيراد */ }
+    return res;
+  };
+
+  // (2) نموذج المنتج اليدوي: أضف القالب المختار إلى حمولة POST/PUT /api/items
+  function itemFormTemplateName(code) {
+    var sel = byId('itemUnit');
+    if (!sel || !sel.value) return null;
+    var edit = byId('itemEditCode'), plain = byId('itemCode');
+    var formCode = String((edit && edit.value) || (plain && plain.value) || '').trim();
+    if (!formCode || formCode !== String(code)) return null; // ليست حمولة هذا النموذج
+    var tpl = typeof root.findUnitTemplateByValue === 'function' ? root.findUnitTemplateByValue(sel.value) : null;
+    tpl = tpl || findTemplate(sel.value);
+    return tpl && tpl.name ? String(tpl.name).trim() : null;
+  }
+  var origApi = root.api;
+  if (typeof origApi === 'function') {
+    root.api = function (method, path, body) {
+      try {
+        if ((method === 'POST' || method === 'PUT') && /^\/api\/items(\/|$)/.test(String(path)) &&
+            body && typeof body === 'object' && !Array.isArray(body) &&
+            'name' in body && 'unit' in body && !('unit_template' in body)) {
+          var name = itemFormTemplateName(body.code);
+          if (name) body.unit_template = name;
+        }
+      } catch (e) { /* لا يمنع الحفظ */ }
+      return origApi.apply(this, arguments);
+    };
+  }
+
+  // (3) وحدات المنتج في طلب الشراء وطلب عرض السعر (كلتاهما تستدعي window.productUnits أولاً)
+  root.productUnits = function (p) {
+    p = p || {};
+    var tpls = allUnitTemplates();
+    var tpl = findTemplate(p.unit_template || p.unitTemplate, tpls);
+    var unit = String(p.unit || p.base_unit || p.baseUnit || '').trim();
+    if (!tpl && unit) { // منتج قديم بلا ارتباط: نستدل بالوحدة الأساسية فقط إن طابقت قالباً واحداً
+      var same = tpls.filter(function (t) { return normText(t.base_unit) === normText(unit); });
+      if (same.length === 1) tpl = same[0];
+    }
+    var out = [];
+    if (tpl) { out.push(unit || tpl.base_unit, tpl.base_unit, tpl.higher_unit); }
+    else {
+      if (Array.isArray(p.units)) p.units.forEach(function (u) { out.push(typeof u === 'string' ? u : (u && (u.name || u.unit || u.label || u.unit_name))); });
+      out.push(unit);
+    }
+    var seen = {}, res = [];
+    out.forEach(function (u) { u = String(u == null ? '' : u).trim(); if (u && !seen[u]) { seen[u] = 1; res.push(u); } });
+    return res.length ? res : ['حبة'];
+  };
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -300,6 +300,7 @@ def create_item(payload: ItemIn, db: Session = Depends(get_db)):
         default_warehouse_id=payload.default_warehouse_id,
         default_location_id=payload.default_location_id,
         unit=payload.unit,
+        unit_template=payload.unit_template,
         default_cost=default_cost,
         price=float(payload.price or 0),
         qty=opening_qty,
