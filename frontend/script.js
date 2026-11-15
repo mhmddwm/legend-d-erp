@@ -3919,9 +3919,10 @@ function buildPinvDetailPageHtml(inv){
   }
 
   async function apiCall(method, path, body){
-    const opts={method, headers:{'Content-Type':'application/json'}};
+    const opts={method, headers:{'Content-Type':'application/json','Authorization':'Bearer '+(localStorage.getItem('legend_token')||'')}};
     if(body) opts.body=JSON.stringify(body);
     const res=await fetch(API_BASE+path, opts);
+    if(res.status===401){ localStorage.removeItem('legend_token'); location.href='login.html'; }
     const json=await res.json().catch(()=>({}));
     if(!res.ok) throw new Error(json.detail || json.message || 'خطأ في الخادم');
     return json;
@@ -9064,3 +9065,157 @@ async function submitResetTransactions(){
   }
 }
 window.submitResetTransactions = submitResetTransactions;
+
+
+// ============================================================
+// PF-01.5 — مزامنة قوالب الوحدات مع الخادم
+// ------------------------------------------------------------
+// المشكلة: القوالب كانت تُحفظ في localStorage (داخل المتصفح فقط)، فلا تظهر
+// على رابط Render ولا على أي جهاز آخر، وتظهر في طلب الشراء الوحدة الأدنى فقط.
+// الحل: القوالب تُحفظ وتُقرأ من /api/unit-templates (قاعدة البيانات)،
+// وlocalStorage يبقى مجرد نسخة سريعة. أي قوالب موجودة محلياً ولا توجد في
+// الخادم تُرفع تلقائياً مرة واحدة.
+// ============================================================
+(function(){
+  const UT_KEY = 'unitTemplates';
+  const idOf = code => /^\d+$/.test(String(code)) ? Number(code) : String(code);
+
+  function fromServer(s){
+    const hn = s.higher_unit || '';
+    return { id:idOf(s.code), code:String(s.code), name:s.name, base:s.base_unit,
+             higher:hn, higherName:hn, factor:Number(s.factor)||1 };
+  }
+  function toPayload(t){
+    const hn = (t.higherName || t.higher || '').trim();
+    return { name:String(t.name).trim(), base_unit:String(t.base || t.name).trim(),
+             higher_unit: hn || null, factor: Number(t.factor) || 1 };
+  }
+  function readLocal(){
+    try{ const v = JSON.parse(localStorage.getItem(UT_KEY) || '[]'); return Array.isArray(v) ? v : []; }
+    catch(e){ return []; }
+  }
+  function persist(list){
+    unitTemplates = list;
+    window.unitTemplates = list;
+    try{ localStorage.setItem(UT_KEY, JSON.stringify(list)); }catch(e){}
+  }
+  function rerender(){
+    try{ if(typeof renderUnitTemplates === 'function') renderUnitTemplates(); }catch(e){}
+  }
+
+  let syncPromise = null;
+  window.syncUnitTemplates = function(force){
+    if(syncPromise && !force) return syncPromise;
+    syncPromise = (async function(){
+      let server;
+      try{ server = await api('GET', '/api/unit-templates'); }
+      catch(e){ console.warn('تعذر تحميل قوالب الوحدات من الخادم', e.message); syncPromise = null; return; }
+      if(!Array.isArray(server)){ syncPromise = null; return; }
+
+      const names = new Set(server.map(s => String(s.name).trim()));
+      const codes = new Set(server.map(s => String(s.code)));
+      const pushed = [];
+      for(const t of readLocal()){
+        if(!t || !t.name || names.has(String(t.name).trim())) continue;
+        const p = toPayload(t);
+        if(p.higher_unit && p.factor <= 1){ console.warn('قالب محلي تم تخطيه (معامل التحويل ≤ 1):', t.name); continue; }
+        let code = String(t.id || t.code || Date.now());
+        if(codes.has(code)) code = String(Date.now() + pushed.length);
+        if(code.length > 30) code = code.slice(0, 30);
+        try{
+          const r = await api('POST', '/api/unit-templates', Object.assign({code}, p));
+          pushed.push(r); codes.add(code); names.add(p.name);
+        }catch(e){ console.warn('تعذر رفع القالب المحلي', t.name, e.message); }
+      }
+      persist(server.concat(pushed).map(fromServer));
+      rerender();
+    })();
+    return syncPromise;
+  };
+
+  // نضمن اكتمال المزامنة قبل تحميل الأصناف وعرضها
+  const origLoadAll = loadAll;
+  loadAll = async function(){
+    await window.syncUnitTemplates();
+    return origLoadAll.apply(this, arguments);
+  };
+
+  // ---- فتح نموذج جديد يصفّر وضع التعديل ----
+  window.openUnitTemplateForm = openUnitTemplateForm = function(keepEditing){
+    if(keepEditing !== true){
+      editingUnitId = null;
+      ['utName','utBase','utHigher','utHigherName'].forEach(id => { const e = document.getElementById(id); if(e) e.value = ''; });
+      const f = document.getElementById('utFactor'); if(f) f.value = 1;
+    }
+    document.getElementById('unitTemplateForm').style.display = 'block';
+  };
+
+  // ---- الحفظ ----
+  window.saveUnitTemplate = saveUnitTemplate = async function(){
+    const g = id => document.getElementById(id);
+    const name = (g('utName').value || '').trim();
+    if(!name) return;
+    const base = (g('utBase').value || '').trim();
+    const hn = ((g('utHigherName').value || g('utHigher').value) || '').trim();
+    const factor = Number(g('utFactor').value) || 1;
+    const id = editingUnitId != null ? editingUnitId : String(Date.now());
+    const list = Array.isArray(unitTemplates) ? unitTemplates : [];
+    if(list.some(x => String(x.name).trim() === name && String(x.id) !== String(id))){ alert('اسم القالب موجود مسبقاً'); return; }
+    if(hn && factor <= 1){ alert('معامل التحويل للوحدة الأعلى يجب أن يكون أكبر من 1'); return; }
+    const payload = { name, base_unit: base || name, higher_unit: hn || null, factor };
+    try{
+      if(editingUnitId != null){
+        try{ await api('PUT', '/api/unit-templates/' + encodeURIComponent(String(id)), payload); }
+        catch(e){ await api('POST', '/api/unit-templates', Object.assign({code:String(id)}, payload)); }
+      }else{
+        await api('POST', '/api/unit-templates', Object.assign({code:String(id)}, payload));
+      }
+    }catch(e){ alert('تعذر حفظ القالب في الخادم: ' + e.message); return; }
+    const t = { id:idOf(id), code:String(id), name, base:payload.base_unit, higher:hn, higherName:hn, factor };
+    const exists = list.some(x => String(x.id) === String(id));
+    persist(exists ? list.map(x => String(x.id) === String(id) ? t : x) : list.concat([t]));
+    editingUnitId = null;
+    window.__unitTemplatePage = Math.max(1, Math.ceil(unitTemplates.length / (typeof pageSize !== 'undefined' ? pageSize : 10)));
+    rerender();
+    closeUnitTemplateForm();
+  };
+
+  // ---- التحديد / التعديل / الحذف (المعرّف قد يكون نصاً) ----
+  window.selectedUnitTemplates = selectedUnitTemplates = function(){
+    return [...document.querySelectorAll('.utCheck:checked')].map(x => String(x.value));
+  };
+  window.editSelectedUnitTemplate = editSelectedUnitTemplate = function(){
+    const t = (unitTemplates || []).find(x => String(x.id) === selectedUnitTemplates()[0]);
+    if(!t) return;
+    editingUnitId = t.id;
+    document.getElementById('utName').value = t.name || '';
+    document.getElementById('utBase').value = t.base || '';
+    document.getElementById('utHigher').value = t.higher || t.higherName || '';
+    document.getElementById('utHigherName').value = t.higherName || t.higher || '';
+    document.getElementById('utFactor').value = t.factor || 1;
+    openUnitTemplateForm(true);
+  };
+  window.deleteSelectedUnitTemplates = deleteSelectedUnitTemplates = async function(){
+    const ids = selectedUnitTemplates();
+    if(!ids.length) return;
+    const failed = [];
+    for(const id of ids){
+      try{ await api('DELETE', '/api/unit-templates/' + encodeURIComponent(id)); }
+      catch(e){ if(!/غير موجود|not found/i.test(e.message)) failed.push(id); }
+    }
+    if(failed.length) alert('تعذر حذف بعض القوالب من الخادم');
+    persist((unitTemplates || []).filter(t => !ids.includes(String(t.id)) || failed.includes(String(t.id))));
+    rerender();
+    const a = document.getElementById('unitActions'); if(a) a.style.display = 'none';
+  };
+
+  // ---- طلب الشراء: قائمة وحدات المنتج (الأساسية + الأعلى) من القالب ----
+  // الصنف يحفظ الوحدة الأساسية فقط (item.unit)، فنطابق القالب عن طريقها.
+  window.productUnits = function(p){
+    if(!p) return ['حبة'];
+    let out = [];
+    try{ out = getTemplateUnitsForItem(p).map(u => u.value).filter(Boolean); }catch(e){}
+    out = [...new Set(out)];
+    return out.length ? out : ['حبة'];
+  };
+})();

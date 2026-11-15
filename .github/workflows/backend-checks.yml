@@ -1,0 +1,24 @@
+name: Backend Checks
+
+on:
+  push:
+    branches: [ main, master, develop ]
+  pull_request:
+
+jobs:
+  backend-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          pip install -r backend/requirements.txt -r backend/requirements-dev.txt
+          pip install pgserver
+      - name: Lint migration files
+        run: python scripts/migrate.py check
+      - name: Run tests (auth + migrations on a temporary Postgres)
+        working-directory: backend
+        run: pytest ../tests -q

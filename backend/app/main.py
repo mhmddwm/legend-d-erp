@@ -3,13 +3,15 @@ import logging
 import traceback
 from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 
+from app.core.security import enforce_route_permission
 from app.routers import (
+    auth,
     accounting,
     inventory,
     purchasing,
@@ -46,10 +48,18 @@ app = FastAPI(
 # CORS
 # ============================================================
 
+# الواجهة تُخدَّم عادةً من نفس الخادم. يُسمح دائماً بـ localhost/127.0.0.1 لأغراض
+# التطوير المحلي (script.js يخاطب 127.0.0.1:8080 حين تُفتح الصفحة من localhost).
+# لأصول إضافية: CORS_ORIGINS=https://erp.example.com  (لا يُسمح بـ "*").
+_cors_origins = [
+    o.strip() for o in os.getenv("CORS_ORIGINS", "").split(",")
+    if o.strip() and o.strip() != "*"
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=_cors_origins,
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
+    allow_credentials=False,   # المصادقة بترويسة Bearer لا بالكوكيز
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -76,19 +86,28 @@ async def global_exception_handler(
         traceback.format_exc(),
     )
 
-    return JSONResponse(
-        status_code=500,
-        content={
+    if os.getenv("DEBUG", "").lower() in ("1", "true", "yes"):
+        content = {
             "detail": str(exc),
             "type": type(exc).__name__,
             "path": request.url.path,
-        },
-    )
+        }
+    else:
+        content = {"detail": "حدث خطأ داخلي في الخادم"}
+    return JSONResponse(status_code=500, content=content)
 
 
 # ============================================================
 # Routers
 # ============================================================
+
+# كل الراوترات (عدا الدخول والترجمة) تمر عبر المصادقة + فحص الصلاحية المركزي
+PROTECTED = [Depends(enforce_route_permission)]
+
+# Auth (عام: تسجيل الدخول)
+app.include_router(
+    auth.router
+)
 
 # Localization
 app.include_router(
@@ -98,142 +117,183 @@ app.include_router(
 
 # Accounting
 app.include_router(
-    accounting.router
+    accounting.router,
+    dependencies=PROTECTED,
 )
 
 app.include_router(
-    accounting.journal_router
+    accounting.journal_router,
+    dependencies=PROTECTED,
 )
 
 app.include_router(
-    accounting.cost_center_router
+    accounting.cost_center_router,
+    dependencies=PROTECTED,
 )
 
 app.include_router(
-    accounting.tax_type_router
+    accounting.tax_type_router,
+    dependencies=PROTECTED,
 )
 
 
 # Branches
 app.include_router(
-    branches.router
+    branches.router,
+    dependencies=PROTECTED,
 )
 
 # Financial Reports
 app.include_router(
-    reports.router
+    reports.router,
+    dependencies=PROTECTED,
 )
 
 # System utilities
 app.include_router(
-    system.router
+    system.router,
+    dependencies=PROTECTED,
 )
 
 
 # Inventory
 app.include_router(
-    inventory.router
+    inventory.router,
+    dependencies=PROTECTED,
 )
 
 app.include_router(
-    inventory.stock_router
+    inventory.stock_router,
+    dependencies=PROTECTED,
 )
 
 app.include_router(
-    inventory.supplier_router
+    inventory.supplier_router,
+    dependencies=PROTECTED,
 )
 
 app.include_router(
-    inventory.category_router
+    inventory.category_router,
+    dependencies=PROTECTED,
 )
 
 app.include_router(
-    inventory.brand_router
+    inventory.brand_router,
+    dependencies=PROTECTED,
 )
 
 app.include_router(
-    inventory.unit_template_router
+    inventory.unit_template_router,
+    dependencies=PROTECTED,
 )
 
 app.include_router(
-    inventory.price_list_router
+    inventory.price_list_router,
+    dependencies=PROTECTED,
 )
 
 
 # Purchasing
 app.include_router(
-    purchasing.po_router
+    purchasing.po_router,
+    dependencies=PROTECTED,
 )
 
 app.include_router(
-    purchasing.grn_router
+    purchasing.grn_router,
+    dependencies=PROTECTED,
 )
 
 app.include_router(
-    purchasing.pinv_router
+    purchasing.pinv_router,
+    dependencies=PROTECTED,
 )
 
 app.include_router(
-    purchasing.prt_router
+    purchasing.prt_router,
+    dependencies=PROTECTED,
 )
 
 app.include_router(
-    purchasing.spay_router
+    purchasing.spay_router,
+    dependencies=PROTECTED,
 )
 
 
 # Sales
 app.include_router(
-    sales.customer_router
+    sales.customer_router,
+    dependencies=PROTECTED,
 )
 
 app.include_router(
-    sales.si_router
+    sales.si_router,
+    dependencies=PROTECTED,
 )
 
 app.include_router(
-    sales.so_router
+    sales.so_router,
+    dependencies=PROTECTED,
 )
 
 app.include_router(
-    sales.dn_router
+    sales.dn_router,
+    dependencies=PROTECTED,
 )
 
 app.include_router(
-    sales.sq_router
+    sales.sq_router,
+    dependencies=PROTECTED,
 )
 
 app.include_router(
-    sales.sr_router
+    sales.sr_router,
+    dependencies=PROTECTED,
 )
 
 
 # Users / Roles / Permissions
 app.include_router(
-    users.router
+    users.router,
+    dependencies=PROTECTED,
 )
 
 app.include_router(
-    roles.router
+    roles.router,
+    dependencies=PROTECTED,
 )
 
 app.include_router(
-    permissions_catalog.router
+    permissions_catalog.router,
+    dependencies=PROTECTED,
 )
 
 
 # Warehouse
 app.include_router(
-    warehouse.router
+    warehouse.router,
+    dependencies=PROTECTED,
 )
 
 app.include_router(
-    warehouse.stock_router
+    warehouse.stock_router,
+    dependencies=PROTECTED,
 )
 
 app.include_router(
-    warehouse_locations.router
+    warehouse_locations.router,
+    dependencies=PROTECTED,
 )
+
+
+# ============================================================
+# إنشاء مدير النظام الأول (إن لم يوجد أي مستخدم)
+# ============================================================
+
+@app.on_event("startup")
+def bootstrap_admin():
+    from app.bootstrap import ensure_initial_admin
+    ensure_initial_admin()
 
 
 # ============================================================
