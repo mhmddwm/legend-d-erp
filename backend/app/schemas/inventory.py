@@ -17,6 +17,7 @@ class ItemIn(BaseModel):
     default_warehouse_id: Optional[int] = None
     default_location_id: Optional[int] = None
     unit: str = "حبة"
+    unit_template: Optional[str] = None
     default_cost: float = 0
     price: float = 0
     opening_qty: float = 0
@@ -37,6 +38,7 @@ class ItemUpdate(BaseModel):
     default_warehouse_id: Optional[int] = None
     default_location_id: Optional[int] = None
     unit: Optional[str] = None
+    unit_template: Optional[str] = None
     default_cost: Optional[float] = None
     price: Optional[float] = None
     reorder_level: Optional[float] = None
@@ -57,6 +59,7 @@ class ItemOut(BaseModel):
     default_warehouse_id: Optional[int] = None
     default_location_id: Optional[int] = None
     unit: str
+    unit_template: Optional[str] = None
     default_cost: float
     price: float
     qty: float

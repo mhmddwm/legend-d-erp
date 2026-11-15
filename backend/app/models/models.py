@@ -279,6 +279,9 @@ class Item(Base):
         default="حبة"
     )
 
+    # اسم قالب الوحدات المرتبط بالمنتج (PF-01.6)؛ القالب نفسه يُحفظ حالياً في المتصفح
+    unit_template = Column(String(120), nullable=True)
+
     default_cost = Column(Numeric(18,4), nullable=False, default=0)
     price = Column(Numeric(18,4), nullable=False, default=0)
     qty = Column(Numeric(18,4), nullable=False, default=0)

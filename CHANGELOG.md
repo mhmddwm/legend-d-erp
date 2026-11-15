@@ -1,5 +1,6 @@
 # CHANGELOG
 
+<<<<<<< HEAD
 ## PF-01.4 — Migrations
 ### Added
 - `scripts/migrate.py`: مُشغِّل هجرات (`check` / `status` / `apply [--dry-run]` / `baseline`) مع تتبع ببصمة checksum وقفل ضد التشغيل المتزامن وتوقف عند أول فشل.
@@ -10,6 +11,8 @@
 - الأرقام المكررة القديمة 022/023/024 لم تُعاد تسميتها (أسماؤها مسجَّلة في القاعدة).
 - فجوة معروفة: لا يمكن التركيب من الصفر لغياب لقطة بنية القاعدة الأساسية (انظر MIGRATIONS.md).
 
+=======
+>>>>>>> 6f9717c8abcc10d40c98789c194a56aa28e11523
 ## PF-01.3 — Security Hardening
 ### Added
 - تسجيل دخول حقيقي بـ JWT: `POST /api/auth/login`, `GET /api/auth/me`, `POST /api/auth/change-password` + شاشة `login.html` و`auth.js` (إضافة الرمز تلقائياً لكل طلب، وتحويل لصفحة الدخول عند انتهاء الجلسة، وزر تسجيل الخروج في الهيدر).
