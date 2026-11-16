@@ -296,6 +296,13 @@ def bootstrap_admin():
     ensure_initial_admin()
 
 
+@app.on_event("startup")
+def check_schema_on_startup():
+    # فحص قراءة فقط: يحذّر إن كانت الهجرات غير مطبَّقة (انظر app/schema_check.py)
+    from app.schema_check import run_startup_check
+    run_startup_check()
+
+
 # ============================================================
 # Health Check
 # ============================================================

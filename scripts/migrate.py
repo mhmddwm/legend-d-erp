@@ -300,8 +300,4 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
-<<<<<<< HEAD
     sys.exit(main())
-=======
-    sys.exit(main())
->>>>>>> 6f9717c8abcc10d40c98789c194a56aa28e11523

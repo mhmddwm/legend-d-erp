@@ -101,15 +101,12 @@ ADMIN_PASSWORD=<8 أحرف فأكثر>
 
 ---
 
-<<<<<<< HEAD
 ## الهجرات (PF-01.4)
 
 راجع `docs/MIGRATIONS.md` — الأمر الأساسي: `python ../scripts/migrate.py status` من مجلد backend.
 
 ---
 
-=======
->>>>>>> 6f9717c8abcc10d40c98789c194a56aa28e11523
 ## الخطوة 4: تشغيل الخادم
 
 ```bash

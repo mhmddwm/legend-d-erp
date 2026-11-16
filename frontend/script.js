@@ -152,10 +152,17 @@ return data;
 }
 catch(e){
 
-console.warn(
-"تعذر تحميل "+name,
-e.message
-);
+console.warn("تعذر تحميل "+name, e.message);
+if(name==="الأصناف"||name==="قوالب الوحدات"){
+  try{
+    let b=document.getElementById("apiErrorBanner");
+    if(!b){b=document.createElement("div");b.id="apiErrorBanner";
+      b.style.cssText="position:fixed;top:0;left:0;right:0;z-index:99999;background:#b91c1c;color:#fff;padding:8px 14px;font-size:14px;text-align:center;direction:rtl";
+      document.body.appendChild(b);}
+    b.dataset.fails=((b.dataset.fails||"")+"|"+name);
+    b.textContent="تعذر تحميل: "+[...new Set(b.dataset.fails.split("|").filter(Boolean))].join("، ")+" — "+e.message+" (غالباً هجرات قاعدة البيانات غير مطبَّقة: شغّل migrate.py status ثم apply)";
+  }catch(_){}
+}
 
 return [];
 
