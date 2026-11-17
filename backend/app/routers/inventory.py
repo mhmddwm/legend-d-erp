@@ -125,6 +125,45 @@ def delete_price_list_item(code: str, item_id: int, db: Session = Depends(get_db
 # UNIT TEMPLATES (قوالب الوحدات)
 # ============================================================
 
+def _norm_name(v):
+    """توحيد الاسم للمقارنة: إزالة المسافات الزائدة وتجاهل حالة الأحرف."""
+    return " ".join(str(v or "").split()).casefold()
+
+
+def _resolve_item_template(db, unit, unit_template):
+    """يتحقق من ارتباط الصنف بقالب وحداته ويعيد اسم القالب الذي يُحفظ مع الصنف.
+
+    - قالب مُرسَل: يجب أن يكون موجوداً وأن تطابق وحدته الأساسية وحدة الصنف.
+    - قالب غير مُرسَل: إن وُجد قالب واحد فقط بنفس الوحدة الأساسية رُبط تلقائياً،
+      وإن وُجد أكثر من قالب رُفض الحفظ (وإلا عرضت طلبات الشراء الوحدة الأساسية وحدها)،
+      وإن لم يوجد قالب أصلاً بقي الصنف بلا قالب.
+    """
+    unit_n = _norm_name(unit)
+    tpls = db.query(UnitTemplate).all()
+    wanted = unit_template.strip() if isinstance(unit_template, str) else unit_template
+    if wanted:
+        wn = _norm_name(wanted)
+        tpl = next((t for t in tpls if t.code == wanted or _norm_name(t.name) == wn), None)
+        if not tpl:
+            raise HTTPException(400, f"قالب الوحدات «{wanted}» غير موجود")
+        if unit_n and _norm_name(tpl.base_unit) != unit_n:
+            raise HTTPException(
+                400,
+                f"وحدة الصنف «{unit}» لا تطابق الوحدة الأساسية للقالب «{tpl.name}» ({tpl.base_unit})",
+            )
+        return tpl.name
+    same = [t for t in tpls if unit_n and _norm_name(t.base_unit) == unit_n]
+    if len(same) == 1:
+        return same[0].name
+    if len(same) > 1:
+        names = "، ".join(t.name for t in same[:8])
+        raise HTTPException(
+            400,
+            f"اختر قالب وحدات للصنف: يوجد {len(same)} قوالب وحدتها الأساسية «{unit}» ({names})",
+        )
+    return None
+
+
 @unit_template_router.get("", response_model=list[UnitTemplateOut])
 def list_unit_templates(db: Session = Depends(get_db)):
     return db.query(UnitTemplate).order_by(UnitTemplate.code.asc()).all()
@@ -134,6 +173,8 @@ def list_unit_templates(db: Session = Depends(get_db)):
 def create_unit_template(payload: UnitTemplateIn, db: Session = Depends(get_db)):
     if db.query(UnitTemplate).filter(UnitTemplate.code == payload.code).first():
         raise HTTPException(400, "كود قالب الوحدة مستخدم من قبل")
+    if any(_norm_name(t.name) == _norm_name(payload.name) for t in db.query(UnitTemplate).all()):
+        raise HTTPException(400, "اسم قالب الوحدات مستخدم من قبل")
     if payload.higher_unit and (not payload.factor or payload.factor <= 1):
         raise HTTPException(400, "معامل التحويل للوحدة الأعلى يجب أن يكون أكبر من 1")
     tpl = UnitTemplate(**payload.model_dump())
@@ -153,8 +194,21 @@ def update_unit_template(code: str, payload: UnitTemplateUpdate, db: Session = D
     new_higher = data.get("higher_unit", tpl.higher_unit)
     if new_higher and (not new_factor or new_factor <= 1):
         raise HTTPException(400, "معامل التحويل للوحدة الأعلى يجب أن يكون أكبر من 1")
+    old_name = tpl.name
+    linked = db.query(Item).filter(Item.unit_template == old_name)
+    new_name = data.get("name")
+    if new_name and _norm_name(new_name) != _norm_name(old_name):
+        if any(t.code != tpl.code and _norm_name(t.name) == _norm_name(new_name) for t in db.query(UnitTemplate).all()):
+            raise HTTPException(400, "اسم قالب الوحدات مستخدم من قبل")
+    if "base_unit" in data and _norm_name(data["base_unit"]) != _norm_name(tpl.base_unit):
+        n = linked.count()
+        if n:
+            raise HTTPException(409, f"لا يمكن تغيير الوحدة الأساسية: {n} صنف مرتبط بهذا القالب. غيّر وحدة الأصناف أولاً")
     for k, v in data.items():
         setattr(tpl, k, v)
+    if new_name and tpl.name != old_name:
+        # الصنف يحفظ اسم القالب، فتغيير الاسم يجب أن ينعكس على الأصناف المرتبطة وإلا انقطع الارتباط
+        linked.update({Item.unit_template: tpl.name}, synchronize_session=False)
     db.commit()
     db.refresh(tpl)
     return tpl
@@ -165,6 +219,9 @@ def delete_unit_template(code: str, db: Session = Depends(get_db)):
     tpl = db.query(UnitTemplate).filter(UnitTemplate.code == code).first()
     if not tpl:
         raise HTTPException(404, "قالب الوحدة غير موجود")
+    n = db.query(Item).filter(Item.unit_template == tpl.name).count()
+    if n:
+        raise HTTPException(409, f"لا يمكن حذف القالب: {n} صنف مرتبط به. غيّر قالب هذه الأصناف أولاً")
     db.delete(tpl)
     db.commit()
     return None
@@ -283,6 +340,7 @@ def create_item(payload: ItemIn, db: Session = Depends(get_db)):
     if payload.supplier_code and not db.query(Supplier).filter(Supplier.code == payload.supplier_code).first():
         raise HTTPException(404, "المورد غير موجود")
 
+    unit_template = _resolve_item_template(db, payload.unit, payload.unit_template)
     opening_qty = float(payload.opening_qty or 0)
     default_cost = float(payload.default_cost or 0)
 
@@ -300,7 +358,7 @@ def create_item(payload: ItemIn, db: Session = Depends(get_db)):
         default_warehouse_id=payload.default_warehouse_id,
         default_location_id=payload.default_location_id,
         unit=payload.unit,
-        unit_template=payload.unit_template,
+        unit_template=unit_template,
         default_cost=default_cost,
         price=float(payload.price or 0),
         qty=opening_qty,
@@ -349,6 +407,11 @@ def update_item(code: str, payload: ItemUpdate, db: Session = Depends(get_db)):
         raise HTTPException(404, "الماركة غير موجودة")
     if "supplier_code" in data and data["supplier_code"] and not db.query(Supplier).filter(Supplier.code == data["supplier_code"]).first():
         raise HTTPException(404, "المورد غير موجود")
+
+    if "unit" in data or "unit_template" in data:
+        eff_unit = data["unit"] if "unit" in data else item.unit
+        eff_tpl = data["unit_template"] if "unit_template" in data else item.unit_template
+        data["unit_template"] = _resolve_item_template(db, eff_unit, eff_tpl)
 
     for k, v in data.items():
         setattr(item, k, v)

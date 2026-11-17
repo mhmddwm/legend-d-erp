@@ -329,6 +329,33 @@ def chk_grni(cur, a):
         "قد ينتج عن اختلاف سعر الفاتورة عن سعر الاستلام، أو إيصالات قديمة بلا قيد."
 
 
+def chk_item_templates(cur, a):
+    """ارتباط الأصناف بقوالب الوحدات (يمنع ظهور «حبة» وحدها في طلب الشراء)."""
+    unknown = fetch(cur, """
+        SELECT i.code, i.name, i.unit, i.unit_template FROM items i
+        WHERE COALESCE(i.unit_template, '') <> ''
+          AND NOT EXISTS (SELECT 1 FROM unit_templates t WHERE t.name = i.unit_template)
+        ORDER BY i.code""")
+    mismatch = fetch(cur, """
+        SELECT i.code, i.name, i.unit, i.unit_template FROM items i
+        WHERE COALESCE(i.unit_template, '') <> ''
+          AND EXISTS (SELECT 1 FROM unit_templates t WHERE t.name = i.unit_template)
+          AND NOT EXISTS (SELECT 1 FROM unit_templates t WHERE t.name = i.unit_template AND t.base_unit = i.unit)
+        ORDER BY i.code""")
+    ambiguous = fetch(cur, """
+        SELECT i.code, i.name, i.unit FROM items i
+        WHERE i.is_active AND COALESCE(i.unit_template, '') = ''
+          AND (SELECT COUNT(*) FROM unit_templates t WHERE t.base_unit = i.unit) > 1
+        ORDER BY i.code""")
+    rows = ([f"{r[0]} {r[1]}: مرتبط بقالب غير موجود «{r[3]}»" for r in unknown]
+            + [f"{r[0]} {r[1]}: وحدته «{r[2]}» لا تطابق الوحدة الأساسية لقالب «{r[3]}»" for r in mismatch]
+            + [f"{r[0]} {r[1]}: بلا قالب وأكثر من قالب يناسب وحدته «{r[2]}»" for r in ambiguous])
+    if not rows:
+        return "ok", "كل الأصناف مرتبطة بقوالب وحداتها بشكل سليم", [], ""
+    return "warn", f"{len(rows)} صنف يحتاج ربطاً بقالب وحدات", rows, \
+        "شغّل: python scripts/link_item_templates.py export ثم apply لربطها دفعة واحدة."
+
+
 CHECKS = [
     ("الميزان العام", chk_global_totals),
     ("توازن القيود", chk_unbalanced_entries),
@@ -344,6 +371,7 @@ CHECKS = [
     ("قيمة المخزون", chk_inventory_value),
     ("أرصدة الموردين", chk_supplier_balances),
     ("البضاعة غير المفوترة", chk_grni),
+    ("ارتباط الأصناف بالقوالب", chk_item_templates),
 ]
 
 
