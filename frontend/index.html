@@ -3493,12 +3493,13 @@ html[dir="ltr"] .brand-center{direction:ltr;}
       </div>
     </div>
 
+    <datalist id="unitNamesList"><option value="حبة"><option value="كرتون"><option value="علبة"><option value="كيس"><option value="دزينة"><option value="شد"><option value="باكت"><option value="زجاجة"><option value="قطعة"><option value="طرد"><option value="صندوق"><option value="عبوة"><option value="رول"><option value="لتر"><option value="كجم"><option value="جرام"><option value="متر"></datalist>
     <div id="unitTemplateForm" style="display:none;margin-top:20px" class="formcard">
       <div class="frow">
         <div class="field"><label>اسم القالب</label><input id="utName" placeholder="كرتون شد 10 حبات"></div>
-        <div class="field"><label>الوحدة الأساسية</label><input id="utBase" placeholder="حبة"></div>
-        <div class="field"><label>الوحدة الأعلى</label><input id="utHigher" placeholder="كرتون"></div>
-        <div class="field"><label>اسم الوحدة الأعلى</label><input id="utHigherName" placeholder="كرتون"></div>
+        <div class="field"><label>الوحدة الأساسية</label><input id="utBase" list="unitNamesList" autocomplete="off" placeholder="حبة"></div>
+        <div class="field"><label>الوحدة الأعلى</label><input id="utHigher" list="unitNamesList" autocomplete="off" placeholder="كرتون"></div>
+        <div class="field"><label>اسم الوحدة الأعلى</label><input id="utHigherName" list="unitNamesList" autocomplete="off" placeholder="كرتون"></div>
         <div class="field"><label>معامل التحويل</label><input id="utFactor" type="number" value="1"></div>
       </div>
       <button class="btn" onclick="saveUnitTemplate()">حفظ القالب</button>

@@ -9226,3 +9226,53 @@ window.submitResetTransactions = submitResetTransactions;
     return out.length ? out : ['حبة'];
   };
 })();
+
+
+/* ===== PF-01.6.3: شاشة قوالب الوحدات — قائمة وحدات جاهزة ورسائل حفظ واضحة ===== */
+(function(){
+  var COMMON = ['حبة','كرتون','علبة','كيس','دزينة','شد','باكت','زجاجة','قطعة','طرد','صندوق','عبوة','رول','لتر','كجم','جرام','متر'];
+  function gv(id){ var e=document.getElementById(id); return e ? String(e.value||'').trim() : ''; }
+  function msg(text, bad){
+    try{
+      var b=document.getElementById('utMsgBar');
+      if(!b){ b=document.createElement('div'); b.id='utMsgBar';
+        b.style.cssText='position:fixed;top:14px;left:50%;transform:translateX(-50%);z-index:99999;padding:10px 20px;border-radius:8px;font-size:14px;direction:rtl;color:#fff;box-shadow:0 4px 14px rgba(0,0,0,.25)';
+        document.body.appendChild(b); }
+      b.style.background = bad ? '#b91c1c' : '#15803d';
+      b.textContent = text; b.style.display='block';
+      clearTimeout(b._t); b._t=setTimeout(function(){ b.style.display='none'; }, bad ? 6000 : 2500);
+    }catch(e){ alert(text); }
+  }
+  function refreshUnitNames(){
+    var dl=document.getElementById('unitNamesList'); if(!dl) return;
+    var seen={}, out=[];
+    function add(u){ u=String(u||'').trim(); if(u && !seen[u]){ seen[u]=1; out.push(u); } }
+    COMMON.forEach(add);
+    (Array.isArray(window.unitTemplates)?window.unitTemplates:[]).forEach(function(t){
+      add(t.base||t.base_unit); add(t.higherName||t.higher||t.higher_unit); });
+    (Array.isArray(window.items)?window.items:[]).forEach(function(i){ add(i.unit); });
+    dl.innerHTML = out.map(function(u){ return '<option value="'+u.replace(/&/g,'&amp;').replace(/"/g,'&quot;')+'">'; }).join('');
+  }
+  var baseOpen = window.openUnitTemplateForm;
+  window.openUnitTemplateForm = openUnitTemplateForm = function(){
+    refreshUnitNames();
+    if(baseOpen) baseOpen.apply(this, arguments);
+  };
+  var baseSave = window.saveUnitTemplate;
+  window.saveUnitTemplate = saveUnitTemplate = async function(){
+    var name=gv('utName'), base=gv('utBase'), hn=gv('utHigherName')||gv('utHigher');
+    var factor=Number(gv('utFactor'))||1;
+    if(!name){ msg('اكتب اسم القالب (مثل: كرتون شد 10 حبة)', true); return; }
+    if(hn && !base){ msg('اكتب الوحدة الأساسية (مثل: حبة)', true); return; }
+    if(hn && factor<=1){ msg('معامل التحويل يجب أن يكون أكبر من 1 (عدد الوحدات الأساسية في الوحدة الأعلى)', true); return; }
+    await baseSave.apply(this, arguments);
+    var f=document.getElementById('unitTemplateForm');
+    if(f && f.style.display==='none'){      // أُغلق النموذج = نجح الحفظ في الخادم
+      ['utName','utBase','utHigher','utHigherName'].forEach(function(id){ var e=document.getElementById(id); if(e) e.value=''; });
+      var fe=document.getElementById('utFactor'); if(fe) fe.value='1';
+      msg('تم حفظ القالب «'+name+'»', false);
+    }
+  };
+  document.addEventListener('DOMContentLoaded', refreshUnitNames);
+})();
+

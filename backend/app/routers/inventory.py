@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 from datetime import date as date_type
 from app.database import get_db
 from app.models.models import Item, StockMove, Supplier, PurchaseInvoice, PurchaseReturn, Account, SupplierPayment, SupplierPaymentAllocation, Category, Brand, UnitTemplate, PriceList, PriceListItem
@@ -433,10 +434,22 @@ def delete_item(code: str, db: Session = Depends(get_db)):
     item = db.query(Item).filter(Item.code == code).first()
     if not item:
         raise HTTPException(404, "الصنف غير موجود")
-    if db.query(StockMove).filter(StockMove.item_id == item.id).first():
-        raise HTTPException(400, "لا يمكن حذف صنف له حركات مخزون")
-    db.delete(item)
-    db.commit()
+    moves = db.query(StockMove).filter(StockMove.item_id == item.id).all()
+    # الرصيد الافتتاحي (حركة افتتاحي بلا قيد محاسبي) لا يمنع الحذف؛ أي حركة أخرى تمنعه
+    if any((m.move_type or "") != "افتتاحي" for m in moves):
+        raise HTTPException(400, "لا يمكن حذف صنف له حركات مخزون غير الرصيد الافتتاحي")
+    opening = sum(float(m.qty or 0) for m in moves)
+    if abs(float(item.qty or 0) - opening) > 0.0001:
+        raise HTTPException(400, "لا يمكن حذف الصنف: رصيده الحالي تغيّر عن الرصيد الافتتاحي")
+    try:
+        for m in moves:
+            db.delete(m)
+        db.query(WarehouseStock).filter(WarehouseStock.item_id == item.id).delete(synchronize_session=False)
+        db.delete(item)
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(400, "لا يمكن حذف الصنف: مستخدم في مستندات (طلبات/أوامر شراء/فواتير/قوائم أسعار...)")
     return None
 
 

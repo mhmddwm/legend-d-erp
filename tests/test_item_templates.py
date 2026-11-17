@@ -15,15 +15,18 @@ import pytest
 from fastapi import HTTPException
 
 from app.database import Base, SessionLocal, engine
-from app.models.models import Item, UnitTemplate
+from app.models.models import Item, StockMove, UnitTemplate
+from app.models.warehouse_stock import WarehouseStock
 from app.routers import inventory as inv
 from app.schemas.inventory import ItemIn, ItemUpdate, UnitTemplateIn, UnitTemplateUpdate
 
 
 @pytest.fixture()
 def db():
-    Base.metadata.create_all(engine, tables=[Item.__table__, UnitTemplate.__table__])
+    Base.metadata.create_all(engine, tables=[Item.__table__, UnitTemplate.__table__, StockMove.__table__, WarehouseStock.__table__])
     s = SessionLocal()
+    s.query(StockMove).delete()
+    s.query(WarehouseStock).delete()
     s.query(Item).delete()
     s.query(UnitTemplate).delete()
     s.add_all([
@@ -143,3 +146,27 @@ def test_bulk_link_script_end_to_end(tmp_path, db):
     with eng.connect() as c:
         got = dict(c.execute(text("SELECT code, unit_template FROM items")).fetchall())
     assert got == {"P1": "12", "P2": "6", "P3": None}
+
+
+def test_delete_item_with_only_opening_balance(db):
+    inv.create_item(ItemIn(code="O1", name="تجريبي", unit="حبة", unit_template="6", opening_qty=5), db)
+    assert db.query(StockMove).count() == 1
+    inv.delete_item("O1", db)
+    assert db.query(Item).filter(Item.code == "O1").count() == 0
+    assert db.query(StockMove).count() == 0
+
+
+def test_delete_item_blocked_by_other_moves_or_changed_qty(db):
+    inv.create_item(ItemIn(code="O2", name="س", unit="حبة", unit_template="6", opening_qty=5), db)
+    it = db.query(Item).filter(Item.code == "O2").one()
+    db.add(StockMove(move_date=__import__("datetime").date.today(), item_id=it.id, move_type="استلام",
+                     reference="GRN-1", qty=3, unit_cost=1, balance_after=8))
+    db.commit()
+    with pytest.raises(HTTPException) as e:
+        inv.delete_item("O2", db)
+    assert e.value.status_code == 400
+    # رصيد تغيّر بلا حركة مسجلة
+    inv.create_item(ItemIn(code="O3", name="ص", unit="حبة", unit_template="6", opening_qty=5), db)
+    it3 = db.query(Item).filter(Item.code == "O3").one(); it3.qty = 9; db.commit()
+    with pytest.raises(HTTPException):
+        inv.delete_item("O3", db)
