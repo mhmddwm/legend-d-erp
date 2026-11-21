@@ -15,7 +15,7 @@ import pytest
 from fastapi import HTTPException
 
 from app.database import Base, SessionLocal, engine
-from app.models.models import Item, StockMove, UnitTemplate
+from app.models.models import Account, GoodsReceipt, GoodsReceiptLine, Item, JournalEntry, JournalEntryLine, PriceList, PriceListItem, StockMove, UnitTemplate
 from app.models.warehouse_stock import WarehouseStock
 from app.routers import inventory as inv
 from app.schemas.inventory import ItemIn, ItemUpdate, UnitTemplateIn, UnitTemplateUpdate
@@ -23,12 +23,17 @@ from app.schemas.inventory import ItemIn, ItemUpdate, UnitTemplateIn, UnitTempla
 
 @pytest.fixture()
 def db():
-    Base.metadata.create_all(engine, tables=[Item.__table__, UnitTemplate.__table__, StockMove.__table__, WarehouseStock.__table__])
+    Base.metadata.create_all(engine)
     s = SessionLocal()
+    for m in (JournalEntryLine, JournalEntry, GoodsReceiptLine, GoodsReceipt, PriceListItem):
+        s.query(m).delete()
     s.query(StockMove).delete()
     s.query(WarehouseStock).delete()
     s.query(Item).delete()
     s.query(UnitTemplate).delete()
+    if not s.query(Account).filter(Account.code == '123').first():
+        s.add_all([Account(code='123', name_ar='المخزون', account_type='assets'),
+                   Account(code='34', name_ar='أرصدة افتتاحية — مخزون', account_type='equity')])
     s.add_all([
         UnitTemplate(code="T6", name="6", base_unit="حبة", higher_unit="كرتون", factor=6),
         UnitTemplate(code="T12", name="12", base_unit="حبة", higher_unit="كرتون", factor=12),
@@ -148,25 +153,88 @@ def test_bulk_link_script_end_to_end(tmp_path, db):
     assert got == {"P1": "12", "P2": "6", "P3": None}
 
 
-def test_delete_item_with_only_opening_balance(db):
-    inv.create_item(ItemIn(code="O1", name="تجريبي", unit="حبة", unit_template="6", opening_qty=5), db)
-    assert db.query(StockMove).count() == 1
-    inv.delete_item("O1", db)
-    assert db.query(Item).filter(Item.code == "O1").count() == 0
-    assert db.query(StockMove).count() == 0
+def test_opening_balance_creates_receipt_journal_and_move(db):
+    inv.create_item(ItemIn(code="O1", name="تجريبي", unit="حبة", unit_template="6", opening_qty=5, default_cost=10), db)
+    grn = db.query(GoodsReceipt).one()
+    assert grn.invoice_status == "opening" and grn.supplier_code is None and float(grn.total) == 50
+    assert db.query(GoodsReceiptLine).filter(GoodsReceiptLine.grn_number == grn.grn_number).count() == 1
+    mv = db.query(StockMove).one()
+    assert mv.move_type == "افتتاحي" and mv.reference == f"GRN-{grn.grn_number}"
+    je = db.query(JournalEntry).one()
+    assert je.source_type == "opening_stock" and grn.journal_entry_id == je.id
+    lines = {l.account_code: (float(l.debit), float(l.credit)) for l in db.query(JournalEntryLine).all()}
+    assert lines == {"123": (50.0, 0.0), "34": (0.0, 50.0)}
 
 
-def test_delete_item_blocked_by_other_moves_or_changed_qty(db):
-    inv.create_item(ItemIn(code="O2", name="س", unit="حبة", unit_template="6", opening_qty=5), db)
+def test_zero_cost_opening_has_receipt_but_no_journal(db):
+    inv.create_item(ItemIn(code="Z1", name="ز", unit="حبة", unit_template="6", opening_qty=3, default_cost=0), db)
+    assert db.query(GoodsReceipt).count() == 1 and db.query(JournalEntry).count() == 0
+
+
+def test_delete_requires_confirmation_then_removes_voucher_and_journal(db):
+    inv.create_item(ItemIn(code="O1", name="تجريبي", unit="حبة", unit_template="6", opening_qty=5, default_cost=10), db)
+    prev = inv.delete_item_preview("O1", db)
+    assert prev["can_delete"] and prev["needs_confirmation"] and len(prev["opening_receipts"]) == 1
+    with pytest.raises(HTTPException) as e:
+        inv.delete_item("O1", confirm=False, db=db)
+    assert e.value.status_code == 409
+    assert db.query(Item).filter(Item.code == "O1").count() == 1      # لم يُحذف شيء
+    inv.delete_item("O1", confirm=True, db=db)
+    for m in (Item, StockMove, GoodsReceipt, GoodsReceiptLine, JournalEntry, JournalEntryLine):
+        assert db.query(m).count() == 0
+
+
+def test_item_without_opening_is_deleted_without_confirmation(db):
+    inv.create_item(ItemIn(code="N1", name="س", unit="حبة", unit_template="6"), db)
+    assert inv.delete_item_preview("N1", db)["needs_confirmation"] is False
+    inv.delete_item("N1", confirm=False, db=db)
+    assert db.query(Item).count() == 0
+
+
+def test_item_with_other_moves_or_documents_cannot_be_deleted(db):
+    import datetime
+    inv.create_item(ItemIn(code="O2", name="س", unit="حبة", unit_template="6", opening_qty=5, default_cost=1), db)
     it = db.query(Item).filter(Item.code == "O2").one()
-    db.add(StockMove(move_date=__import__("datetime").date.today(), item_id=it.id, move_type="استلام",
-                     reference="GRN-1", qty=3, unit_cost=1, balance_after=8))
+    db.add(StockMove(move_date=datetime.date.today(), item_id=it.id, move_type="استلام مشتريات",
+                     reference="GRN-X", qty=3, unit_cost=1, balance_after=8))
     db.commit()
     with pytest.raises(HTTPException) as e:
-        inv.delete_item("O2", db)
+        inv.delete_item("O2", confirm=True, db=db)
     assert e.value.status_code == 400
-    # رصيد تغيّر بلا حركة مسجلة
-    inv.create_item(ItemIn(code="O3", name="ص", unit="حبة", unit_template="6", opening_qty=5), db)
-    it3 = db.query(Item).filter(Item.code == "O3").one(); it3.qty = 9; db.commit()
-    with pytest.raises(HTTPException):
-        inv.delete_item("O3", db)
+    assert db.query(GoodsReceipt).count() == 1                         # الإذن باقٍ
+
+
+def test_item_in_purchase_receipt_is_blocked_by_name(db):
+    import datetime
+    from app.models.models import Supplier
+    inv.create_item(ItemIn(code="B1", name="س", unit="حبة", unit_template="6"), db)
+    it = db.query(Item).filter(Item.code == "B1").one()
+    db.add(Supplier(code="S1", name="مورد"))
+    db.add(GoodsReceipt(grn_number="GRN-000009", grn_date=datetime.date.today(), supplier_code="S1",
+                        total=1, invoice_status="not_invoiced"))
+    db.flush()
+    db.add(GoodsReceiptLine(grn_number="GRN-000009", item_id=it.id, qty=1, unit_cost=1))
+    db.commit()
+    prev = inv.delete_item_preview("B1", db)
+    assert not prev["can_delete"] and "أذون استلام مشتريات" in prev["message"]
+
+
+def test_price_list_rows_are_listed_and_removed_with_confirmation(db):
+    inv.create_item(ItemIn(code="P1", name="س", unit="حبة", unit_template="6"), db)
+    it = db.query(Item).filter(Item.code == "P1").one()
+    db.add(PriceList(code="PL1", name="قائمة"))
+    db.flush()
+    db.add(PriceListItem(price_list_code="PL1", item_id=it.id, price=5)); db.commit()
+    prev = inv.delete_item_preview("P1", db)
+    assert prev["needs_confirmation"] and prev["price_list_rows"] == 1
+    inv.delete_item("P1", confirm=True, db=db)
+    assert db.query(Item).count() == 0 and db.query(PriceListItem).count() == 0
+
+
+def test_opening_receipt_cannot_be_edited_or_invoiced(db):
+    from app.routers import purchasing as pur
+    inv.create_item(ItemIn(code="O3", name="س", unit="حبة", unit_template="6", opening_qty=2, default_cost=1), db)
+    num = db.query(GoodsReceipt).one().grn_number
+    with pytest.raises(HTTPException) as e:
+        pur.update_grn(num, pur.GoodsReceiptIn(grn_date="2026-01-01", supplier_code="S", lines=[]), db)
+    assert e.value.status_code == 400

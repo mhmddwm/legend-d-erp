@@ -1,7 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
+from app.opening_stock import create_opening_receipt, delete_item_with_opening, delete_plan
 from datetime import date as date_type
 from app.database import get_db
 from app.models.models import Item, StockMove, Supplier, PurchaseInvoice, PurchaseReturn, Account, SupplierPayment, SupplierPaymentAllocation, Category, Brand, UnitTemplate, PriceList, PriceListItem
@@ -370,17 +371,12 @@ def create_item(payload: ItemIn, db: Session = Depends(get_db)):
     db.flush()  # نحتاج item.id فوراً لإنشاء حركة المخزون الافتتاحية قبل الـ commit النهائي
 
     if opening_qty > 0:
-        move = StockMove(
-            move_date=date_type.today(),
-            item_id=item.id,
-            move_type="افتتاحي",
-            reference="رصيد افتتاحي",
-            warehouse_id=payload.default_warehouse_id,
-            qty=opening_qty,
-            unit_cost=default_cost,
-            balance_after=opening_qty,
-        )
-        db.add(move)
+        try:
+            create_opening_receipt(db, item, opening_qty, default_cost,
+                                   payload.default_warehouse_id, payload.default_location_id)
+        except HTTPException:
+            db.rollback()
+            raise
 
         if payload.default_warehouse_id:
             db.add(WarehouseStock(
@@ -429,27 +425,23 @@ def update_item(code: str, payload: ItemUpdate, db: Session = Depends(get_db)):
     return item
 
 
-@router.delete("/{code}", status_code=204)
-def delete_item(code: str, db: Session = Depends(get_db)):
+@router.get("/{code}/delete-preview")
+def delete_item_preview(code: str, db: Session = Depends(get_db)):
+    """معاينة الحذف: هل يمكن حذف الصنف؟ وما الذي سيُحذف معه (إذن الإضافة وقيده...)؟"""
     item = db.query(Item).filter(Item.code == code).first()
     if not item:
         raise HTTPException(404, "الصنف غير موجود")
-    moves = db.query(StockMove).filter(StockMove.item_id == item.id).all()
-    # الرصيد الافتتاحي (حركة افتتاحي بلا قيد محاسبي) لا يمنع الحذف؛ أي حركة أخرى تمنعه
-    if any((m.move_type or "") != "افتتاحي" for m in moves):
-        raise HTTPException(400, "لا يمكن حذف صنف له حركات مخزون غير الرصيد الافتتاحي")
-    opening = sum(float(m.qty or 0) for m in moves)
-    if abs(float(item.qty or 0) - opening) > 0.0001:
-        raise HTTPException(400, "لا يمكن حذف الصنف: رصيده الحالي تغيّر عن الرصيد الافتتاحي")
-    try:
-        for m in moves:
-            db.delete(m)
-        db.query(WarehouseStock).filter(WarehouseStock.item_id == item.id).delete(synchronize_session=False)
-        db.delete(item)
-        db.commit()
-    except IntegrityError:
-        db.rollback()
-        raise HTTPException(400, "لا يمكن حذف الصنف: مستخدم في مستندات (طلبات/أوامر شراء/فواتير/قوائم أسعار...)")
+    return delete_plan(db, item)
+
+
+@router.delete("/{code}", status_code=204)
+def delete_item(code: str, confirm: bool = Query(False), db: Session = Depends(get_db)):
+    """حذف صنف. الصنف الذي رصيده الافتتاحي وحده يُحذف بعد التأكيد (confirm=true) مع إذن
+    الإضافة المنشأ من النظام وقيده. أي صنف عليه عمليات شراء/بيع لا يُحذف أبداً."""
+    item = db.query(Item).filter(Item.code == code).first()
+    if not item:
+        raise HTTPException(404, "الصنف غير موجود")
+    delete_item_with_opening(db, item, confirm=confirm)
     return None
 
 

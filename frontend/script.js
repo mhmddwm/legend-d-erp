@@ -1312,6 +1312,7 @@ function journalSourceLabel(sourceType){
   const map = {
     purchase_invoice: 'فاتورة مشتريات',
     goods_receipt: 'استلام بضاعة',
+    opening_stock: 'رصيد افتتاحي (مخزون)',
   };
   if (!sourceType || sourceType === 'manual') {
     return { isSystem: false, text: 'يدوي' };
@@ -3031,9 +3032,15 @@ function cancelItemEdit(){
 }
 
 async function deleteItem(code){
-  if(!confirm('حذف هذا الصنف؟')) return;
-  try{await api('DELETE',`/api/items/${code}`); await loadAll();}
-  catch(e){alert(e.message);}
+  // معاينة من الخادم: هل يُحذف؟ وما الذي سيُحذف معه (إذن الإضافة وقيده)؟
+  const enc=encodeURIComponent(code);
+  let pv;
+  try{ pv=await api('GET',`/api/items/${enc}/delete-preview`); }
+  catch(e){ alert(e.message); return; }
+  if(!pv.can_delete){ alert(pv.message); return; }
+  if(!confirm(pv.message + (pv.needs_confirmation ? '' : '\nهل تريد المتابعة؟'))) return;
+  try{ await api('DELETE',`/api/items/${enc}`+(pv.needs_confirmation?'?confirm=true':'')); await loadAll(); }
+  catch(e){ alert(e.message); }
 }
 
 // ============================================================
@@ -3342,9 +3349,10 @@ function grnEsc(s){ return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&
 
 // شارة حالة فوترة الاستلام
 function getGrnInvoiceBadge(grn){
+  const opening = grn && grn.invoice_status==='opening';
   const invoiced = grn && grn.invoice_status==='invoiced';
-  const color = invoiced ? '#2e7d32' : '#b45309';
-  const text = invoiced ? 'مفوترة' : 'لم تُفوتر بعد';
+  const color = opening ? '#1d4ed8' : (invoiced ? '#2e7d32' : '#b45309');
+  const text = opening ? 'رصيد افتتاحي' : (invoiced ? 'مفوترة' : 'لم تُفوتر بعد');
   return `<span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:12px;background:${color}22;color:${color};border:1px solid ${color}55;">${text}</span>`;
 }
 
@@ -3410,7 +3418,7 @@ function renderGRNs(){
     return `<tr>
       <td>${grnEsc(g.grn_number)}</td>
       <td>${grnEsc(g.grn_date)}</td>
-      <td>${grnEsc(sup?sup.name:g.supplier_code)}</td>
+      <td>${grnEsc(sup?sup.name:(g.supplier_code||'رصيد افتتاحي'))}</td>
       <td>${grnEsc(g.po_number||'-')}</td>
       <td>${grnEsc(wh?wh.code+' — '+wh.name:'-')}</td>
       <td>${fmt(g.total)}</td>
@@ -3526,7 +3534,7 @@ function refreshPinvGrnOptions(){
   if(!sel) return;
   const current=sel.value;
   const invoicedGrnNumbers=new Set((invoices||[]).map(i=>i.grn_number));
-  const available=(grns||[]).filter(g=> g.invoice_status!=='invoiced' && !invoicedGrnNumbers.has(g.grn_number));
+  const available=(grns||[]).filter(g=> g.invoice_status!=='invoiced' && g.invoice_status!=='opening' && !invoicedGrnNumbers.has(g.grn_number));
   sel.innerHTML='<option value="">— اختر استلامًا —</option>' +
     available.map(g=>{
       const sup=(suppliers||[]).find(s=>s.code===g.supplier_code);
@@ -7303,13 +7311,28 @@ async function bulkDeleteItems(){
   const codes=getSelectedItemCodes();
   if(!codes.length) return;
   if(!confirm(`سيتم حذف ${codes.length} منتج نهائياً. هل تريد المتابعة؟`)) return;
-  let ok=0, failed=[];
+  const failed=[]; const todo=[]; let needsConfirm=0; const grnNos=[];
   for(const code of codes){
-    try{ await api('DELETE', `/api/items/${encodeURIComponent(code)}`); ok++; }
-    catch(e){ failed.push(`${code} (${e.message})`); }
+    try{
+      const pv=await api('GET',`/api/items/${encodeURIComponent(code)}/delete-preview`);
+      if(!pv.can_delete){ failed.push(`${code} (${pv.message})`); continue; }
+      if(pv.needs_confirmation){ needsConfirm++; (pv.opening_receipts||[]).forEach(n=>grnNos.push(n)); }
+      todo.push({code, confirm: !!pv.needs_confirmation});
+    }catch(e){ failed.push(`${code} (${e.message})`); }
+  }
+  let allowConfirmed=true;
+  if(needsConfirm){
+    allowConfirmed=confirm(`${needsConfirm} من المنتجات لها رصيد افتتاحي. سيتم حذف إذن الإضافة المنشأ من النظام (${grnNos.length} إذن) وقيده المحاسبي مع كل منتج. هل توافق؟`);
+  }
+  let ok=0;
+  for(const t of todo){
+    if(t.confirm && !allowConfirmed){ failed.push(`${t.code} (لم يُحذف — لم يتم تأكيد حذف إذن الإضافة)`); continue; }
+    try{ await api('DELETE', `/api/items/${encodeURIComponent(t.code)}`+(t.confirm?'?confirm=true':'')); ok++; }
+    catch(e){ failed.push(`${t.code} (${e.message})`); }
   }
   await loadAll();
   if(failed.length) alert(`تم حذف ${ok} منتج، وتعذّر حذف ${failed.length}:\n${failed.join('\n')}`);
+  else if(ok) alert(`تم حذف ${ok} منتج`);
 }
 window.bulkDeleteItems = bulkDeleteItems;
 

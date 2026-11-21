@@ -848,6 +848,8 @@ def update_grn(
     grn = db.query(GoodsReceipt).filter(GoodsReceipt.grn_number == grn_number).first()
     if not grn:
         raise HTTPException(status_code=404, detail="إذن الاستلام غير موجود")
+    if grn.invoice_status == "opening":
+        raise HTTPException(status_code=400, detail="إذن رصيد افتتاحي منشأ من النظام — لا يُعدَّل (عدّل الصنف أو احذفه)")
     if grn.invoice_status == "invoiced":
         raise HTTPException(
             status_code=400,
@@ -1270,6 +1272,9 @@ def create_purchase_invoice(
             status_code=404,
             detail=f"إذن الاستلام {payload.grn_number} غير موجود",
         )
+
+    if grn.invoice_status == "opening":
+        raise HTTPException(status_code=400, detail="إذن رصيد افتتاحي لا يُفوتر")
 
     if grn.invoice_status == "invoiced":
         raise HTTPException(

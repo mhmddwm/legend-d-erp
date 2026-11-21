@@ -426,7 +426,7 @@ class GoodsReceipt(Base):
     supplier_code = Column(
         String(30),
         ForeignKey("suppliers.code"),
-        nullable=False
+        nullable=True
     )
 
     po_number = Column(

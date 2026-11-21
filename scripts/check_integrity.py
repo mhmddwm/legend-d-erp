@@ -356,6 +356,24 @@ def chk_item_templates(cur, a):
         "شغّل: python scripts/link_item_templates.py export ثم apply لربطها دفعة واحدة."
 
 
+def chk_opening_receipts(cur, a):
+    """أذون الرصيد الافتتاحي: كل إذن بقيمة يجب أن يكون له قيد، وكل صنف برصيد افتتاحي يجب أن يكون له إذن."""
+    no_je = fetch(cur, """
+        SELECT grn_number, total FROM goods_receipts
+        WHERE invoice_status = 'opening' AND total > 0 AND journal_entry_id IS NULL
+        ORDER BY grn_number""")
+    legacy = fetch(cur, """
+        SELECT i.code, i.name FROM items i
+        JOIN stock_moves m ON m.item_id = i.id AND m.move_type = 'افتتاحي' AND m.reference = 'رصيد افتتاحي'
+        ORDER BY i.code""")
+    rows = ([f"{r[0]}: إذن رصيد افتتاحي بقيمة {r[1]} بلا قيد محاسبي" for r in no_je]
+            + [f"{r[0]} {r[1]}: رصيد افتتاحي قديم بلا إذن إضافة وبلا قيد (أُنشئ قبل PF-01.7)" for r in legacy])
+    if not rows:
+        return "ok", "أرصدة المخزون الافتتاحية كلها لها أذون إضافة وقيود", [], ""
+    return "warn", f"{len(rows)} رصيد افتتاحي بلا إذن/قيد", rows, \
+        "الأرصدة القديمة لا تظهر قيمتها في حساب المخزون 123؛ أعد إدخال الصنف أو أدخل قيداً افتتاحياً مجمّعاً."
+
+
 CHECKS = [
     ("الميزان العام", chk_global_totals),
     ("توازن القيود", chk_unbalanced_entries),
@@ -372,6 +390,7 @@ CHECKS = [
     ("أرصدة الموردين", chk_supplier_balances),
     ("البضاعة غير المفوترة", chk_grni),
     ("ارتباط الأصناف بالقوالب", chk_item_templates),
+    ("أذون الرصيد الافتتاحي", chk_opening_receipts),
 ]
 
 

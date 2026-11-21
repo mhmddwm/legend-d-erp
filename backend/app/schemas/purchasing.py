@@ -66,7 +66,7 @@ class GRNLineOut(BaseModel):
 class GoodsReceiptOut(BaseModel):
     grn_number: str
     grn_date: date
-    supplier_code: str
+    supplier_code: Optional[str] = None
     po_number: Optional[str]
     reference: Optional[str]
     warehouse_id: Optional[int] = None
