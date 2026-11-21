@@ -238,3 +238,35 @@ def test_opening_receipt_cannot_be_edited_or_invoiced(db):
     with pytest.raises(HTTPException) as e:
         pur.update_grn(num, pur.GoodsReceiptIn(grn_date="2026-01-01", supplier_code="S", lines=[]), db)
     assert e.value.status_code == 400
+
+
+def test_single_unit_template_without_factor_is_accepted(db):
+    t = inv.create_unit_template(UnitTemplateIn(code="U1", name="كرتون", base_unit="كرتون"), db)
+    assert t.higher_unit is None and float(t.factor) == 1
+    # عامل مُرسَل بلا وحدة أعلى يُتجاهل
+    t2 = inv.create_unit_template(UnitTemplateIn(code="U2", name="علبة", base_unit="علبة", factor=7), db)
+    assert float(t2.factor) == 1
+    # الوحدة الأعلى = الأساسية تُعامل كوحدة واحدة
+    t3 = inv.create_unit_template(UnitTemplateIn(code="U3", name="حبة مفردة", base_unit="حبة", higher_unit=" حبة "), db)
+    assert t3.higher_unit is None and float(t3.factor) == 1
+
+
+def test_two_unit_template_still_requires_factor_above_one(db):
+    with pytest.raises(HTTPException) as e:
+        inv.create_unit_template(UnitTemplateIn(code="U4", name="كرتون 1", base_unit="حبة", higher_unit="كرتون", factor=1), db)
+    assert e.value.status_code == 400 and "وحدة واحدة" in e.value.detail
+    ok = inv.create_unit_template(UnitTemplateIn(code="U5", name="كرتون 20", base_unit="حبة", higher_unit="كرتون", factor=20), db)
+    assert float(ok.factor) == 20
+
+
+def test_clearing_higher_unit_resets_factor(db):
+    t = inv.update_unit_template("T6", UnitTemplateUpdate(higher_unit=None), db)
+    assert t.higher_unit is None and float(t.factor) == 1
+    with pytest.raises(HTTPException):
+        inv.update_unit_template("T12", UnitTemplateUpdate(factor=1), db)
+
+
+def test_single_unit_template_can_be_linked_to_items(db):
+    inv.create_unit_template(UnitTemplateIn(code="U6", name="كرتون", base_unit="كرتون"), db)
+    it = inv.create_item(ItemIn(code="C1", name="س", unit="كرتون"), db)   # قالب واحد فقط بهذه الوحدة → ربط تلقائي
+    assert it.unit_template == "كرتون"

@@ -177,9 +177,16 @@ def create_unit_template(payload: UnitTemplateIn, db: Session = Depends(get_db))
         raise HTTPException(400, "كود قالب الوحدة مستخدم من قبل")
     if any(_norm_name(t.name) == _norm_name(payload.name) for t in db.query(UnitTemplate).all()):
         raise HTTPException(400, "اسم قالب الوحدات مستخدم من قبل")
-    if payload.higher_unit and (not payload.factor or payload.factor <= 1):
-        raise HTTPException(400, "معامل التحويل للوحدة الأعلى يجب أن يكون أكبر من 1")
-    tpl = UnitTemplate(**payload.model_dump())
+    data = payload.model_dump()
+    # قالب بوحدة واحدة (مثل «حبة» أو «كرتون»): بلا وحدة أعلى ولا معامل تحويل
+    if data.get("higher_unit") and _norm_name(data["higher_unit"]) == _norm_name(data["base_unit"]):
+        data["higher_unit"] = None
+    if not data.get("higher_unit"):
+        data["higher_unit"] = None
+        data["factor"] = 1
+    elif not data.get("factor") or data["factor"] <= 1:
+        raise HTTPException(400, "القالب بوحدتين يحتاج معامل تحويل أكبر من 1 (عدد الوحدات الأساسية في الوحدة الأعلى). لقالب بوحدة واحدة اترك الوحدة الأعلى فارغة")
+    tpl = UnitTemplate(**data)
     db.add(tpl)
     db.commit()
     db.refresh(tpl)
@@ -194,8 +201,13 @@ def update_unit_template(code: str, payload: UnitTemplateUpdate, db: Session = D
     data = payload.model_dump(exclude_unset=True)
     new_factor = data.get("factor", tpl.factor)
     new_higher = data.get("higher_unit", tpl.higher_unit)
-    if new_higher and (not new_factor or new_factor <= 1):
-        raise HTTPException(400, "معامل التحويل للوحدة الأعلى يجب أن يكون أكبر من 1")
+    if new_higher and _norm_name(new_higher) == _norm_name(data.get("base_unit", tpl.base_unit)):
+        new_higher = None
+    if not new_higher:
+        data["higher_unit"] = None   # قالب بوحدة واحدة: لا وحدة أعلى ولا معامل
+        data["factor"] = 1
+    elif not new_factor or new_factor <= 1:
+        raise HTTPException(400, "القالب بوحدتين يحتاج معامل تحويل أكبر من 1 (عدد الوحدات الأساسية في الوحدة الأعلى). لقالب بوحدة واحدة اترك الوحدة الأعلى فارغة")
     old_name = tpl.name
     linked = db.query(Item).filter(Item.unit_template == old_name)
     new_name = data.get("name")

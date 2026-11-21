@@ -9283,11 +9283,27 @@ window.submitResetTransactions = submitResetTransactions;
   };
   var baseSave = window.saveUnitTemplate;
   window.saveUnitTemplate = saveUnitTemplate = async function(){
-    var name=gv('utName'), base=gv('utBase'), hn=gv('utHigherName')||gv('utHigher');
+    var name=gv('utName'), base=gv('utBase'), higher=gv('utHigherName')||gv('utHigher');
     var factor=Number(gv('utFactor'))||1;
+    function same(a,b){ return String(a||'').trim().toLowerCase()===String(b||'').trim().toLowerCase(); }
+    function setv(id,v){ var e=document.getElementById(id); if(e) e.value=v; }
+    // قالب بوحدة واحدة (مثل «حبة» أو «كرتون»): بلا وحدة أعلى ولا معامل
+    var single=false, unit='';
+    if(!higher){ single=true; unit=base||name; }
+    else if(!base){
+      if(factor<=1){ single=true; unit=higher; }
+      else { msg('اكتب الوحدة الأساسية (مثل: حبة)', true); return; }
+    }
+    else if(same(base,higher)){ single=true; unit=base; }
+    else if(factor<=1){
+      msg('القالب بوحدتين يحتاج معامل تحويل أكبر من 1 (كم وحدة أساسية في الوحدة الأعلى). ولقالب بوحدة واحدة اترك الوحدة الأعلى فارغة', true); return;
+    }
+    if(single){
+      if(!unit){ msg('اكتب الوحدة (مثل: حبة أو كرتون)', true); return; }
+      if(!name) name=unit;
+      setv('utName',name); setv('utBase',unit); setv('utHigher',''); setv('utHigherName',''); setv('utFactor','1');
+    }
     if(!name){ msg('اكتب اسم القالب (مثل: كرتون شد 10 حبة)', true); return; }
-    if(hn && !base){ msg('اكتب الوحدة الأساسية (مثل: حبة)', true); return; }
-    if(hn && factor<=1){ msg('معامل التحويل يجب أن يكون أكبر من 1 (عدد الوحدات الأساسية في الوحدة الأعلى)', true); return; }
     await baseSave.apply(this, arguments);
     var f=document.getElementById('unitTemplateForm');
     if(f && f.style.display==='none'){      // أُغلق النموذج = نجح الحفظ في الخادم
