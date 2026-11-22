@@ -678,6 +678,9 @@ def delete_supplier(code: str, db: Session = Depends(get_db)):
         raise HTTPException(400, "لا يمكن حذف مورد له طلبات شراء")
     if db.query(GoodsReceipt).filter(GoodsReceipt.supplier_code == code).first():
         raise HTTPException(400, "لا يمكن حذف مورد له عمليات استلام")
+    from app.models.service_catalog import ServiceInvoice
+    if db.query(ServiceInvoice).filter(ServiceInvoice.direction == "purchase", ServiceInvoice.party_code == code).first():
+        raise HTTPException(400, "لا يمكن حذف مورد له فواتير خدمات")
     db.delete(s)
     db.commit()
     return None

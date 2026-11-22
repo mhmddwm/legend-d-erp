@@ -1313,6 +1313,8 @@ function journalSourceLabel(sourceType){
     purchase_invoice: 'فاتورة مشتريات',
     goods_receipt: 'استلام بضاعة',
     opening_stock: 'رصيد افتتاحي (مخزون)',
+    service_sales_invoice: 'فاتورة خدمات مبيعات',
+    service_purchase_invoice: 'فاتورة خدمات مشتريات',
   };
   if (!sourceType || sourceType === 'manual') {
     return { isSystem: false, text: 'يدوي' };

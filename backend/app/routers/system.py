@@ -23,6 +23,7 @@ from app.models.models import (
     SupplierPaymentAllocation,
 )
 from app.models.warehouse_stock import WarehouseStock
+from app.models.service_catalog import ServiceInvoice, ServiceInvoiceLine
 from app.models.audit_log import AuditLog
 
 
@@ -49,7 +50,7 @@ def reset_all_transactions(
 
     يُحذف: كل القيود المحاسبية، فواتير ومرتجعات ومدفوعات المشتريات،
     أوامر الشراء وأذون الاستلام، حركات المخزون، أرصدة المستودعات،
-    وسجل النشاط. وتُصفَّر كمية وتكلفة كل الأصناف إلى صفر.
+    وفواتير الخدمات وسجل النشاط. وتُصفَّر كمية وتكلفة كل الأصناف إلى صفر.
 
     عملية غير قابلة للتراجع عنها — تتطلب إرسال عبارة تأكيد حرفية."""
     if payload.confirm != RESET_CONFIRM_PHRASE:
@@ -78,6 +79,10 @@ def reset_all_transactions(
         # حركات وأرصدة المخزون
         db.query(StockMove).delete()
         db.query(WarehouseStock).delete()
+
+        # فواتير الخدمات (بطاقات الخدمات نفسها تبقى) — قبل القيود لأنها تشير إليها
+        db.query(ServiceInvoiceLine).delete()
+        db.query(ServiceInvoice).delete()
 
         # القيود المحاسبية وملحقاتها
         db.query(LineCostAllocation).delete()

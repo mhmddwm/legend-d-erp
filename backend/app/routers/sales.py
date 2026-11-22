@@ -88,7 +88,18 @@ def calc_receivable(db: Session, customer_code: str) -> float:
         .filter(SalesReturn.customer_code == customer_code, SalesReturn.status != "cancelled")
         .scalar()
     )
-    return float(invoiced or 0) - float(returned or 0)
+    from app.models.service_catalog import ServiceInvoice  # فواتير الخدمات الآجلة تدخل رصيد العميل
+    services = (
+        db.query(func.coalesce(func.sum(ServiceInvoice.total), 0))
+        .filter(
+            ServiceInvoice.direction == "sales",
+            ServiceInvoice.party_code == customer_code,
+            ServiceInvoice.status == "posted",
+            ServiceInvoice.payment_method == "credit",
+        )
+        .scalar()
+    )
+    return float(invoiced or 0) + float(services or 0) - float(returned or 0)
 
 
 # =========================================================
@@ -149,6 +160,9 @@ def delete_customer(code: str, db: Session = Depends(get_db)):
         raise HTTPException(404, "العميل غير موجود")
     if db.query(SalesInvoice).filter(SalesInvoice.customer_code == code).first():
         raise HTTPException(400, "لا يمكن حذف عميل عليه فواتير — يمكن إلغاء تنشيطه بدلاً من ذلك")
+    from app.models.service_catalog import ServiceInvoice
+    if db.query(ServiceInvoice).filter(ServiceInvoice.direction == "sales", ServiceInvoice.party_code == code).first():
+        raise HTTPException(400, "لا يمكن حذف عميل عليه فواتير خدمات — يمكن إلغاء تنشيطه بدلاً من ذلك")
     db.delete(customer)
     db.commit()
     return None

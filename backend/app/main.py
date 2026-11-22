@@ -25,6 +25,7 @@ from app.routers import (
     branches,
     reports,
     system,
+    service_catalog,
 )
 
 
@@ -267,6 +268,12 @@ app.include_router(
     permissions_catalog.router,
     dependencies=PROTECTED,
 )
+
+
+# Services (بطاقات الخدمات + فواتير خدمات المبيعات/المشتريات)
+app.include_router(service_catalog.router, dependencies=PROTECTED)
+app.include_router(service_catalog.sales_router, dependencies=PROTECTED)
+app.include_router(service_catalog.purchase_router, dependencies=PROTECTED)
 
 
 # Warehouse

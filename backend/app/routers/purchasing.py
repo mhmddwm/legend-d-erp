@@ -175,8 +175,15 @@ def _item_has_transactions(db: Session, item_code: str) -> bool:
     return any(checks)
 
 
+def _service_invoice_for(db: Session, direction: str, party_code: str):
+    from app.models.service_catalog import ServiceInvoice
+    return db.query(ServiceInvoice).filter(
+        ServiceInvoice.direction == direction, ServiceInvoice.party_code == party_code).first()
+
+
 def _supplier_has_transactions(db: Session, supplier_code: str) -> bool:
     checks = (
+        _service_invoice_for(db, "purchase", supplier_code),
         db.query(PurchaseOrder)
         .filter(PurchaseOrder.supplier_code == supplier_code)
         .first(),
@@ -195,7 +202,7 @@ def _supplier_has_transactions(db: Session, supplier_code: str) -> bool:
 
 def calc_payable(db: Session, supplier_code: str) -> float:
     """
-    الرصيد الحالي = فواتير الشراء المرحلة - مرتجعات الشراء.
+    الرصيد الحالي = فواتير الشراء المرحلة + فواتير الخدمات الآجلة - مرتجعات الشراء.
     لا يشمل سندات السداد لعدم وجود نموذج مدفوعات في الكود الحالي.
     """
     invoiced = (
@@ -213,7 +220,19 @@ def calc_payable(db: Session, supplier_code: str) -> float:
         .scalar()
     )
 
-    return _to_float(invoiced) - _to_float(returned)
+    from app.models.service_catalog import ServiceInvoice  # فواتير الخدمات الآجلة تدخل رصيد المورد
+    services = (
+        db.query(func.coalesce(func.sum(ServiceInvoice.total), 0))
+        .filter(
+            ServiceInvoice.direction == "purchase",
+            ServiceInvoice.party_code == supplier_code,
+            ServiceInvoice.status == "posted",
+            ServiceInvoice.payment_method == "credit",
+        )
+        .scalar()
+    )
+
+    return _to_float(invoiced) + _to_float(services) - _to_float(returned)
 
 
 # =========================================================

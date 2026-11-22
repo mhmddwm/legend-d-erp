@@ -374,6 +374,38 @@ def chk_opening_receipts(cur, a):
         "الأرصدة القديمة لا تظهر قيمتها في حساب المخزون 123؛ أعد إدخال الصنف أو أدخل قيداً افتتاحياً مجمّعاً."
 
 
+def chk_service_invoices(cur, a):
+    """فواتير الخدمات: كل فاتورة مرحّلة لها قيد مرحّل ومتوازن ومجاميعها تطابق أسطرها."""
+    no_entry = fetch(cur, """
+        SELECT i.inv_number FROM service_invoices i
+        LEFT JOIN journal_entries j ON j.id = i.journal_entry_id
+        WHERE i.status = 'posted' AND (j.id IS NULL OR j.status <> 'posted')
+        ORDER BY i.inv_number""")
+    live_entry = fetch(cur, """
+        SELECT i.inv_number FROM service_invoices i
+        JOIN journal_entries j ON j.id = i.journal_entry_id
+        WHERE i.status = 'cancelled' AND j.status = 'posted'
+        ORDER BY i.inv_number""")
+    bad_totals = fetch(cur, """
+        SELECT i.inv_number FROM service_invoices i
+        WHERE ABS(i.total - COALESCE((SELECT SUM(l.line_total) FROM service_invoice_lines l WHERE l.inv_number = i.inv_number), 0)) > 0.001
+           OR ABS(i.subtotal - COALESCE((SELECT SUM(l.net_amount) FROM service_invoice_lines l WHERE l.inv_number = i.inv_number), 0)) > 0.001
+           OR ABS(i.tax_amount - COALESCE((SELECT SUM(l.tax_amount) FROM service_invoice_lines l WHERE l.inv_number = i.inv_number), 0)) > 0.001
+        ORDER BY i.inv_number""")
+    unbalanced = fetch(cur, """
+        SELECT j.source_ref FROM journal_entries j
+        WHERE j.source_type IN ('service_sales_invoice', 'service_purchase_invoice') AND j.status = 'posted'
+          AND ABS((SELECT COALESCE(SUM(debit), 0) - COALESCE(SUM(credit), 0) FROM journal_entry_lines WHERE entry_id = j.id)) > 0.001
+        ORDER BY j.source_ref""")
+    rows = ([f"{r[0]}: فاتورة مرحّلة بلا قيد مرحّل" for r in no_entry]
+            + [f"{r[0]}: فاتورة ملغاة وقيدها ما زال مرحّلاً" for r in live_entry]
+            + [f"{r[0]}: مجاميع الفاتورة لا تطابق أسطرها" for r in bad_totals]
+            + [f"{r[0]}: قيد غير متوازن" for r in unbalanced])
+    if not rows:
+        return "ok", "فواتير الخدمات وقيودها متطابقة ومتوازنة", [], ""
+    return "error", f"{len(rows)} مشكلة في فواتير الخدمات", rows, "راجع الفواتير المذكورة؛ لا تعدّل القيود يدوياً."
+
+
 CHECKS = [
     ("الميزان العام", chk_global_totals),
     ("توازن القيود", chk_unbalanced_entries),
@@ -391,6 +423,7 @@ CHECKS = [
     ("البضاعة غير المفوترة", chk_grni),
     ("ارتباط الأصناف بالقوالب", chk_item_templates),
     ("أذون الرصيد الافتتاحي", chk_opening_receipts),
+    ("فواتير الخدمات وقيودها", chk_service_invoices),
 ]
 
 

@@ -164,6 +164,9 @@ ROUTE_MODULES = [
     ("/api/brands", "inventory"),
     ("/api/unit-templates", "inventory"),
     ("/api/price-lists", "inventory"),
+    ("/api/services", "inventory"),
+    ("/api/service-sales-invoices", "sales"),
+    ("/api/service-purchase-invoices", "purchasing"),
     ("/api/warehouses", "inventory"),
     ("/api/warehouse-stock", "inventory"),
     ("/api/warehouse-locations", "inventory"),
@@ -180,7 +183,7 @@ ROUTE_MODULES = [
 LOOKUP_READ_PREFIXES = (
     "/api/accounts", "/api/cost-centers", "/api/tax-types", "/api/branches",
     "/api/items", "/api/categories", "/api/brands", "/api/unit-templates",
-    "/api/price-lists", "/api/suppliers", "/api/customers",
+    "/api/price-lists", "/api/services", "/api/suppliers", "/api/customers",
     "/api/warehouses", "/api/warehouse-locations",
 )
 
