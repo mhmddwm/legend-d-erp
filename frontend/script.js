@@ -6720,7 +6720,7 @@ const MODULE_TAGS = {
   tree:'الحسابات', entry:'الحسابات', journal:'الحسابات', cost:'الحسابات',
   settings:'الحسابات', tax_settings:'الحسابات',
   items:'المخزون', services:'المخزون', stockmoves:'المخزون',
-  warehouses:'المخزون', prices:'المخزون', tracking:'المخزون', productsettings:'المخزون',
+  warehouses:'المخزون', prices:'المخزون', tracking:'المخزون', productsettings:'المخزون', unit_templates:'المخزون', unit_template_products:'المخزون',
   suppliers:'المشتريات', po:'المشتريات', grn:'المشتريات',
   pinvoice:'المشتريات', preturn:'المشتريات',
   purchase_request:'المشتريات', quotation_request:'المشتريات',
@@ -6984,8 +6984,8 @@ function utChainText(t){
  return unitLevelsOf(t).map(l=>{ const s=l.unit+' = '+(l.per_parent||l.factor)+' '+prev; prev=l.unit; return s; }).join(' ، ');
 }
 function exportUnitTemplates(){
- let csv='اسم القالب,الوحدة الاساسية,الوحدات الأعلى,معامل أكبر وحدة\n'+
- unitTemplates.map(t=>`"${t.name}","${t.base}","${utChainText(t)}",${unitLevelsOf(t).length?unitLevelsOf(t).slice(-1)[0].factor:''}`).join('\n');
+ let csv='اسم القالب,الوحدة الاساسية,الوحدات الأعلى,معامل أكبر وحدة,عدد المنتجات\n'+
+ unitTemplates.map(t=>`"${t.name}","${t.base}","${utChainText(t)}",${unitLevelsOf(t).length?unitLevelsOf(t).slice(-1)[0].factor:''},${(typeof utpProductsOf==='function'?utpProductsOf(t).length:0)}`).join('\n');
  let a=document.createElement('a');
  a.href='data:text/csv;charset=utf-8,'+encodeURIComponent(csv);
  a.download='unit_templates.csv';
@@ -7968,7 +7968,8 @@ window.openSubModule=openSubModule;
         <td>${esc2(t.base)}</td>
         <td>${esc2(utChainText(t))}</td>
         <td>${esc2(unitLevelsOf(t).length ? unitLevelsOf(t).slice(-1)[0].factor : '')}</td>
-      </tr>`).join('') : '<tr><td colspan="5" class="empty-msg">لا توجد قوالب وحدات</td></tr>';
+        <td>${utpCountCell(t)}</td>
+      </tr>`).join('') : '<tr><td colspan="6" class="empty-msg">لا توجد قوالب وحدات</td></tr>';
     window.unitTemplates=unitTemplates;
     setInfo('unit', page, list.length);
     if(typeof loadProductDropdowns==='function') loadProductDropdowns();
@@ -9188,7 +9189,9 @@ window.submitResetTransactions = submitResetTransactions;
   const origLoadAll = loadAll;
   loadAll = async function(){
     await window.syncUnitTemplates();
-    return origLoadAll.apply(this, arguments);
+    const res = await origLoadAll.apply(this, arguments);
+    try{ rerender(); if(typeof window.renderUnitTemplateProducts==='function') window.renderUnitTemplateProducts(); }catch(e){}
+    return res;
   };
 
   // ---- التحديد / التعديل / الحذف (المعرّف قد يكون نصاً) ----
@@ -9367,3 +9370,61 @@ window.submitResetTransactions = submitResetTransactions;
   document.addEventListener('DOMContentLoaded', function(){ refreshUnitNames(); render(); });
 })();
 
+/* ===== PF-01.10: عدد المنتجات المرتبطة بكل قالب وحدات + صفحة المنتجات المرتبطة ===== */
+(function(){
+  let currentCode = null;
+  const norm = v => String(v == null ? '' : v).split(/\s+/).filter(Boolean).join(' ').toLowerCase();
+  const escH = v => String(v == null ? '' : v).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+  const STATUS = { active:'نشط', paused:'موقوف', inactive:'غير نشط' };
+
+  // الارتباط = اسم القالب المحفوظ مع المنتج (نفس معيار الخادم عند حذف/تعديل القالب)
+  window.utpProductsOf = function(t){
+    if(!t) return [];
+    const name = norm(t.name);
+    const list = (typeof items !== 'undefined' && Array.isArray(items)) ? items : (window.items || []);
+    return list.filter(i => i && norm(i.unit_template) === name);
+  };
+  window.utpCountCell = function(t){
+    const n = window.utpProductsOf(t).length;
+    const key = escH(t.code != null ? t.code : t.id);
+    if(!n) return '<span style="color:#94a3b8">0</span>';
+    return '<a href="#" class="ut-count-link" style="color:#1565C0;font-weight:800;text-decoration:underline" ' +
+           'title="عرض المنتجات المرتبطة بهذا القالب" onclick="openUnitTemplateProducts(\'' + key + '\');return false">' + n + '</a>';
+  };
+  function findTpl(code){
+    return (window.unitTemplates || []).find(t => String(t.code != null ? t.code : t.id) === String(code)) || null;
+  }
+  window.renderUnitTemplateProducts = function(){
+    const body = document.getElementById('utpBody'); if(!body) return;
+    const t = findTpl(currentCode);
+    const title = document.getElementById('utpTitle');
+    const sum = document.getElementById('utpSummary');
+    if(!t){ body.innerHTML = '<tr><td colspan="8" class="empty-msg">القالب غير موجود</td></tr>'; return; }
+    const list = window.utpProductsOf(t);
+    if(title) title.textContent = 'المنتجات المرتبطة بالقالب: ' + t.name;
+    if(sum) sum.textContent = 'عدد المنتجات: ' + list.length;
+    if(!list.length){ body.innerHTML = '<tr><td colspan="8" class="empty-msg">لا توجد منتجات مرتبطة بهذا القالب</td></tr>'; return; }
+    const num = v => (typeof fmt === 'function') ? fmt(Number(v) || 0) : (Number(v) || 0);
+    const catName = i => { try{ return findCategoryName(i.category_code || i.category, i); }catch(e){ return i.category_code || ''; } };
+    body.innerHTML = list.map(i => {
+      const code = escH(i.code);
+      return '<tr>' +
+        '<td>' + code + '</td>' +
+        '<td><a href="#" style="color:#1565C0;font-weight:700" title="عرض المنتج" onclick="viewItem(\'' + String(i.code).replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/"/g,'&quot;') + '\');return false">' + escH(i.name) + '</a></td>' +
+        '<td>' + escH(catName(i)) + '</td>' +
+        '<td>' + escH(i.unit) + '</td>' +
+        '<td>' + num(i.qty) + '</td>' +
+        '<td>' + num(i.default_cost) + '</td>' +
+        '<td>' + num(i.price) + '</td>' +
+        '<td>' + escH(STATUS[i.status] || i.status || '') + '</td>' +
+      '</tr>';
+    }).join('');
+  };
+  window.openUnitTemplateProducts = function(code){
+    currentCode = code;
+    window.renderUnitTemplateProducts();
+    activateTab('unit_template_products');
+    // أبقِ «قوالب الوحدات» مظلّلة في القائمة الجانبية
+    document.querySelectorAll('.sb-item').forEach(it => it.classList.toggle('active', it.dataset.tab === 'unit_templates'));
+  };
+})();

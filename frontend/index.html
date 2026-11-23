@@ -3525,11 +3525,28 @@ html[dir="ltr"] .brand-center{direction:ltr;}
             <th>الوحدة الأساسية</th>
             <th>الوحدات الأعلى</th>
             <th>معامل أكبر وحدة</th>
+            <th>عدد المنتجات</th>
           </tr>
         </thead>
         <tbody id="unitTemplatesBody"></tbody>
       </table>
     </div>
+  </div>
+</div>
+<!-- صفحة المنتجات المرتبطة بقالب وحدات محدد -->
+<div class="panel" id="panel-unit_template_products">
+  <div class="formcard">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+      <h3 id="utpTitle">المنتجات المرتبطة بالقالب</h3>
+      <button type="button" class="btn secondary" onclick="activateTab('unit_templates')">→ رجوع إلى قوالب الوحدات</button>
+    </div>
+    <div id="utpSummary" style="margin:10px 0;font-weight:700;color:#1565C0"></div>
+    <div class="gridcard" style="margin-top:14px"><div class="scrollx">
+      <table class="grid">
+        <thead><tr><th>الكود</th><th>اسم المنتج</th><th>التصنيف</th><th>الوحدة الأساسية</th><th>الكمية</th><th>سعر الشراء</th><th>سعر البيع</th><th>الحالة</th></tr></thead>
+        <tbody id="utpBody"></tbody>
+      </table>
+    </div></div>
   </div>
 </div>
   <div class="panel" id="panel-cost">
@@ -4213,7 +4230,7 @@ table.uz-matrix input[type=checkbox]{width:16px;height:16px;cursor:pointer;accen
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script src="i18n.js?v=20260806"></script>
-<script src="script.js?v=20261112"></script>
+<script src="script.js?v=20261123"></script>
 <script src="users_roles.js?v=20260806"></script>
 <script>
 
