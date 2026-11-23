@@ -406,6 +406,30 @@ def chk_service_invoices(cur, a):
     return "error", f"{len(rows)} مشكلة في فواتير الخدمات", rows, "راجع الفواتير المذكورة؛ لا تعدّل القيود يدوياً."
 
 
+def chk_unit_template_levels(cur, a):
+    """مستويات قوالب الوحدات: المعامل التراكمي = حاصل ضرب النسب، وأكبر مستوى = higher_unit/factor."""
+    bad_chain = fetch(cur, """
+        SELECT template_code, level_no FROM (
+            SELECT template_code, level_no, per_parent, factor,
+                   LAG(factor) OVER (PARTITION BY template_code ORDER BY level_no) AS prev_factor
+            FROM unit_template_levels) x
+        WHERE ABS(factor - COALESCE(prev_factor, 1) * per_parent) > 0.01
+        ORDER BY template_code, level_no""")
+    bad_top = fetch(cur, """
+        SELECT t.code FROM unit_templates t
+        WHERE EXISTS (SELECT 1 FROM unit_template_levels l WHERE l.template_code = t.code)
+          AND (COALESCE(t.higher_unit, '') <> (SELECT unit_name FROM unit_template_levels l
+                                               WHERE l.template_code = t.code ORDER BY level_no DESC LIMIT 1)
+               OR ABS(t.factor - (SELECT factor FROM unit_template_levels l
+                                  WHERE l.template_code = t.code ORDER BY level_no DESC LIMIT 1)) > 0.01)
+        ORDER BY t.code""")
+    rows = ([f"{r[0]}: المستوى {r[1]} معامله لا يساوي حاصل ضرب النسب" for r in bad_chain]
+            + [f"{r[0]}: الوحدة الأعلى/المعامل لا يطابقان أكبر مستوى" for r in bad_top])
+    if not rows:
+        return "ok", "مستويات قوالب الوحدات متسقة", [], ""
+    return "error", f"{len(rows)} خلل في مستويات القوالب", rows, "أعد حفظ القالب من شاشة قوالب الوحدات."
+
+
 CHECKS = [
     ("الميزان العام", chk_global_totals),
     ("توازن القيود", chk_unbalanced_entries),
@@ -424,6 +448,7 @@ CHECKS = [
     ("ارتباط الأصناف بالقوالب", chk_item_templates),
     ("أذون الرصيد الافتتاحي", chk_opening_receipts),
     ("فواتير الخدمات وقيودها", chk_service_invoices),
+    ("مستويات قوالب الوحدات", chk_unit_template_levels),
 ]
 
 

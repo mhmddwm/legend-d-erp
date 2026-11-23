@@ -4,10 +4,12 @@ from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from app.opening_stock import create_opening_receipt, delete_item_with_opening, delete_plan
 from datetime import date as date_type
+from decimal import Decimal
 from app.database import get_db
-from app.models.models import Item, StockMove, Supplier, PurchaseInvoice, PurchaseReturn, Account, SupplierPayment, SupplierPaymentAllocation, Category, Brand, UnitTemplate, PriceList, PriceListItem
+from app.models.models import Item, StockMove, Supplier, PurchaseInvoice, PurchaseReturn, Account, SupplierPayment, SupplierPaymentAllocation, Category, Brand, UnitTemplate, PriceList, PriceListItem, UnitTemplateLevel
 from app.models.warehouse_stock import WarehouseStock
 from app.schemas.inventory import (
+    UnitTemplateLevelIn,
     ItemIn, ItemUpdate, ItemOut, StockMoveOut, SupplierIn, SupplierUpdate, SupplierOut,
     CategoryIn, CategoryUpdate, CategoryOut, BrandIn, BrandUpdate, BrandOut,
     UnitTemplateIn, UnitTemplateUpdate, UnitTemplateOut,
@@ -166,6 +168,60 @@ def _resolve_item_template(db, unit, unit_template):
     return None
 
 
+_MAX_LEVELS = 6
+_FACTOR_LIMIT = Decimal("1000000000")
+_FOUR = Decimal("0.0001")
+_ONE_UNIT_MSG = "القالب بوحدتين يحتاج معامل تحويل أكبر من 1 (عدد الوحدات الأساسية في الوحدة الأعلى). لقالب بوحدة واحدة اترك الوحدة الأعلى فارغة"
+
+
+def _build_levels(base_unit, raw_levels):
+    """يتحقق من مستويات القالب ويحسب المعامل التراكمي لكل مستوى.
+    مثال: حبة ← شدة (12) ← كرتون (6) تعطي معاملات 12 و72 بالنسبة للحبة."""
+    if len(raw_levels) > _MAX_LEVELS:
+        raise HTTPException(400, f"الحد الأقصى {_MAX_LEVELS} مستويات أعلى في القالب الواحد")
+    names = {_norm_name(base_unit)}
+    prev = (base_unit or "").strip()
+    cumulative = Decimal(1)
+    out = []
+    for i, lv in enumerate(raw_levels, start=1):
+        unit = (lv.unit or "").strip()
+        if not unit:
+            raise HTTPException(400, f"اكتب اسم الوحدة في المستوى {i}")
+        if len(unit) > 50:
+            raise HTTPException(400, f"اسم الوحدة «{unit[:20]}…» أطول من 50 حرفاً")
+        if _norm_name(unit) in names:
+            raise HTTPException(400, f"اسم الوحدة «{unit}» مكرر داخل القالب (أو يطابق الوحدة الأساسية)")
+        names.add(_norm_name(unit))
+        per = Decimal(str(lv.per_parent or 0)).quantize(_FOUR)
+        if per <= 1:
+            raise HTTPException(400, f"«{unit}» يجب أن تحتوي أكثر من وحدة واحدة من «{prev}» (أدخل رقماً أكبر من 1)")
+        cumulative = (cumulative * per).quantize(_FOUR)
+        if cumulative > _FACTOR_LIMIT:
+            raise HTTPException(400, f"معامل «{unit}» بالنسبة للأساسية كبير جداً — راجع الأرقام")
+        out.append(dict(unit=unit, per_parent=per, factor=cumulative))
+        prev = unit
+    return out
+
+
+def _legacy_levels(higher_unit, factor, base_unit):
+    """الحقلان القديمان (وحدة أعلى + معامل) = مستوى واحد."""
+    hu = (higher_unit or "").strip()
+    if not hu or _norm_name(hu) == _norm_name(base_unit):
+        return []
+    if not factor or float(factor) <= 1:
+        raise HTTPException(400, _ONE_UNIT_MSG)
+    return [UnitTemplateLevelIn(unit=hu, per_parent=float(factor))]
+
+
+def _apply_levels(tpl, built):
+    """يكتب المستويات المحسوبة ويحدّث higher_unit/factor (= أكبر مستوى)."""
+    tpl.higher_unit = built[-1]["unit"] if built else None
+    tpl.factor = built[-1]["factor"] if built else 1
+    tpl.levels.clear()
+    return [UnitTemplateLevel(level_no=i, unit_name=b["unit"], per_parent=b["per_parent"], factor=b["factor"])
+            for i, b in enumerate(built, start=1)]
+
+
 @unit_template_router.get("", response_model=list[UnitTemplateOut])
 def list_unit_templates(db: Session = Depends(get_db)):
     return db.query(UnitTemplate).order_by(UnitTemplate.code.asc()).all()
@@ -177,16 +233,13 @@ def create_unit_template(payload: UnitTemplateIn, db: Session = Depends(get_db))
         raise HTTPException(400, "كود قالب الوحدة مستخدم من قبل")
     if any(_norm_name(t.name) == _norm_name(payload.name) for t in db.query(UnitTemplate).all()):
         raise HTTPException(400, "اسم قالب الوحدات مستخدم من قبل")
-    data = payload.model_dump()
-    # قالب بوحدة واحدة (مثل «حبة» أو «كرتون»): بلا وحدة أعلى ولا معامل تحويل
-    if data.get("higher_unit") and _norm_name(data["higher_unit"]) == _norm_name(data["base_unit"]):
-        data["higher_unit"] = None
-    if not data.get("higher_unit"):
-        data["higher_unit"] = None
-        data["factor"] = 1
-    elif not data.get("factor") or data["factor"] <= 1:
-        raise HTTPException(400, "القالب بوحدتين يحتاج معامل تحويل أكبر من 1 (عدد الوحدات الأساسية في الوحدة الأعلى). لقالب بوحدة واحدة اترك الوحدة الأعلى فارغة")
-    tpl = UnitTemplate(**data)
+    base = payload.base_unit.strip()
+    raw_levels = payload.levels if payload.levels is not None else _legacy_levels(payload.higher_unit, payload.factor, base)
+    built = _build_levels(base, raw_levels)
+    tpl = UnitTemplate(code=payload.code, name=payload.name.strip(), base_unit=base,
+                       min_price=payload.min_price, max_price=payload.max_price)
+    new_levels = _apply_levels(tpl, built)
+    tpl.levels.extend(new_levels)
     db.add(tpl)
     db.commit()
     db.refresh(tpl)
@@ -199,27 +252,43 @@ def update_unit_template(code: str, payload: UnitTemplateUpdate, db: Session = D
     if not tpl:
         raise HTTPException(404, "قالب الوحدة غير موجود")
     data = payload.model_dump(exclude_unset=True)
-    new_factor = data.get("factor", tpl.factor)
-    new_higher = data.get("higher_unit", tpl.higher_unit)
-    if new_higher and _norm_name(new_higher) == _norm_name(data.get("base_unit", tpl.base_unit)):
-        new_higher = None
-    if not new_higher:
-        data["higher_unit"] = None   # قالب بوحدة واحدة: لا وحدة أعلى ولا معامل
-        data["factor"] = 1
-    elif not new_factor or new_factor <= 1:
-        raise HTTPException(400, "القالب بوحدتين يحتاج معامل تحويل أكبر من 1 (عدد الوحدات الأساسية في الوحدة الأعلى). لقالب بوحدة واحدة اترك الوحدة الأعلى فارغة")
+    for k in ("levels", "higher_unit", "factor"):
+        data.pop(k, None)
     old_name = tpl.name
     linked = db.query(Item).filter(Item.unit_template == old_name)
     new_name = data.get("name")
+    if new_name:
+        data["name"] = new_name = new_name.strip()
     if new_name and _norm_name(new_name) != _norm_name(old_name):
         if any(t.code != tpl.code and _norm_name(t.name) == _norm_name(new_name) for t in db.query(UnitTemplate).all()):
             raise HTTPException(400, "اسم قالب الوحدات مستخدم من قبل")
-    if "base_unit" in data and _norm_name(data["base_unit"]) != _norm_name(tpl.base_unit):
+    base_after = (data.get("base_unit") or tpl.base_unit).strip()
+    data.pop("base_unit", None)
+    if _norm_name(base_after) != _norm_name(tpl.base_unit):
         n = linked.count()
         if n:
             raise HTTPException(409, f"لا يمكن تغيير الوحدة الأساسية: {n} صنف مرتبط بهذا القالب. غيّر وحدة الأصناف أولاً")
+
+    fields = payload.model_fields_set
+    replace = True
+    if "levels" in fields:
+        raw_levels = payload.levels or []
+    elif "higher_unit" in fields or "factor" in fields:       # واجهة قديمة: مستوى واحد
+        raw_levels = _legacy_levels(
+            payload.higher_unit if "higher_unit" in fields else tpl.higher_unit,
+            payload.factor if "factor" in fields else tpl.factor, base_after)
+    else:                                                       # لا تغيير بالمستويات؛ نتحقق منها مع الأساسية الجديدة
+        raw_levels = [UnitTemplateLevelIn(unit=l.unit_name, per_parent=float(l.per_parent)) for l in tpl.effective_levels]
+        replace = False
+    built = _build_levels(base_after, raw_levels)
+
     for k, v in data.items():
         setattr(tpl, k, v)
+    tpl.base_unit = base_after
+    if replace:
+        new_levels = _apply_levels(tpl, built)
+        db.flush()                    # يحذف القديمة قبل إدراج الجديدة (قيد التفرد على level_no)
+        tpl.levels.extend(new_levels)
     if new_name and tpl.name != old_name:
         # الصنف يحفظ اسم القالب، فتغيير الاسم يجب أن ينعكس على الأصناف المرتبطة وإلا انقطع الارتباط
         linked.update({Item.unit_template: tpl.name}, synchronize_session=False)

@@ -26,6 +26,7 @@
     if(tplKey){
       const tpl=getUnitTemplates().find(t=>String(t.id||t.name||t.template_name||t.unitTemplateName)===String(tplKey)||String(t.name||t.template_name)===String(tplKey));
       if(tpl) out.push(...[tpl.base_unit,tpl.base,tpl.utBase,tpl.baseUnit,tpl.higher_unit,tpl.higher,tpl.utHigher,tpl.higherUnit,tpl.higher_name,tpl.utHigherName].filter(Boolean));
+      if(tpl && typeof window.unitLevelsOf==='function') out.push(...window.unitLevelsOf(tpl).map(l=>l.unit));
     }
     const unit=val(p,['base_unit','baseUnit','unit_base','unit','itemUnit','unit_name','item_unit']); if(unit)out.unshift(unit);
     out=[...new Set(out.map(x=>String(x).trim()).filter(Boolean))];

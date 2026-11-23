@@ -38,10 +38,14 @@
     t = t || {};
     var name = String(t.name == null ? '' : t.name).trim();
     var code = t.code != null ? t.code : (t.id != null ? t.id : name);
+    var higher = String(t.higher_unit != null ? t.higher_unit : (t.higherName || t.higher || '')).trim();
+    var levels = Array.isArray(t.levels) ? t.levels.map(function (l) {
+      return { unit: String(l.unit != null ? l.unit : (l.unit_name || '')).trim(), per_parent: Number(l.per_parent) || 0, factor: Number(l.factor) || 1 };
+    }).filter(function (l) { return l.unit; }) : [];
+    if (!levels.length && higher && Number(t.factor) > 1) levels = [{ unit: higher, per_parent: Number(t.factor), factor: Number(t.factor) }];
     return { code: String(code).trim(), name: name,
       base_unit: String(t.base_unit != null ? t.base_unit : (t.base || '')).trim(),
-      higher_unit: String(t.higher_unit != null ? t.higher_unit : (t.higherName || t.higher || '')).trim(),
-      factor: t.factor };
+      higher_unit: higher, factor: t.factor, levels: levels };
   }
   function mergeTemplates() { // قوائم متعددة (خادم + متصفح) بلا تكرار بالاسم
     var seen = {}, out = [];
@@ -56,8 +60,8 @@
   }
   function templateLabel(t) { return t.name || t.code; }
   function templateDetail(t) {
-    return (t.name || t.code) + ': ' + (t.base_unit || '—') + (t.higher_unit ? ' ← ' + t.higher_unit +
-      (t.factor ? ' × ' + t.factor : '') : '');
+    var lv = (t.levels || []).map(function (l) { return l.unit + ' × ' + l.factor; }).join(' ← ');
+    return (t.name || t.code) + ': ' + (t.base_unit || '—') + (lv ? ' ← ' + lv : '');
   }
 
   /* فهرس مرجعي: يبحث بالكود أولاً ثم بالاسم */
@@ -235,7 +239,10 @@
     var wh = (lists.warehouses || []).map(function (x) { return labelOf(x.code, x.name); });
     var unitsSet = {}; var units = [];
     ['حبة', 'كرتون', 'علبة', 'كيلو', 'جرام', 'لتر', 'متر', 'دزينة', 'طقم'].concat(
-      (lists.templates || []).reduce(function (a, t) { return a.concat([t.base_unit, t.higher_unit]); }, []))
+      (lists.templates || []).reduce(function (a, t) {
+        var n = normalizeTemplate(t);
+        return a.concat([n.base_unit], n.levels.map(function (l) { return l.unit; }));
+      }, []))
       .forEach(function (u) { u = String(u || '').trim(); if (u && !unitsSet[u]) { unitsSet[u] = 1; units.push(u); } });
 
     var columns = [ // ترتيب أعمدة الورقة المرجعية
@@ -685,7 +692,7 @@
       if (same.length === 1) tpl = same[0];
     }
     var out = [];
-    if (tpl) { out.push(unit || tpl.base_unit, tpl.base_unit, tpl.higher_unit); }
+    if (tpl) { out.push(unit || tpl.base_unit, tpl.base_unit); (tpl.levels || []).forEach(function (l) { out.push(l.unit); }); if (!(tpl.levels || []).length) out.push(tpl.higher_unit); }
     else {
       if (Array.isArray(p.units)) p.units.forEach(function (u) { out.push(typeof u === 'string' ? u : (u && (u.name || u.unit || u.label || u.unit_name))); });
       out.push(unit);

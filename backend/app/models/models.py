@@ -1,4 +1,5 @@
 from datetime import timedelta
+from types import SimpleNamespace
 
 from sqlalchemy import (
     Column, String, Numeric, Boolean, Date, DateTime, Integer,
@@ -728,6 +729,39 @@ class UnitTemplate(Base):
     max_price = Column(Numeric(18, 4), nullable=True)
     is_active = Column(Boolean, nullable=False, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    # مستويات الوحدات الأعلى بالترتيب (حبة ← شدة ← كرتون). higher_unit/factor أعلاه = أكبر مستوى (توافق)
+    levels = relationship(
+        "UnitTemplateLevel", cascade="all, delete-orphan", lazy="selectin",
+        order_by="UnitTemplateLevel.level_no",
+    )
+
+    @property
+    def effective_levels(self):
+        """المستويات المخزنة، أو مستوى واحد مستنتج من الحقلين القديمين لقالب قديم بلا صفوف مستويات."""
+        if self.levels:
+            return list(self.levels)
+        if self.higher_unit and self.factor is not None and float(self.factor) > 1:
+            return [SimpleNamespace(level_no=1, unit_name=self.higher_unit,
+                                    per_parent=self.factor, factor=self.factor)]
+        return []
+
+
+class UnitTemplateLevel(Base):
+    """مستوى وحدة أعلى داخل قالب: يحوي per_parent من الوحدة السابقة، ومعامله التراكمي factor بالأساسية."""
+    __tablename__ = "unit_template_levels"
+
+    id = Column(Integer, primary_key=True)
+    template_code = Column(String(30), ForeignKey("unit_templates.code", ondelete="CASCADE"), nullable=False)
+    level_no = Column(Integer, nullable=False)
+    unit_name = Column(String(50), nullable=False)
+    per_parent = Column(Numeric(18, 4), nullable=False)
+    factor = Column(Numeric(18, 4), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("template_code", "level_no", name="uq_utl_code_level"),
+        CheckConstraint("per_parent > 1 AND factor > 1", name="ck_utl_factors"),
+    )
 
 
 class PriceList(Base):

@@ -15,10 +15,10 @@ import pytest
 from fastapi import HTTPException
 
 from app.database import Base, SessionLocal, engine
-from app.models.models import Account, GoodsReceipt, GoodsReceiptLine, Item, JournalEntry, JournalEntryLine, PriceList, PriceListItem, StockMove, UnitTemplate
+from app.models.models import UnitTemplateLevel, Account, GoodsReceipt, GoodsReceiptLine, Item, JournalEntry, JournalEntryLine, PriceList, PriceListItem, StockMove, UnitTemplate
 from app.models.warehouse_stock import WarehouseStock
 from app.routers import inventory as inv
-from app.schemas.inventory import ItemIn, ItemUpdate, UnitTemplateIn, UnitTemplateUpdate
+from app.schemas.inventory import ItemIn, ItemUpdate, UnitTemplateIn, UnitTemplateLevelIn, UnitTemplateOut, UnitTemplateUpdate
 
 
 @pytest.fixture()
@@ -30,6 +30,7 @@ def db():
     s.query(StockMove).delete()
     s.query(WarehouseStock).delete()
     s.query(Item).delete()
+    s.query(UnitTemplateLevel).delete()
     s.query(UnitTemplate).delete()
     if not s.query(Account).filter(Account.code == '123').first():
         s.add_all([Account(code='123', name_ar='المخزون', account_type='assets'),
@@ -270,3 +271,97 @@ def test_single_unit_template_can_be_linked_to_items(db):
     inv.create_unit_template(UnitTemplateIn(code="U6", name="كرتون", base_unit="كرتون"), db)
     it = inv.create_item(ItemIn(code="C1", name="س", unit="كرتون"), db)   # قالب واحد فقط بهذه الوحدة → ربط تلقائي
     assert it.unit_template == "كرتون"
+
+
+# ===================== قوالب متعددة المستويات: حبة ← شدة ← كرتون =====================
+def L(unit, per):
+    return UnitTemplateLevelIn(unit=unit, per_parent=per)
+
+
+def mk(db, code="M1", name="كرتون شد 12", base="حبة", levels=None, **kw):
+    return inv.create_unit_template(UnitTemplateIn(code=code, name=name, base_unit=base, levels=levels, **kw), db)
+
+
+def test_multi_level_template_computes_cumulative_factors(db):
+    t = mk(db, levels=[L("شدة", 12), L("كرتون", 6)])
+    got = [(l.level_no, l.unit_name, float(l.per_parent), float(l.factor)) for l in t.effective_levels]
+    assert got == [(1, "شدة", 12.0, 12.0), (2, "كرتون", 6.0, 72.0)]
+    assert t.higher_unit == "كرتون" and float(t.factor) == 72          # الحقلان القديمان = أكبر مستوى
+    out = UnitTemplateOut.model_validate(t).model_dump()
+    assert [(l["unit"], l["per_parent"], l["factor"]) for l in out["levels"]] == [("شدة", 12.0, 12.0), ("كرتون", 6.0, 72.0)]
+
+
+def test_three_levels_and_decimal_ratio(db):
+    t = mk(db, levels=[L("علبة", 4), L("شدة", 2.5), L("كرتون", 6)])
+    assert [float(l.factor) for l in t.effective_levels] == [4.0, 10.0, 60.0]
+
+
+@pytest.mark.parametrize("levels,msg", [
+    ([L("شدة", 12), L("شدة", 6)], "مكرر"),                  # اسم مكرر
+    ([L("حبة", 12)], "مكرر"),                                # يطابق الأساسية
+    ([L(" ", 12)], "اكتب اسم الوحدة"),
+    ([L("شدة", 1)], "أكبر من 1"),
+    ([L("شدة", 0)], "أكبر من 1"),
+    ([L("شدة", 12), L("كرتون", 1)], "أكبر من 1"),
+    ([L("أ%d" % i, 2) for i in range(7)], "الحد الأقصى"),
+    ([L("شدة", 100000), L("كرتون", 100000)], "كبير جداً"),
+])
+def test_invalid_levels_rejected(db, levels, msg):
+    with pytest.raises(HTTPException) as e:
+        mk(db, levels=levels)
+    assert e.value.status_code == 400 and msg in e.value.detail
+    assert db.query(UnitTemplate).filter(UnitTemplate.code == "M1").count() == 0
+
+
+def test_legacy_payload_still_makes_single_level(db):
+    t = inv.create_unit_template(UnitTemplateIn(code="LG", name="قديم", base_unit="حبة", higher_unit="كرتون", factor=24), db)
+    assert [(l.unit_name, float(l.factor)) for l in t.effective_levels] == [("كرتون", 24.0)]
+
+
+def test_legacy_rows_without_level_rows_get_synthesized_level(db):
+    # T6 أُنشئ بالفيكستشر مباشرة (حقول قديمة فقط)
+    out = UnitTemplateOut.model_validate(db.query(UnitTemplate).filter(UnitTemplate.code == "T6").one()).model_dump()
+    assert [(l["unit"], l["factor"]) for l in out["levels"]] == [("كرتون", 6.0)]
+
+
+def test_update_replaces_levels_and_keeps_them_when_untouched(db):
+    mk(db, levels=[L("شدة", 12), L("كرتون", 6)])
+    t = inv.update_unit_template("M1", UnitTemplateUpdate(levels=[L("علبة", 10)]), db)
+    assert [(l.unit_name, float(l.factor)) for l in t.effective_levels] == [("علبة", 10.0)] and t.higher_unit == "علبة"
+    t = inv.update_unit_template("M1", UnitTemplateUpdate(min_price=3), db)            # لا تلمس المستويات
+    assert [l.unit_name for l in t.effective_levels] == ["علبة"] and float(t.min_price) == 3
+    t = inv.update_unit_template("M1", UnitTemplateUpdate(levels=[]), db)             # وحدة واحدة
+    assert t.effective_levels == [] and t.higher_unit is None and float(t.factor) == 1
+    assert db.query(UnitTemplateLevel).filter(UnitTemplateLevel.template_code == "M1").count() == 0
+
+
+def test_update_to_invalid_levels_changes_nothing(db):
+    mk(db, levels=[L("شدة", 12), L("كرتون", 6)])
+    with pytest.raises(HTTPException):
+        inv.update_unit_template("M1", UnitTemplateUpdate(levels=[L("شدة", 12), L("شدة", 5)]), db)
+    db.rollback()
+    t = db.query(UnitTemplate).filter(UnitTemplate.code == "M1").one()
+    assert [float(l.factor) for l in t.effective_levels] == [12.0, 72.0]
+
+
+def test_base_rename_blocked_when_linked_and_cannot_clash_with_level_name(db):
+    mk(db, levels=[L("شدة", 12), L("كرتون", 6)])
+    with pytest.raises(HTTPException):
+        inv.update_unit_template("M1", UnitTemplateUpdate(base_unit="شدة"), db)      # يطابق اسم مستوى
+    db.rollback()
+    inv.create_item(ItemIn(code="MM", name="س", unit="حبة", unit_template="كرتون شد 12"), db)
+    with pytest.raises(HTTPException) as e:
+        inv.update_unit_template("M1", UnitTemplateUpdate(base_unit="قطعة"), db)
+    assert e.value.status_code == 409
+
+
+def test_delete_template_removes_its_levels(db):
+    mk(db, levels=[L("شدة", 12), L("كرتون", 6)])
+    inv.delete_unit_template("M1", db)
+    assert db.query(UnitTemplateLevel).count() == 0
+
+
+def test_legacy_edit_of_multilevel_template_collapses_to_one_level(db):
+    mk(db, levels=[L("شدة", 12), L("كرتون", 6)])
+    t = inv.update_unit_template("M1", UnitTemplateUpdate(higher_unit="كرتون", factor=72), db)   # واجهة قديمة
+    assert [(l.unit_name, float(l.factor)) for l in t.effective_levels] == [("كرتون", 72.0)]

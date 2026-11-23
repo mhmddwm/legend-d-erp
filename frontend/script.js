@@ -2770,15 +2770,28 @@ function findUnitDisplay(value, templateId){
   return value || '';
 }
 
+// مستويات الوحدات الأعلى للقالب: [{unit, per_parent, factor}] — factor تراكمي بالنسبة للأساسية.
+// القوالب القديمة (وحدة أعلى واحدة) تُعامل كمستوى واحد.
+function unitLevelsOf(tpl){
+  if(!tpl) return [];
+  if(Array.isArray(tpl.levels) && tpl.levels.length){
+    return tpl.levels.map(l=>({unit:String(l.unit!=null?l.unit:(l.unit_name||'')).trim(), per_parent:Number(l.per_parent)||0, factor:Number(l.factor)||1})).filter(l=>l.unit);
+  }
+  const hn=String(tpl.higherName||tpl.higher||tpl.higher_unit||'').trim(), f=Number(tpl.factor)||1;
+  return hn && f>1 ? [{unit:hn, per_parent:f, factor:f}] : [];
+}
+window.unitLevelsOf = unitLevelsOf;
+
 function getTemplateUnitsForItem(item){
   item = item || {};
   const tpl = getItemUnitTemplate(item);
   const units=[];
   if(tpl){
     const base = tpl.base || tpl.name || item.unit || '';
-    const higher = tpl.higherName || tpl.higher || '';
     if(base) units.push({value:base, label:base, kind:'base', factor:1});
-    if(higher && !units.some(u=>String(u.value)===String(higher))) units.push({value:higher, label:higher + (tpl.factor ? ' × ' + tpl.factor : ''), kind:'higher', factor:Number(tpl.factor)||1});
+    unitLevelsOf(tpl).forEach(l=>{
+      if(!units.some(u=>String(u.value)===String(l.unit))) units.push({value:l.unit, label:l.unit + ' × ' + l.factor, kind:'higher', factor:l.factor});
+    });
   }
   const raw = item.unit || item.base_unit || item.baseUnit || '';
   if(raw && !units.some(u=>String(u.value)===String(raw))) units.unshift({value:raw, label:raw, kind:'base', factor:1});
@@ -2800,11 +2813,9 @@ function getItemUnitFactor(item, selectedUnit){
   const tpl = getItemUnitTemplate(item);
   if(!tpl) return 1;
   const base = String(tpl.base || tpl.name || '').trim();
-  const higher = String(tpl.higherName || tpl.higher || '').trim();
   const u = String(selectedUnit || item.display_unit || item.unit || base).trim();
-  const factor = Number(tpl.factor) || 1;
-  if(higher && u === higher) return factor;
-  return 1;
+  const lv = unitLevelsOf(tpl).find(l => l.unit === u);
+  return lv ? (Number(lv.factor) || 1) : 1;
 }
 
 function getItemDisplayValues(item){
@@ -6967,9 +6978,14 @@ function editSelectedUnitTemplate(){
  document.getElementById('utFactor').value=t.factor;
  openUnitTemplateForm();
 }
+function utChainText(t){
+ // شدة = 12 حبة ، كرتون = 6 شدة
+ let prev=String((t&&(t.base||t.name))||'');
+ return unitLevelsOf(t).map(l=>{ const s=l.unit+' = '+(l.per_parent||l.factor)+' '+prev; prev=l.unit; return s; }).join(' ، ');
+}
 function exportUnitTemplates(){
- let csv='اسم القالب,الوحدة الاساسية,الوحدة العليا,معامل التحويل\n'+
- unitTemplates.map(t=>`${t.name},${t.base},${t.higherName},${t.factor}`).join('\n');
+ let csv='اسم القالب,الوحدة الاساسية,الوحدات الأعلى,معامل أكبر وحدة\n'+
+ unitTemplates.map(t=>`"${t.name}","${t.base}","${utChainText(t)}",${unitLevelsOf(t).length?unitLevelsOf(t).slice(-1)[0].factor:''}`).join('\n');
  let a=document.createElement('a');
  a.href='data:text/csv;charset=utf-8,'+encodeURIComponent(csv);
  a.download='unit_templates.csv';
@@ -7950,8 +7966,8 @@ window.openSubModule=openSubModule;
         <td><input type="checkbox" class="utCheck" value="${esc2(t.id)}" onchange="showUnitActions()"></td>
         <td>${esc2(t.name)}</td>
         <td>${esc2(t.base)}</td>
-        <td>${esc2(t.higherName || t.higher || '')}</td>
-        <td>${esc2(t.factor)}</td>
+        <td>${esc2(utChainText(t))}</td>
+        <td>${esc2(unitLevelsOf(t).length ? unitLevelsOf(t).slice(-1)[0].factor : '')}</td>
       </tr>`).join('') : '<tr><td colspan="5" class="empty-msg">لا توجد قوالب وحدات</td></tr>';
     window.unitTemplates=unitTemplates;
     setInfo('unit', page, list.length);
@@ -8041,9 +8057,8 @@ window.openSubModule=openSubModule;
     const units=[];
     if(tpl){
       const base=tpl.base || tpl.name || '';
-      const higher=tpl.higherName || tpl.higher || '';
       if(base) units.push({value:String(base), label:String(base), factor:1});
-      if(higher && !units.some(u=>u.value===String(higher))) units.push({value:String(higher), label:String(higher), factor:Number(tpl.factor)||1});
+      unitLevelsOf(tpl).forEach(l=>{ if(!units.some(u=>u.value===String(l.unit))) units.push({value:String(l.unit), label:String(l.unit), factor:l.factor}); });
     }
     const raw=q('itemUnit')?.selectedOptions?.[0]?.textContent?.trim();
     if(raw && !/^اختر/.test(raw) && !units.some(u=>u.value===raw)) units.push({value:raw,label:raw,factor:1});
@@ -8237,9 +8252,8 @@ window.openSubModule=openSubModule;
     const units=[];
     if(tpl){
       const base=baseUnitFromTemplate(tpl);
-      const higher=String(tpl.higherName || tpl.higher || '').trim();
       if(base) units.push({value:base,label:base,kind:'base',factor:1});
-      if(higher && !units.some(u=>String(u.value)===higher)) units.push({value:higher,label:higher + ((Number(tpl.factor)||0)>1 ? ' × ' + (Number(tpl.factor)||1) : ''),kind:'higher',factor:Number(tpl.factor)||1});
+      unitLevelsOf(tpl).forEach(l=>{ if(!units.some(u=>String(u.value)===l.unit)) units.push({value:l.unit,label:l.unit + ' × ' + l.factor,kind:'higher',factor:l.factor}); });
     }
     return units;
   }
@@ -9114,13 +9128,18 @@ window.submitResetTransactions = submitResetTransactions;
 
   function fromServer(s){
     const hn = s.higher_unit || '';
+    const levels = Array.isArray(s.levels) ? s.levels.map(l => ({ unit:String(l.unit||'').trim(), per_parent:Number(l.per_parent)||0, factor:Number(l.factor)||1 })).filter(l => l.unit) : [];
+    // higher/higherName/factor = أكبر مستوى (توافق مع أي كود قديم)
     return { id:idOf(s.code), code:String(s.code), name:s.name, base:s.base_unit,
-             higher:hn, higherName:hn, factor:Number(s.factor)||1 };
+             higher:hn, higherName:hn, factor:Number(s.factor)||1, levels };
   }
   function toPayload(t){
+    const lv = (typeof unitLevelsOf === 'function') ? unitLevelsOf(t) : [];
     const hn = (t.higherName || t.higher || '').trim();
-    return { name:String(t.name).trim(), base_unit:String(t.base || t.name).trim(),
+    const p = { name:String(t.name).trim(), base_unit:String(t.base || t.name).trim(),
              higher_unit: hn || null, factor: Number(t.factor) || 1 };
+    if(lv.length) p.levels = lv.map(l => ({ unit:l.unit, per_parent:l.per_parent || l.factor }));
+    return p;
   }
   function readLocal(){
     try{ const v = JSON.parse(localStorage.getItem(UT_KEY) || '[]'); return Array.isArray(v) ? v : []; }
@@ -9172,60 +9191,9 @@ window.submitResetTransactions = submitResetTransactions;
     return origLoadAll.apply(this, arguments);
   };
 
-  // ---- فتح نموذج جديد يصفّر وضع التعديل ----
-  window.openUnitTemplateForm = openUnitTemplateForm = function(keepEditing){
-    if(keepEditing !== true){
-      editingUnitId = null;
-      ['utName','utBase','utHigher','utHigherName'].forEach(id => { const e = document.getElementById(id); if(e) e.value = ''; });
-      const f = document.getElementById('utFactor'); if(f) f.value = 1;
-    }
-    document.getElementById('unitTemplateForm').style.display = 'block';
-  };
-
-  // ---- الحفظ ----
-  window.saveUnitTemplate = saveUnitTemplate = async function(){
-    const g = id => document.getElementById(id);
-    const name = (g('utName').value || '').trim();
-    if(!name) return;
-    const base = (g('utBase').value || '').trim();
-    const hn = ((g('utHigherName').value || g('utHigher').value) || '').trim();
-    const factor = Number(g('utFactor').value) || 1;
-    const id = editingUnitId != null ? editingUnitId : String(Date.now());
-    const list = Array.isArray(unitTemplates) ? unitTemplates : [];
-    if(list.some(x => String(x.name).trim() === name && String(x.id) !== String(id))){ alert('اسم القالب موجود مسبقاً'); return; }
-    if(hn && factor <= 1){ alert('معامل التحويل للوحدة الأعلى يجب أن يكون أكبر من 1'); return; }
-    const payload = { name, base_unit: base || name, higher_unit: hn || null, factor };
-    try{
-      if(editingUnitId != null){
-        try{ await api('PUT', '/api/unit-templates/' + encodeURIComponent(String(id)), payload); }
-        catch(e){ await api('POST', '/api/unit-templates', Object.assign({code:String(id)}, payload)); }
-      }else{
-        await api('POST', '/api/unit-templates', Object.assign({code:String(id)}, payload));
-      }
-    }catch(e){ alert('تعذر حفظ القالب في الخادم: ' + e.message); return; }
-    const t = { id:idOf(id), code:String(id), name, base:payload.base_unit, higher:hn, higherName:hn, factor };
-    const exists = list.some(x => String(x.id) === String(id));
-    persist(exists ? list.map(x => String(x.id) === String(id) ? t : x) : list.concat([t]));
-    editingUnitId = null;
-    window.__unitTemplatePage = Math.max(1, Math.ceil(unitTemplates.length / (typeof pageSize !== 'undefined' ? pageSize : 10)));
-    rerender();
-    closeUnitTemplateForm();
-  };
-
   // ---- التحديد / التعديل / الحذف (المعرّف قد يكون نصاً) ----
   window.selectedUnitTemplates = selectedUnitTemplates = function(){
     return [...document.querySelectorAll('.utCheck:checked')].map(x => String(x.value));
-  };
-  window.editSelectedUnitTemplate = editSelectedUnitTemplate = function(){
-    const t = (unitTemplates || []).find(x => String(x.id) === selectedUnitTemplates()[0]);
-    if(!t) return;
-    editingUnitId = t.id;
-    document.getElementById('utName').value = t.name || '';
-    document.getElementById('utBase').value = t.base || '';
-    document.getElementById('utHigher').value = t.higher || t.higherName || '';
-    document.getElementById('utHigherName').value = t.higherName || t.higher || '';
-    document.getElementById('utFactor').value = t.factor || 1;
-    openUnitTemplateForm(true);
   };
   window.deleteSelectedUnitTemplates = deleteSelectedUnitTemplates = async function(){
     const ids = selectedUnitTemplates();
@@ -9243,6 +9211,8 @@ window.submitResetTransactions = submitResetTransactions;
 
   // ---- طلب الشراء: قائمة وحدات المنتج (الأساسية + الأعلى) من القالب ----
   // الصنف يحفظ الوحدة الأساسية فقط (item.unit)، فنطابق القالب عن طريقها.
+  window.__ut = { fromServer, persist, rerender, idOf };
+
   window.productUnits = function(p){
     if(!p) return ['حبة'];
     let out = [];
@@ -9252,12 +9222,15 @@ window.submitResetTransactions = submitResetTransactions;
   };
 })();
 
-
-/* ===== PF-01.6.3: شاشة قوالب الوحدات — قائمة وحدات جاهزة ورسائل حفظ واضحة ===== */
+/* ===== PF-01.9: قوالب وحدات متعددة المستويات (حبة ← شدة ← كرتون) ===== */
 (function(){
-  var COMMON = ['حبة','كرتون','علبة','كيس','دزينة','شد','باكت','زجاجة','قطعة','طرد','صندوق','عبوة','رول','لتر','كجم','جرام','متر'];
+  var COMMON=['حبة','كرتون','علبة','كيس','دزينة','شد','شدة','باكت','زجاجة','قطعة','طرد','صندوق','عبوة','رول','لتر','كجم','جرام','متر'];
+  var MAX_LEVELS=6;
+  var levels=[];                       // [{unit:'', per:''}] — المستويات الأعلى بالترتيب
   function gv(id){ var e=document.getElementById(id); return e ? String(e.value||'').trim() : ''; }
-  function msg(text, bad){
+  function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;'); }
+  function fmt(n){ return Number(n).toLocaleString('en-US',{maximumFractionDigits:4}); }
+  function msg(text,bad){
     try{
       var b=document.getElementById('utMsgBar');
       if(!b){ b=document.createElement('div'); b.id='utMsgBar';
@@ -9265,7 +9238,7 @@ window.submitResetTransactions = submitResetTransactions;
         document.body.appendChild(b); }
       b.style.background = bad ? '#b91c1c' : '#15803d';
       b.textContent = text; b.style.display='block';
-      clearTimeout(b._t); b._t=setTimeout(function(){ b.style.display='none'; }, bad ? 6000 : 2500);
+      clearTimeout(b._t); b._t=setTimeout(function(){ b.style.display='none'; }, bad ? 6500 : 2500);
     }catch(e){ alert(text); }
   }
   function refreshUnitNames(){
@@ -9274,46 +9247,123 @@ window.submitResetTransactions = submitResetTransactions;
     function add(u){ u=String(u||'').trim(); if(u && !seen[u]){ seen[u]=1; out.push(u); } }
     COMMON.forEach(add);
     (Array.isArray(window.unitTemplates)?window.unitTemplates:[]).forEach(function(t){
-      add(t.base||t.base_unit); add(t.higherName||t.higher||t.higher_unit); });
+      add(t.base||t.base_unit); unitLevelsOf(t).forEach(function(l){ add(l.unit); }); });
     (Array.isArray(window.items)?window.items:[]).forEach(function(i){ add(i.unit); });
-    dl.innerHTML = out.map(function(u){ return '<option value="'+u.replace(/&/g,'&amp;').replace(/"/g,'&quot;')+'">'; }).join('');
+    dl.innerHTML = out.map(function(u){ return '<option value="'+esc(u)+'">'; }).join('');
   }
-  var baseOpen = window.openUnitTemplateForm;
-  window.openUnitTemplateForm = openUnitTemplateForm = function(){
+
+  // ---------- عرض المستويات
+  function prevName(i){ return i===0 ? (gv('utBase')||gv('utName')||'الأساسية') : (levels[i-1].unit||'السابقة'); }
+  function render(){
+    var box=document.getElementById('utLevelsBox'); if(!box) return;
+    box.innerHTML = levels.map(function(l,i){
+      return '<div class="ut-level" data-i="'+i+'" style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap">'+
+        '<b style="min-width:70px">المستوى '+(i+1)+'</b>'+
+        '<input class="ut-lu" list="unitNamesList" autocomplete="off" placeholder="مثال: شدة" value="'+esc(l.unit)+'" style="flex:1 1 140px;min-width:110px">'+
+        '<span>تحوي</span>'+
+        '<input class="ut-lp" type="number" min="2" step="any" placeholder="12" value="'+esc(l.per)+'" style="width:90px">'+
+        '<b class="ut-prev"></b><span class="ut-eq" style="opacity:.8"></span>'+
+        '<button type="button" class="btn ut-ldel" data-i="'+i+'" title="حذف المستوى">✕</button></div>';
+    }).join('');
+    chain();
+  }
+  function chain(){
+    var box=document.getElementById('utLevelsBox'), sum=document.getElementById('utChain'); if(!box||!sum) return;
+    var base=gv('utBase')||gv('utName')||'الأساسية', cum=1, ok=true, last=null;
+    box.querySelectorAll('.ut-level').forEach(function(row,i){
+      var per=Number(levels[i].per), prev=prevName(i);
+      row.querySelector('.ut-prev').textContent=prev;
+      var eq=row.querySelector('.ut-eq');
+      if(ok && per>1){ cum=Math.round(cum*per*10000)/10000; eq.textContent='= '+fmt(cum)+' '+base; last=i; }
+      else { ok=false; eq.textContent=''; }
+    });
+    if(levels.length && ok){
+      var top=levels[levels.length-1], n=levels.length;
+      sum.textContent='1 '+top.unit+' = '+fmt(Number(top.per))+' '+prevName(n-1)+(n>1 ? ' = '+fmt(cum)+' '+base : '');
+    } else sum.textContent = levels.length ? 'أكمل اسم كل وحدة وعدد ما تحويه (رقم أكبر من 1).' : 'قالب بوحدة واحدة فقط ('+base+') — أضف مستوى إن كان للمنتج وحدات أكبر.';
+  }
+
+  document.addEventListener('input', function(e){
+    var t=e.target; if(!t || !t.closest) return;
+    var row=t.closest('#utLevelsBox .ut-level');
+    if(row){
+      var i=Number(row.getAttribute('data-i'));
+      if(t.classList.contains('ut-lu')) levels[i].unit=t.value; else if(t.classList.contains('ut-lp')) levels[i].per=t.value;
+      chain();
+    } else if(t.id==='utBase' || t.id==='utName') chain();
+  });
+  document.addEventListener('click', function(e){
+    var b=e.target && e.target.closest ? e.target.closest('.ut-ldel') : null; if(!b) return;
+    levels.splice(Number(b.getAttribute('data-i')),1); render();
+  });
+  window.addUnitTemplateLevel = function(){
+    if(levels.length>=MAX_LEVELS){ msg('الحد الأقصى '+MAX_LEVELS+' مستويات',true); return; }
+    levels.push({unit:'',per:''}); render();
+    var inputs=document.querySelectorAll('#utLevelsBox .ut-lu'); if(inputs.length) inputs[inputs.length-1].focus();
+  };
+
+  function resetForm(){
+    ['utName','utBase'].forEach(function(id){ var e=document.getElementById(id); if(e) e.value=''; });
+    levels=[]; render();
+  }
+
+  // ---------- فتح / تعديل
+  window.openUnitTemplateForm = openUnitTemplateForm = function(keepEditing){
+    if(keepEditing !== true){ editingUnitId=null; resetForm(); }
     refreshUnitNames();
-    if(baseOpen) baseOpen.apply(this, arguments);
+    document.getElementById('unitTemplateForm').style.display='block';
+    chain();
   };
-  var baseSave = window.saveUnitTemplate;
+  window.editSelectedUnitTemplate = editSelectedUnitTemplate = function(){
+    var t=(unitTemplates||[]).find(function(x){ return String(x.id)===selectedUnitTemplates()[0]; });
+    if(!t) return;
+    editingUnitId=t.id;
+    document.getElementById('utName').value=t.name||'';
+    document.getElementById('utBase').value=t.base||'';
+    levels=unitLevelsOf(t).map(function(l){ return {unit:l.unit, per:String(l.per_parent||l.factor)}; });
+    render();
+    openUnitTemplateForm(true);
+  };
+
+  // ---------- حفظ
   window.saveUnitTemplate = saveUnitTemplate = async function(){
-    var name=gv('utName'), base=gv('utBase'), higher=gv('utHigherName')||gv('utHigher');
-    var factor=Number(gv('utFactor'))||1;
-    function same(a,b){ return String(a||'').trim().toLowerCase()===String(b||'').trim().toLowerCase(); }
-    function setv(id,v){ var e=document.getElementById(id); if(e) e.value=v; }
-    // قالب بوحدة واحدة (مثل «حبة» أو «كرتون»): بلا وحدة أعلى ولا معامل
-    var single=false, unit='';
-    if(!higher){ single=true; unit=base||name; }
-    else if(!base){
-      if(factor<=1){ single=true; unit=higher; }
-      else { msg('اكتب الوحدة الأساسية (مثل: حبة)', true); return; }
+    var name=gv('utName'), base=gv('utBase');
+    var rows=levels.map(function(l){ return {unit:String(l.unit||'').trim(), per:String(l.per==null?'':l.per).trim()}; })
+                   .filter(function(l){ return l.unit || l.per; });
+    if(!base) base=name;               // قالب بوحدة واحدة: الاسم هو الوحدة
+    if(!base){ msg('اكتب اسم القالب أو الوحدة الأساسية',true); return; }
+    if(!name) name=base;
+    var seen={}; seen[base.toLowerCase()]=1; var out=[], prev=base;
+    for(var i=0;i<rows.length;i++){
+      var r=rows[i];
+      if(!r.unit){ msg('اكتب اسم الوحدة في المستوى '+(i+1),true); return; }
+      var per=Number(r.per);
+      if(!(per>1)){ msg('كم تحوي «'+r.unit+'» من «'+prev+'»؟ أدخل رقماً أكبر من 1',true); return; }
+      var key=r.unit.toLowerCase();
+      if(seen[key]){ msg('اسم الوحدة «'+r.unit+'» مكرر داخل القالب',true); return; }
+      seen[key]=1; out.push({unit:r.unit, per_parent:per}); prev=r.unit;
     }
-    else if(same(base,higher)){ single=true; unit=base; }
-    else if(factor<=1){
-      msg('القالب بوحدتين يحتاج معامل تحويل أكبر من 1 (كم وحدة أساسية في الوحدة الأعلى). ولقالب بوحدة واحدة اترك الوحدة الأعلى فارغة', true); return;
-    }
-    if(single){
-      if(!unit){ msg('اكتب الوحدة (مثل: حبة أو كرتون)', true); return; }
-      if(!name) name=unit;
-      setv('utName',name); setv('utBase',unit); setv('utHigher',''); setv('utHigherName',''); setv('utFactor','1');
-    }
-    if(!name){ msg('اكتب اسم القالب (مثل: كرتون شد 10 حبة)', true); return; }
-    await baseSave.apply(this, arguments);
-    var f=document.getElementById('unitTemplateForm');
-    if(f && f.style.display==='none'){      // أُغلق النموذج = نجح الحفظ في الخادم
-      ['utName','utBase','utHigher','utHigherName'].forEach(function(id){ var e=document.getElementById(id); if(e) e.value=''; });
-      var fe=document.getElementById('utFactor'); if(fe) fe.value='1';
-      msg('تم حفظ القالب «'+name+'»', false);
-    }
+    var id = editingUnitId!=null ? editingUnitId : String(Date.now());
+    var list = Array.isArray(unitTemplates) ? unitTemplates : [];
+    if(list.some(function(x){ return String(x.name).trim()===name && String(x.id)!==String(id); })){ msg('اسم القالب موجود مسبقاً',true); return; }
+    var payload={name:name, base_unit:base, levels:out}, saved;
+    try{
+      if(editingUnitId!=null){
+        try{ saved=await api('PUT','/api/unit-templates/'+encodeURIComponent(String(id)), payload); }
+        catch(e){ if(!/غير موجود|not found/i.test(e.message)) throw e; saved=await api('POST','/api/unit-templates', Object.assign({code:String(id)}, payload)); }
+      } else {
+        saved=await api('POST','/api/unit-templates', Object.assign({code:String(id)}, payload));
+      }
+    }catch(e){ msg('تعذر حفظ القالب: '+e.message,true); return; }
+    var U=window.__ut, t=U.fromServer(saved);
+    var exists=list.some(function(x){ return String(x.id)===String(id); });
+    U.persist(exists ? list.map(function(x){ return String(x.id)===String(id)?t:x; }) : list.concat([t]));
+    editingUnitId=null;
+    window.__unitTemplatePage = Math.max(1, Math.ceil(unitTemplates.length / (typeof pageSize !== 'undefined' ? pageSize : 10)));
+    U.rerender(); closeUnitTemplateForm(); resetForm();
+    msg('تم حفظ القالب «'+name+'»'+(out.length ? ' ('+out.length+' '+(out.length===1?'مستوى':'مستويات')+')' : ''), false);
   };
-  document.addEventListener('DOMContentLoaded', refreshUnitNames);
+
+  document.addEventListener('DOMContentLoaded', function(){ refreshUnitNames(); render(); });
 })();
 

@@ -3498,10 +3498,13 @@ html[dir="ltr"] .brand-center{direction:ltr;}
       <div class="frow">
         <div class="field"><label>اسم القالب</label><input id="utName" placeholder="كرتون شد 10 حبات"></div>
         <div class="field"><label>الوحدة الأساسية</label><input id="utBase" list="unitNamesList" autocomplete="off" placeholder="حبة"></div>
-        <div class="field"><label>الوحدة الأعلى</label><input id="utHigher" list="unitNamesList" autocomplete="off" placeholder="اختياري"></div>
-        <div class="field"><label>اسم الوحدة الأعلى</label><input id="utHigherName" list="unitNamesList" autocomplete="off" placeholder="اختياري"></div>
-        <div class="field"><label>معامل التحويل</label><input id="utFactor" type="number" value="1"></div>
-        <div class="field" style="flex:1 1 100%;font-size:12px;opacity:.8">قالب بوحدة واحدة (مثل حبة أو كرتون): اكتب الوحدة الأساسية فقط واترك الوحدة الأعلى والمعامل. قالب بوحدتين (مثل كرتون شد 10 حبات): أدخل الأساسية والأعلى ومعامل تحويل أكبر من 1.</div>
+        <div class="field" style="flex:1 1 100%">
+          <label>الوحدات الأعلى (اختياري)</label>
+          <div id="utLevelsBox"></div>
+          <button type="button" class="btn" onclick="addUnitTemplateLevel()">＋ إضافة مستوى</button>
+          <div id="utChain" style="margin-top:10px;font-weight:700;color:#1565C0"></div>
+          <div style="margin-top:6px;font-size:12px;opacity:.8">مثال: حبة ← شدة (تحوي 12 حبة) ← كرتون (يحوي 6 شدات = 72 حبة). اترك المستويات فارغة لقالب بوحدة واحدة (مثل حبة أو كرتون).</div>
+        </div>
       </div>
       <button class="btn" onclick="saveUnitTemplate()">حفظ القالب</button>
       <button class="btn" onclick="closeUnitTemplateForm()">إلغاء</button>
@@ -3520,8 +3523,8 @@ html[dir="ltr"] .brand-center{direction:ltr;}
             <th><input type="checkbox" onchange="toggleAllUnitTemplates(this)"></th>
             <th>اسم القالب</th>
             <th>الوحدة الأساسية</th>
-            <th>الوحدة الأعلى</th>
-            <th>معامل التحويل</th>
+            <th>الوحدات الأعلى</th>
+            <th>معامل أكبر وحدة</th>
           </tr>
         </thead>
         <tbody id="unitTemplatesBody"></tbody>
@@ -4761,9 +4764,8 @@ table.uz-matrix input[type=checkbox]{width:16px;height:16px;cursor:pointer;accen
     const units=[];
     if(tpl){
       const base=tpl.base || tpl.name || '';
-      const higher=tpl.higherName || tpl.higher || '';
       if(base) units.push({value:String(base), label:String(base), factor:1});
-      if(higher && !units.some(u=>u.value===String(higher))) units.push({value:String(higher), label:String(higher), factor:Number(tpl.factor)||1});
+      unitLevelsOf(tpl).forEach(l=>{ if(!units.some(u=>u.value===String(l.unit))) units.push({value:String(l.unit), label:String(l.unit), factor:l.factor}); });
     }
     const raw=q('itemUnit')?.selectedOptions?.[0]?.textContent?.trim();
     if(raw && !/^اختر/.test(raw) && !units.some(u=>u.value===raw)) units.push({value:raw,label:raw,factor:1});
@@ -4936,9 +4938,8 @@ table.uz-matrix input[type=checkbox]{width:16px;height:16px;cursor:pointer;accen
     const units=[];
     if(tpl){
       const base=baseUnitFromTemplate(tpl);
-      const higher=String(tpl.higherName || tpl.higher || '').trim();
       if(base) units.push({value:base,label:base,kind:'base',factor:1});
-      if(higher && !units.some(u=>String(u.value)===higher)) units.push({value:higher,label:higher + ((Number(tpl.factor)||0)>1 ? ' × ' + (Number(tpl.factor)||1) : ''),kind:'higher',factor:Number(tpl.factor)||1});
+      unitLevelsOf(tpl).forEach(l=>{ if(!units.some(u=>String(u.value)===l.unit)) units.push({value:l.unit,label:l.unit + ' × ' + l.factor,kind:'higher',factor:l.factor}); });
     }
     return units;
   }
@@ -6045,6 +6046,7 @@ table.uz-matrix input[type=checkbox]{width:16px;height:16px;cursor:pointer;accen
     if(tplKey){
       const tpl=getUnitTemplates().find(t=>String(t.id||t.name||t.template_name||t.unitTemplateName)===String(tplKey)||String(t.name||t.template_name)===String(tplKey));
       if(tpl) out.push(...[tpl.base_unit,tpl.base,tpl.utBase,tpl.baseUnit,tpl.higher_unit,tpl.higher,tpl.utHigher,tpl.higherUnit,tpl.higher_name,tpl.utHigherName].filter(Boolean));
+      if(tpl && typeof unitLevelsOf==='function') out.push(...unitLevelsOf(tpl).map(l=>l.unit));
     }
     const unit=val(p,['base_unit','baseUnit','unit_base','unit','itemUnit','unit_name','item_unit']); if(unit)out.unshift(unit);
     out=[...new Set(out.map(x=>String(x).trim()).filter(Boolean))];
@@ -7003,10 +7005,12 @@ table.uz-matrix input[type=checkbox]{width:16px;height:16px;cursor:pointer;accen
     if(!out.length && p.unit_template){
       const tpl=getUnitTemplates().find(t=>String(t.id||t.name||t.template_name)===String(p.unit_template)||String(t.name||t.template_name)===String(p.unit_template));
       if(tpl) out=[tpl.base_unit,tpl.base,tpl.utBase,tpl.higher_unit,tpl.higher,tpl.utHigher,tpl.higher_name,tpl.utHigherName].filter(Boolean);
+      if(tpl && typeof unitLevelsOf==='function') out=out.concat(unitLevelsOf(tpl).map(l=>l.unit));
     }
     if(!out.length && unit){
       const tpl=getUnitTemplates().find(t=>String(t.id||t.name||t.template_name)===String(unit)||String(t.name||t.template_name)===String(unit));
       if(tpl) out=[tpl.base_unit,tpl.base,tpl.utBase,tpl.higher_unit,tpl.higher,tpl.utHigher,tpl.higher_name,tpl.utHigherName].filter(Boolean);
+      if(tpl && typeof unitLevelsOf==='function') out=out.concat(unitLevelsOf(tpl).map(l=>l.unit));
       else out=[unit];
     }
     if(base && !out.includes(base)) out.unshift(base);
@@ -7118,6 +7122,7 @@ table.uz-matrix input[type=checkbox]{width:16px;height:16px;cursor:pointer;accen
     const tpls=getUnitTemplates();
     const tpl=tpls.find(t=>String(val(t,['id','name','template_name','title']))===String(tplName||unit));
     if(!out.length && tpl) out=[val(tpl,['base_unit','base','utBase','baseUnit']),val(tpl,['higher_unit','higher','utHigher','higher_name','utHigherName']),val(tpl,['unit2','second_unit']),val(tpl,['unit3','third_unit'])].filter(Boolean);
+    if(tpl && typeof unitLevelsOf==='function') out=out.concat(unitLevelsOf(tpl).map(l=>l.unit));
     if(unit && !out.includes(unit)) out.unshift(unit); if(base && !out.includes(base)) out.unshift(base);
     out=[...new Set(out.filter(Boolean))]; return out.length?out:['حبة'];
   }

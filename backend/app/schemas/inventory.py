@@ -1,5 +1,5 @@
-from pydantic import BaseModel, Field
-from typing import Optional
+from pydantic import BaseModel, ConfigDict, Field
+from typing import List, Optional
 from datetime import date
 
 
@@ -174,12 +174,27 @@ class SupplierOut(BaseModel):
     class Config:
         from_attributes = True
 
+class UnitTemplateLevelIn(BaseModel):
+    unit: str                 # اسم الوحدة (شدة / كرتون ...)
+    per_parent: float         # كم تحوي من الوحدة السابقة (الأولى: من الوحدة الأساسية)
+
+
+class UnitTemplateLevelOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+    level_no: int = 1
+    unit: str = Field(validation_alias="unit_name")
+    per_parent: float
+    factor: float             # المعامل التراكمي بالنسبة للوحدة الأساسية
+
+
 class UnitTemplateIn(BaseModel):
     code: str
     name: str
     base_unit: str
+    # القالب متعدد المستويات: ترسل levels. الحقلان القديمان (higher_unit + factor) يعنيان مستوى واحداً
     higher_unit: Optional[str] = None
     factor: float = 1
+    levels: Optional[List[UnitTemplateLevelIn]] = None
     min_price: Optional[float] = None
     max_price: Optional[float] = None
 
@@ -189,23 +204,23 @@ class UnitTemplateUpdate(BaseModel):
     base_unit: Optional[str] = None
     higher_unit: Optional[str] = None
     factor: Optional[float] = None
+    levels: Optional[List[UnitTemplateLevelIn]] = None
     min_price: Optional[float] = None
     max_price: Optional[float] = None
     is_active: Optional[bool] = None
 
 
 class UnitTemplateOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
     code: str
     name: str
     base_unit: str
-    higher_unit: Optional[str] = None
-    factor: float = 1
+    higher_unit: Optional[str] = None     # أكبر مستوى (للتوافق)
+    factor: float = 1                     # معامل أكبر مستوى (للتوافق)
+    levels: List[UnitTemplateLevelOut] = Field(default_factory=list, validation_alias="effective_levels")
     min_price: Optional[float] = None
     max_price: Optional[float] = None
     is_active: bool = True
-
-    class Config:
-        from_attributes = True
 
 
 class PriceListIn(BaseModel):
