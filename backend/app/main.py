@@ -26,6 +26,7 @@ from app.routers import (
     reports,
     system,
     service_catalog,
+    account_settings,
 )
 
 
@@ -134,6 +135,11 @@ app.include_router(
 
 app.include_router(
     accounting.tax_type_router,
+    dependencies=PROTECTED,
+)
+
+app.include_router(
+    account_settings.router,
     dependencies=PROTECTED,
 )
 

@@ -15,6 +15,7 @@ from fastapi import HTTPException
 from sqlalchemy import inspect
 from sqlalchemy.exc import IntegrityError
 
+from app.account_defaults import get_default_account
 from app.models.audit_log import AuditLog
 from app.models.models import (
     Account, DeliveryNoteLine, GoodsReceipt, GoodsReceiptLine, JournalEntry, JournalEntryLine,
@@ -77,14 +78,16 @@ def create_opening_receipt(db, item, qty, unit_cost, warehouse_id=None, location
 
     inv = eq = None
     if total > 0:
-        inv = db.query(Account).filter(Account.code == INVENTORY_ACCOUNT).first()
+        inv_code = get_default_account(db, "inventory")
+        inv = db.query(Account).filter(Account.code == inv_code).first()
         if not inv:
-            raise HTTPException(400, "حساب المخزون (123) غير موجود بدليل الحسابات — لا يمكن ترحيل قيد الرصيد الافتتاحي")
-        eq = db.query(Account).filter(Account.code == OPENING_EQUITY_ACCOUNT).first()
+            raise HTTPException(400, f"حساب المخزون ({inv_code}) غير موجود بدليل الحسابات — لا يمكن ترحيل قيد الرصيد الافتتاحي")
+        eq_code = get_default_account(db, "opening_equity")
+        eq = db.query(Account).filter(Account.code == eq_code).first()
         if not eq:
             raise HTTPException(
                 400,
-                "حساب «أرصدة افتتاحية — مخزون» (34) غير موجود — طبّق الهجرة 035 (python ../scripts/migrate.py apply)",
+                f"حساب «أرصدة افتتاحية — مخزون» ({eq_code}) غير موجود — طبّق الهجرة 035 (python ../scripts/migrate.py apply)",
             )
 
     today = date_type.today()

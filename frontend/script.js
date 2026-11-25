@@ -6787,6 +6787,9 @@ function activateTab(tabKey) {
     populatePurchaseSettingsForm();
   }
 
+  // شاشة إعدادات الحسابات: تحميل الحالة والاقتراحات عند فتحها
+  if (tabKey === 'settings' && window.AcctSettings) { window.AcctSettings.open(); }
+
   // تحديث القائمة الأفقية
   document.querySelectorAll('.nav-dd-item').forEach(it => {
     it.classList.toggle('active', it.dataset.tab === tabKey);
@@ -9426,5 +9429,275 @@ window.submitResetTransactions = submitResetTransactions;
     activateTab('unit_template_products');
     // أبقِ «قوالب الوحدات» مظلّلة في القائمة الجانبية
     document.querySelectorAll('.sb-item').forEach(it => it.classList.toggle('active', it.dataset.tab === 'unit_templates'));
+  };
+})();
+
+/* ===== PF-01.11: شاشة إعدادات الحسابات (حسابات افتراضية + مساعد ذكي + توافق Odoo/SAP/Oracle) ===== */
+(function(){
+  const S = { state:null, sugg:null, draft:{}, resets:{}, auditFilter:'all', fmtTouched:false,
+              preview:null, text:'', fname:'', acceptInferred:false, busy:false };
+  const $ = id => document.getElementById(id);
+  const esc = v => String(v == null ? '' : v).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+  const SEV = { error:['error','✕ خطأ'], warn:['warn','! تحذير'], info:['info','ℹ معلومة'] };
+  const CONF = { high:'ثقة عالية', medium:'ثقة متوسطة', low:'ثقة منخفضة' };
+  const PROFILES = [
+    { k:'generic', n:'الصيغة العامة', d:'صيغة النظام الأصلية (كود، اسم عربي/إنجليزي، نوع، طبيعة، حساب رئيسي).' },
+    { k:'odoo',    n:'Odoo',    d:'Odoo 16/17+: account.account — code, name, account_type, reconcile.' },
+    { k:'sap',     n:'SAP',     d:'SAP S/4HANA / ECC: بيانات أساس حساب الأستاذ (G/L Account Master).' },
+    { k:'oracle',  n:'Oracle',  d:'Oracle Fusion / EBS: قيم شريحة الحساب الطبيعي (Natural Account).' }
+  ];
+  const TYPE_MAP = [
+    ['أصول','assets','asset_current / asset_cash / asset_receivable / asset_fixed','ASSET + ميزانية (X)','Asset'],
+    ['خصوم','liabilities','liability_current / liability_payable / liability_non_current','LIABL + ميزانية (X)','Liability'],
+    ['حقوق ملكية','equity','equity','EQUTY + ميزانية (X)',"Owners' Equity"],
+    ['إيرادات','revenue','income / income_other','REVEN + أرباح وخسائر','Revenue'],
+    ['مصروفات','expenses','expense / expense_direct_cost / expense_depreciation','EXPNS + أرباح وخسائر','Expense']
+  ];
+
+  const dirty = () => (S.state ? S.state.roles : []).some(r => S.resets[r.key] || (S.draft[r.key] != null && S.draft[r.key] !== r.code));
+  const draftOf = r => (S.draft[r.key] != null ? S.draft[r.key] : r.code);
+  const topSugg = key => { const s = (S.sugg || []).find(x => x.role === key); return s && s.candidates[0] ? s : null; };
+  const nSuggestions = () => (S.sugg || []).filter(s => s.differs && s.candidates[0] && s.candidates[0].confidence !== 'low').length;
+
+  async function load(){
+    try{
+      const [st, sg] = await Promise.all([api('GET','/api/account-settings'), api('GET','/api/account-settings/suggest')]);
+      S.state = st; S.sugg = sg.suggestions; S.draft = {}; S.resets = {};
+      renderAll();
+    }catch(e){
+      ['asOverview','asRoles','asAudit','asErp'].forEach(id => { const b = $(id); if(b) b.innerHTML = '<div class="as-empty">تعذّر تحميل الإعدادات: ' + esc(e.message) + '<br>تأكد من تطبيق الهجرة 038 وإعادة تشغيل الخادم.</div>'; });
+    }
+  }
+
+  // ---------------------------------------------------------------- الرأس
+  function renderHero(){
+    const st = S.state; if(!st) return;
+    const ring = $('asRing'); const sc = st.score;
+    ring.style.setProperty('--p', sc);
+    ring.style.setProperty('--rc', sc >= 90 ? '#22c55e' : sc >= 70 ? '#84cc16' : sc >= 40 ? '#f59e0b' : '#ef4444');
+    $('asScore').textContent = sc; $('asGrade').textContent = st.grade;
+  }
+
+  // ---------------------------------------------------------------- نظرة عامة
+  function renderOverview(){
+    const st = S.state, box = $('asOverview'); if(!st) return;
+    const custom = st.roles.filter(r => r.source === 'custom').length;
+    const top = st.issues.filter(i => i.severity !== 'info').slice(0, 5);
+    const n = nSuggestions();
+    let h = '';
+    if(n){
+      h += '<div class="as-banner"><span>✨ وجد المساعد <b>' + n + '</b> اقتراح لتحسين الحسابات الافتراضية.</span>' +
+           '<button class="btn" onclick="AcctSettings.show(\'roles\')">مراجعة الاقتراحات</button></div>';
+    }
+    h += '<div class="as-cards">' +
+      '<div class="as-stat"><b>' + st.stats.accounts + '</b><span>إجمالي الحسابات (' + st.stats.active + ' نشط)</span></div>' +
+      '<div class="as-stat"><b style="color:' + (st.stats.errors ? '#b42318' : '#157a3b') + '">' + st.stats.errors + '</b><span>أخطاء تمنع الترحيل</span></div>' +
+      '<div class="as-stat"><b style="color:' + (st.stats.warnings ? '#946200' : '#157a3b') + '">' + st.stats.warnings + '</b><span>تحذيرات</span></div>' +
+      '<div class="as-stat"><b>' + custom + ' / ' + st.roles.length + '</b><span>حسابات افتراضية مثبّتة صراحةً</span></div>' +
+      '</div>';
+    h += '<div class="as-box"><h4>أهم ما يحتاج انتباهك</h4>';
+    if(!top.length) h += '<div class="as-empty" style="padding:10px">✅ لا توجد أخطاء أو تحذيرات — دليل الحسابات سليم.</div>';
+    top.forEach(i => { h += issueHtml(i); });
+    if(st.issues.filter(i => i.severity !== 'info').length > 5) h += '<button class="btn secondary" onclick="AcctSettings.show(\'audit\')">عرض كل نتائج الفحص</button>';
+    h += '</div>';
+    h += '<div class="as-box"><h4>ماذا تفعل هذه الشاشة؟</h4><ul class="as-notes" style="color:#40536f">' +
+      '<li>القيود التلقائية (المشتريات، المبيعات، الرصيد الافتتاحي، الخدمات) تقرأ الحسابات من <b>الحسابات الافتراضية</b> بدل أكواد ثابتة في البرنامج.</li>' +
+      '<li><b>المساعد الذكي</b> يحلل أسماء الحسابات (عربي/إنجليزي) ونوعها وموقعها بالشجرة ويقترح الأنسب مع بيان السبب.</li>' +
+      '<li>يعمل المساعد محلياً داخل النظام: لا تُرسل بيانات شركتك لأي جهة خارجية.</li></ul></div>';
+    box.innerHTML = h;
+  }
+
+  function issueHtml(i){
+    const sv = SEV[i.severity] || SEV.info;
+    const act = (i.role && i.severity !== 'info') ? '<div style="margin-top:6px"><button class="btn secondary" onclick="AcctSettings.show(\'roles\')">فتح الحسابات الافتراضية</button></div>' : '';
+    return '<div class="as-issue"><span class="as-chip ' + sv[0] + '" style="height:fit-content;white-space:nowrap">' + sv[1] + '</span>' +
+           '<div><div class="t">' + esc(i.message) + '</div>' + (i.fix ? '<div class="f">💡 ' + esc(i.fix) + '</div>' : '') + act + '</div></div>';
+  }
+
+  // ---------------------------------------------------------------- الحسابات الافتراضية
+  function renderRoles(){
+    const st = S.state, box = $('asRoles'); if(!st) return;
+    let h = '<div class="as-row" style="justify-content:space-between;margin-bottom:6px">' +
+            '<div><h3 style="margin:0">الحسابات الافتراضية للترحيل التلقائي</h3>' +
+            '<small style="color:#64748b">اختر الحساب الذي تُرحَّل عليه كل عملية. لا يتغير سلوك النظام إلا بعد الحفظ.</small></div>' +
+            '<div class="as-row"><button class="btn secondary" onclick="AcctSettings.applyAll()"' + (nSuggestions() ? '' : ' disabled') + '>✨ تطبيق كل الاقتراحات (' + nSuggestions() + ')</button>' +
+            '<button class="btn" onclick="AcctSettings.save()"' + (dirty() ? '' : ' disabled') + '>💾 حفظ التغييرات</button></div></div>';
+    st.roles.forEach(r => {
+      const cur = draftOf(r);
+      const opts = st.options.filter(o => o.type === r.type && o.is_active);
+      if(!opts.some(o => o.code === cur)){
+        const any = st.options.find(o => o.code === cur);
+        opts.unshift({ code: cur, name: any ? any.name + (any.is_active ? ' (نوع غير مناسب)' : ' (موقوف)') : 'غير موجود' });
+      }
+      const changed = cur !== r.code || S.resets[r.key];
+      const chip = changed ? '<span class="as-chip info">● تغيير غير محفوظ</span>' :
+        r.status === 'error' ? '<span class="as-chip error">✕ خطأ</span>' :
+        r.status === 'warn' ? '<span class="as-chip warn">! تحذير</span>' :
+        r.source === 'custom' ? '<span class="as-chip ok">✓ مثبّت</span>' : '<span class="as-chip info">افتراضي النظام</span>';
+      const sg = topSugg(r.key);
+      let sgHtml = '';
+      if(sg){
+        const c = sg.candidates[0];
+        if(c.code === cur) sgHtml = '<span class="as-chip ai" title="' + esc(c.reasons.join(' • ')) + '">✨ يطابق توصية المساعد</span>';
+        else sgHtml = '<span class="as-chip ai" title="' + esc(c.reasons.join(' • ')) + '">✨ اقتراح: ' + esc(c.code) + ' — ' + esc(c.name) + ' · ' + CONF[c.confidence] + '</span>' +
+                      '<button class="btn secondary" onclick="AcctSettings.applyOne(\'' + r.key + '\')">تطبيق</button>';
+      } else sgHtml = '<span class="as-chip info">لا اقتراح مناسب</span>';
+      h += '<div class="as-role"><div><h4>' + esc(r.label) + '</h4><small>نوع مطلوب: ' + esc(r.type_label) + ' • يستخدمه: ' + esc(r.used_by) + '</small></div>' +
+           '<div><select onchange="AcctSettings.setRole(\'' + r.key + '\',this.value)">' +
+           opts.map(o => '<option value="' + esc(o.code) + '"' + (o.code === cur ? ' selected' : '') + '>' + esc(o.code) + ' — ' + esc(o.name) + '</option>').join('') +
+           '</select><div style="margin-top:6px" class="as-row">' + chip +
+           (r.source === 'custom' || S.draft[r.key] != null ? '<button class="btn secondary" style="padding:2px 10px" title="العودة للكود التقليدي ' + esc(r.legacy) + '" onclick="AcctSettings.reset(\'' + r.key + '\')">↺ افتراضي</button>' : '') +
+           '</div>' + (r.messages.length && !changed ? '<div class="as-sugg" style="margin-top:6px;color:#b42318">' + esc(r.messages[0]) + '</div>' : '') + '</div>' +
+           '<div class="as-sugg">' + sgHtml + '</div></div>';
+    });
+    box.innerHTML = h;
+  }
+
+  // ---------------------------------------------------------------- الفحص الذكي
+  function renderAudit(){
+    const st = S.state, box = $('asAudit'); if(!st) return;
+    const f = S.auditFilter;
+    const cnt = k => st.issues.filter(i => i.severity === k).length;
+    const list = st.issues.filter(i => f === 'all' || i.severity === f);
+    const chip = (k, label) => '<button class="btn ' + (f === k ? '' : 'secondary') + '" onclick="AcctSettings.filter(\'' + k + '\')">' + label + '</button>';
+    let h = '<div class="as-row" style="justify-content:space-between;margin-bottom:12px"><div><h3 style="margin:0">فحص سلامة دليل الحسابات</h3>' +
+            '<small style="color:#64748b">أخطاء الأدوار، حلقات الهرمية، حسابات يتيمة، أسماء مكررة، وطبيعة الحساب.</small></div>' +
+            '<button class="btn secondary" onclick="AcctSettings.refresh()">🔄 إعادة الفحص</button></div>' +
+            '<div class="as-row" style="margin-bottom:12px">' + chip('all', 'الكل (' + st.issues.length + ')') + chip('error', 'أخطاء (' + cnt('error') + ')') +
+            chip('warn', 'تحذيرات (' + cnt('warn') + ')') + chip('info', 'معلومات (' + cnt('info') + ')') + '</div>';
+    h += list.length ? list.map(issueHtml).join('') : '<div class="as-empty">✅ لا توجد نتائج في هذا التصنيف.</div>';
+    box.innerHTML = h;
+  }
+
+  // ---------------------------------------------------------------- التوافق مع ERP
+  function renderErp(){
+    const st = S.state, box = $('asErp'); if(!st) return;
+    const prof = st.profile;
+    const exFmt = $('asExFmt') ? $('asExFmt').value : prof;
+    let h = '<div class="as-box"><h4>نظام ERP المستهدف</h4><div class="as-profiles">' +
+      PROFILES.map(p => '<button class="as-prof' + (p.k === prof ? ' sel' : '') + '" onclick="AcctSettings.pickProfile(\'' + p.k + '\')"><b>' + p.n + (p.k === prof ? ' ✓' : '') + '</b><span>' + p.d + '</span></button>').join('') +
+      '</div><small style="color:#64748b">يحدد الصيغة الافتراضية للتصدير ويُعرض مقابل الأنواع أدناه. الاستيراد يكتشف صيغة الملف تلقائياً.</small></div>';
+
+    h += '<div class="as-box"><h4>⬇ تصدير دليل الحسابات</h4><div class="as-row">' +
+      '<select id="asExFmt" onchange="AcctSettings.renderErpKeep()">' + PROFILES.map(p => '<option value="' + p.k + '"' + (p.k === exFmt ? ' selected' : '') + '>' + p.n + '</option>').join('') + '</select>' +
+      '<select id="asExPad" style="' + (exFmt === 'sap' ? '' : 'display:none') + '"><option value="left">SAP: أصفار يسار (0000001121)</option><option value="right">SAP: أصفار يمين (1121000000)</option><option value="none">SAP: بدون حشو</option></select>' +
+      '<label class="as-row" style="gap:4px"><input type="checkbox" id="asExInact"> تضمين الموقوفة</label>' +
+      '<button class="btn" onclick="AcctSettings.doExport()">تنزيل ملف CSV</button></div><ul class="as-notes" id="asExNotes"></ul></div>';
+
+    h += '<div class="as-box"><h4>⬆ استيراد دليل حسابات</h4>' +
+      '<div class="as-row"><input type="file" id="asFile" accept=".csv,.txt,text/csv" onchange="AcctSettings.onFile(this)">' +
+      '<small style="color:#64748b">يُكتشف نوع الملف (Odoo / SAP / Oracle / عام) تلقائياً. الحسابات الموجودة لا تُعدَّل أبداً.</small></div>' +
+      '<div id="asPreview"></div></div>';
+
+    h += '<div class="as-box"><h4>🗺 مقابل أنواع الحسابات بين الأنظمة</h4><div class="as-scroll" style="max-height:none"><table class="as-t"><thead><tr><th>النظام الحالي</th><th>Odoo</th><th>SAP</th><th>Oracle</th></tr></thead><tbody>' +
+      TYPE_MAP.map(r => '<tr><td><b>' + r[0] + '</b></td><td>' + r[2] + '</td><td>' + r[3] + '</td><td>' + r[4] + '</td></tr>').join('') +
+      '</tbody></table></div><ul class="as-notes"><li>مجموعات حسابات SAP رموز مقترحة؛ استبدلها بمجموعات شركتك.</li><li>أسماء الأعمدة تتبع القوالب القياسية لكل نظام وقد تختلف قليلاً بين الإصدارات؛ راجعها مقابل قالب الاستيراد لديك قبل الاستخدام الفعلي.</li></ul></div>';
+    box.innerHTML = h;
+    renderPreview();
+  }
+
+  function renderPreview(){
+    const box = $('asPreview'); if(!box) return;
+    const p = S.preview; if(!p){ box.innerHTML = ''; return; }
+    const s = p.summary, stLbl = { new:['ok','جديد'], exists:['info','موجود — يُتخطى'], error:['error','خطأ'], skipped:['info','متخطى'] };
+    const src = { ai_name:'اقتراح من الاسم', ai_code:'اقتراح من الرقم' };
+    let h = '<div class="as-row" style="margin:12px 0 4px"><span class="as-chip ai">الصيغة: ' + esc((PROFILES.find(x => x.k === p.format) || {}).n || p.format) + '</span>' +
+      '<span class="as-chip ok">جديد ' + s.new + '</span><span class="as-chip info">موجود ' + s.exists + '</span>' +
+      '<span class="as-chip ' + (s.errors ? 'error' : 'info') + '">أخطاء ' + s.errors + '</span>' +
+      (s.inferred ? '<span class="as-chip warn">أنواع مقترحة آلياً ' + s.inferred + '</span>' : '') + '</div>';
+    h += '<div class="as-scroll"><table class="as-t"><thead><tr><th>سطر</th><th>الكود</th><th>الاسم</th><th>النوع</th><th>الحساب الرئيسي</th><th>الحالة</th><th>ملاحظات</th></tr></thead><tbody>' +
+      p.rows.slice(0, 300).map(r => { const sl = stLbl[r.status] || stLbl.error;
+        return '<tr><td>' + r.line + '</td><td>' + esc(r.code) + '</td><td>' + esc(r.name_ar) + '</td><td>' + esc(r.account_type || '—') +
+          (src[r.type_source] ? ' <span class="as-chip ai">' + src[r.type_source] + '</span>' : '') + '</td><td>' + esc(r.parent_code || '—') +
+          (r.parent_inferred ? ' <span class="as-chip info">مستنتج</span>' : '') + '</td><td><span class="as-chip ' + sl[0] + '">' + sl[1] + '</span></td><td>' +
+          esc(r.errors.concat(r.warnings).join(' • ')) + '</td></tr>'; }).join('') + '</tbody></table></div>';
+    if(p.rows.length > 300) h += '<small style="color:#64748b">عُرض أول 300 صف من ' + p.rows.length + '.</small>';
+    if(s.inferred) h += '<label class="as-row" style="margin-top:10px;gap:6px"><input type="checkbox" id="asAccInf"' + (S.acceptInferred ? ' checked' : '') + ' onchange="AcctSettings.toggleInferred(this.checked)"> أقبل الأنواع التي اقترحها المساعد (وإلا تُتخطى هذه الحسابات)</label>';
+    h += '<div class="as-row" style="margin-top:12px"><button class="btn" onclick="AcctSettings.commit()"' + (s.new ? '' : ' disabled') + '>استيراد ' + s.new + ' حساب جديد</button>' +
+         '<button class="btn secondary" onclick="AcctSettings.clearImport()">إلغاء</button></div>' +
+         '<small style="color:#64748b">الأرصدة الافتتاحية في الملف لا تُستورد؛ تُدخل بقيد افتتاحي.</small>';
+    box.innerHTML = h;
+  }
+
+  // ---------------------------------------------------------------- عرض
+  function renderAll(){ renderHero(); renderOverview(); renderRoles(); renderAudit(); renderErp(); }
+  function show(sec){
+    document.querySelectorAll('#panel-settings .pset-nav-btn').forEach(b => b.classList.toggle('active', b.dataset.as === sec));
+    document.querySelectorAll('#panel-settings .pset-section').forEach(s => s.classList.toggle('active', s.dataset.as === sec));
+  }
+
+  // ---------------------------------------------------------------- إجراءات
+  async function save(){
+    if(S.busy) return; S.busy = true;
+    try{
+      const defaults = {};
+      S.state.roles.forEach(r => {
+        if(S.resets[r.key]) defaults[r.key] = '';
+        else if(S.draft[r.key] != null && S.draft[r.key] !== r.code) defaults[r.key] = S.draft[r.key];
+      });
+      await api('PUT', '/api/account-settings', { defaults });
+      toast('تم حفظ الحسابات الافتراضية ✓');
+      await load();
+    }catch(e){ toast(e.message, true); }
+    finally{ S.busy = false; }
+  }
+
+  async function pickProfile(k){
+    try{ await api('PUT', '/api/account-settings', { erp_profile: k }); S.state.profile = k; const sel = $('asExFmt'); if(sel) sel.value = k; renderErp(); toast('تم اختيار نمط ' + (PROFILES.find(p => p.k === k) || {}).n); }
+    catch(e){ toast(e.message, true); }
+  }
+
+  async function doExport(){
+    try{
+      const fmt = $('asExFmt').value, pad = $('asExPad').value, inc = $('asExInact').checked;
+      const r = await api('GET', '/api/account-settings/export?format=' + fmt + '&sap_pad=' + pad + '&include_inactive=' + inc);
+      const blob = new Blob(['\ufeff' + r.content], { type: 'text/csv;charset=utf-8' });
+      const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = r.filename;
+      document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+      $('asExNotes').innerHTML = '<li><b>تم تصدير ' + r.count + ' حساب.</b></li>' + r.notes.map(n => '<li>' + esc(n) + '</li>').join('');
+    }catch(e){ toast(e.message, true); }
+  }
+
+  function onFile(inp){
+    const f = inp.files && inp.files[0]; if(!f) return;
+    const rd = new FileReader();
+    rd.onload = async () => {
+      const txt = String(rd.result || '');
+      if(txt.indexOf('\ufffd') >= 0) toast('تنبيه: الملف ليس بترميز UTF-8 وقد تظهر الحروف العربية مشوّهة — احفظه بترميز UTF-8.', true);
+      S.text = txt; S.fname = f.name; S.acceptInferred = false;
+      try{ S.preview = await api('POST', '/api/account-settings/import/preview', { text: txt }); }
+      catch(e){ S.preview = null; toast(e.message, true); }
+      renderPreview();
+    };
+    rd.readAsText(f, 'utf-8');
+  }
+
+  async function commit(){
+    if(S.busy || !S.preview) return;
+    if(!confirm('سيتم إنشاء ' + S.preview.summary.new + ' حساب جديد. الحسابات الموجودة لن تتأثر. متابعة؟')) return;
+    S.busy = true;
+    try{
+      const r = await api('POST', '/api/account-settings/import/commit', { text: S.text, confirm: true, accept_inferred: S.acceptInferred });
+      toast('تم إنشاء ' + r.created + ' حساب' + (r.skipped_inferred.length ? ' — تُخطّي ' + r.skipped_inferred.length + ' لعدم قبول التصنيف الآلي' : ''));
+      S.preview = null; S.text = '';
+      await load();
+      try{ if(typeof loadAll === 'function') loadAll(); }catch(e){}
+    }catch(e){ toast(e.message, true); }
+    finally{ S.busy = false; }
+  }
+
+  window.AcctSettings = {
+    open: () => { load(); },
+    show,
+    save, doExport, onFile, commit, pickProfile,
+    refresh: () => load(),
+    setRole: (k, code) => { S.draft[k] = code; delete S.resets[k]; renderRoles(); },
+    reset: k => { const r = S.state.roles.find(x => x.key === k); S.draft[k] = r.legacy; S.resets[k] = true; renderRoles(); },
+    applyOne: k => { const s = topSugg(k); if(s){ S.draft[k] = s.candidates[0].code; delete S.resets[k]; renderRoles(); } },
+    applyAll: () => { (S.sugg || []).forEach(s => { if(s.differs && s.candidates[0] && s.candidates[0].confidence !== 'low'){ S.draft[s.role] = s.candidates[0].code; delete S.resets[s.role]; } }); renderRoles(); toast('طُبّقت الاقتراحات — راجعها ثم اضغط «حفظ التغييرات»'); },
+    filter: f => { S.auditFilter = f; renderAudit(); },
+    toggleInferred: v => { S.acceptInferred = !!v; },
+    clearImport: () => { S.preview = null; S.text = ''; const f = $('asFile'); if(f) f.value = ''; renderPreview(); },
+    renderErpKeep: () => { const v = $('asExFmt').value; $('asExPad').style.display = v === 'sap' ? '' : 'none'; }
   };
 })();

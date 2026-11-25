@@ -3846,7 +3846,75 @@ html[dir="ltr"] .brand-center{direction:ltr;}
     </div>
   </div>
 
-  <div class="panel" id="panel-settings"><div class="formcard"><h3>إعدادات الحسابات</h3><div class="empty-msg">جاهزة للتطوير</div></div></div>
+  <div class="panel" id="panel-settings">
+<style>
+#panel-settings .as-hero{display:flex;gap:22px;align-items:center;flex-wrap:wrap;padding:18px 20px;border-radius:18px;background:linear-gradient(135deg,#0b2b5a 0%,#1565C0 60%,#2b8cff 100%);color:#fff;margin-bottom:18px}
+#panel-settings .as-hero h2{margin:4px 0;color:#fff;font-size:22px}
+#panel-settings .as-hero p{margin:0;color:#dbe9ff;font-size:13px;max-width:520px;line-height:1.7}
+#panel-settings .as-ai-tag{display:inline-flex;gap:6px;align-items:center;background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.3);padding:3px 11px;border-radius:99px;font-size:12px;font-weight:700}
+#panel-settings .as-ring{--p:0;width:96px;height:96px;border-radius:50%;display:grid;place-items:center;margin-inline-start:auto;background:conic-gradient(var(--rc,#22c55e) calc(var(--p)*1%),rgba(255,255,255,.22) 0)}
+#panel-settings .as-ring>div{width:76px;height:76px;border-radius:50%;background:#0d3166;display:grid;place-items:center;text-align:center;line-height:1.1}
+#panel-settings .as-ring b{font-size:24px}#panel-settings .as-ring small{display:block;font-size:10.5px;color:#cfe0ff}
+#panel-settings .as-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:16px}
+#panel-settings .as-stat{border:1px solid #dbe7f6;border-radius:14px;padding:12px 14px;background:#fff}
+#panel-settings .as-stat b{display:block;font-size:22px;color:#08244a}#panel-settings .as-stat span{font-size:12px;color:#64748b}
+#panel-settings .as-banner{display:flex;gap:12px;align-items:center;flex-wrap:wrap;border:1px solid #bcd6ff;background:#f0f6ff;border-radius:14px;padding:12px 14px;margin-bottom:14px;font-size:13.5px;color:#0b2b5a}
+#panel-settings .as-chip{display:inline-flex;align-items:center;gap:5px;padding:2px 10px;border-radius:99px;font-size:12px;font-weight:700;border:1px solid transparent}
+#panel-settings .as-chip.ok{background:#e8f8ee;color:#157a3b;border-color:#bfe8cd}
+#panel-settings .as-chip.warn{background:#fff6e0;color:#946200;border-color:#f3dfa0}
+#panel-settings .as-chip.error{background:#fdecec;color:#b42318;border-color:#f6c4c0}
+#panel-settings .as-chip.info{background:#eef2f7;color:#475569;border-color:#d9e1ec}
+#panel-settings .as-chip.ai{background:#efe9ff;color:#5b34c7;border-color:#d8cbff}
+#panel-settings .as-role{display:grid;grid-template-columns:minmax(190px,1.1fr) minmax(210px,1.2fr) 1.5fr;gap:12px;align-items:center;padding:13px 4px;border-bottom:1px solid #eaf0f8}
+#panel-settings .as-role:last-child{border-bottom:0}
+#panel-settings .as-role h4{margin:0 0 3px;font-size:14px;color:#08244a}#panel-settings .as-role small{color:#64748b;font-size:12px}
+#panel-settings .as-role select{width:100%}
+#panel-settings .as-sugg{font-size:12.5px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+#panel-settings .as-issue{display:flex;gap:10px;padding:11px 12px;border:1px solid #e6eef8;border-radius:12px;margin-bottom:8px;background:#fff}
+#panel-settings .as-issue .t{font-size:13.5px;color:#0b2b5a;line-height:1.7}#panel-settings .as-issue .f{font-size:12.5px;color:#64748b}
+#panel-settings .as-profiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;margin-bottom:16px}
+#panel-settings .as-prof{border:2px solid #dbe7f6;border-radius:16px;padding:14px;cursor:pointer;background:#fff;transition:.15s;text-align:right;font-family:inherit}
+#panel-settings .as-prof:hover{border-color:#8bb8f5;transform:translateY(-1px)}
+#panel-settings .as-prof.sel{border-color:#1565C0;background:#f0f6ff;box-shadow:0 6px 18px rgba(21,101,192,.14)}
+#panel-settings .as-prof b{display:block;font-size:15px;color:#08244a;margin-bottom:4px}#panel-settings .as-prof span{font-size:12px;color:#64748b;line-height:1.6}
+#panel-settings .as-box{border:1px solid #dbe7f6;border-radius:16px;padding:16px;margin-bottom:16px;background:#fff}
+#panel-settings .as-box h4{margin:0 0 10px;color:#08244a}
+#panel-settings .as-row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+#panel-settings .as-scroll{max-height:380px;overflow:auto;border:1px solid #e6eef8;border-radius:12px;margin-top:10px}
+#panel-settings table.as-t{width:100%;border-collapse:collapse;font-size:12.5px}
+#panel-settings table.as-t th{position:sticky;top:0;background:#f4f8fe;text-align:right;padding:8px 10px;color:#40536f;white-space:nowrap}
+#panel-settings table.as-t td{padding:7px 10px;border-top:1px solid #eef3fa;vertical-align:top}
+#panel-settings .as-notes{margin:8px 0 0;padding:0 18px;color:#64748b;font-size:12.5px;line-height:1.8}
+#panel-settings .as-empty{padding:22px;text-align:center;color:#64748b}
+@media(max-width:900px){#panel-settings .as-role{grid-template-columns:1fr}#panel-settings .pset-body{flex-direction:column}#panel-settings .pset-nav{width:100%;position:static;flex-direction:row;flex-wrap:wrap}}
+</style>
+<div class="pset-page erp-watermark-page">
+  <div class="formcard pset-card">
+    <div class="as-hero">
+      <div>
+        <span class="as-ai-tag">✨ المساعد الذكي للحسابات</span>
+        <h2>إعدادات الحسابات</h2>
+        <p>اضبط الحسابات التي تُرحَّل عليها القيود التلقائية، ودع المساعد يقترح الأنسب ويفحص سلامة الدليل، واستورد/صدّر الدليل بصيغ Odoo وSAP وOracle.</p>
+      </div>
+      <div class="as-ring" id="asRing"><div><span><b id="asScore">–</b><small id="asGrade">جارٍ الفحص</small></span></div></div>
+    </div>
+    <div class="pset-body">
+      <div class="pset-nav">
+        <button class="pset-nav-btn active" data-as="overview" onclick="AcctSettings.show('overview')">🧭 نظرة عامة</button>
+        <button class="pset-nav-btn" data-as="roles" onclick="AcctSettings.show('roles')">🔗 الحسابات الافتراضية</button>
+        <button class="pset-nav-btn" data-as="audit" onclick="AcctSettings.show('audit')">🩺 الفحص الذكي</button>
+        <button class="pset-nav-btn" data-as="erp" onclick="AcctSettings.show('erp')">🔄 التوافق مع Odoo / SAP / Oracle</button>
+      </div>
+      <div class="pset-content">
+        <div class="pset-section active" data-as="overview"><div id="asOverview" class="as-empty">جارٍ التحميل...</div></div>
+        <div class="pset-section" data-as="roles"><div id="asRoles" class="as-empty">جارٍ التحميل...</div></div>
+        <div class="pset-section" data-as="audit"><div id="asAudit" class="as-empty">جارٍ التحميل...</div></div>
+        <div class="pset-section" data-as="erp"><div id="asErp" class="as-empty">جارٍ التحميل...</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
 
   <div class="panel" id="panel-gl_reports">
   <div class="pset-page erp-watermark-page">
@@ -4230,7 +4298,7 @@ table.uz-matrix input[type=checkbox]{width:16px;height:16px;cursor:pointer;accen
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script src="i18n.js?v=20260806"></script>
-<script src="script.js?v=20261123"></script>
+<script src="script.js?v=20261124"></script>
 <script src="users_roles.js?v=20260806"></script>
 <script>
 

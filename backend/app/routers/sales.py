@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from app.account_defaults import get_default_account
 from app.database import get_db
 from app.models.models import (
     Account,
@@ -124,7 +125,7 @@ def create_customer(payload: CustomerIn, db: Session = Depends(get_db)):
         raise HTTPException(400, "كود العميل مستخدم من قبل")
     customer = Customer(**payload.model_dump())
     if not customer.account_code:
-        customer.account_code = "1121"
+        customer.account_code = get_default_account(db, "receivable")
     db.add(customer)
     db.commit()
     db.refresh(customer)
@@ -207,20 +208,23 @@ def _post_sales_invoice_journal(db: Session, invoice: SalesInvoice, subtotal, ta
        فقط عند include_cogs_journal=True (الفاتورة المباشرة بلا إذن
        تسليم سابق). عند وجود إذن تسليم مرتبط، هذا القيد يكون قد رُحِّل
        بالفعل وقت التسليم، فلا يُكرَّر هنا."""
-    revenue_account = db.query(Account).filter(Account.code == "41").first()
+    revenue_code = get_default_account(db, "sales_revenue")
+    revenue_account = db.query(Account).filter(Account.code == revenue_code).first()
     if not revenue_account:
-        raise HTTPException(400, "حساب إيرادات المبيعات (41) غير موجود بدليل الحسابات.")
+        raise HTTPException(400, f"حساب إيرادات المبيعات ({revenue_code}) غير موجود بدليل الحسابات.")
     inventory_account = cogs_account = None
     if include_cogs_journal:
-        cogs_account = db.query(Account).filter(Account.code == "51").first()
+        cogs_code = get_default_account(db, "cogs")
+        cogs_account = db.query(Account).filter(Account.code == cogs_code).first()
         if not cogs_account:
-            raise HTTPException(400, "حساب تكلفة البضاعة المباعة (51) غير موجود بدليل الحسابات.")
-        inventory_account = db.query(Account).filter(Account.code == "123").first()
+            raise HTTPException(400, f"حساب تكلفة البضاعة المباعة ({cogs_code}) غير موجود بدليل الحسابات.")
+        inventory_code = get_default_account(db, "inventory")
+        inventory_account = db.query(Account).filter(Account.code == inventory_code).first()
         if not inventory_account:
-            raise HTTPException(400, "حساب المخزون (123) غير موجود بدليل الحسابات.")
+            raise HTTPException(400, f"حساب المخزون ({inventory_code}) غير موجود بدليل الحسابات.")
 
     customer = db.query(Customer).filter(Customer.code == invoice.customer_code).first()
-    receivable_account_code = (customer.account_code if customer and customer.account_code else None) or "1121"
+    receivable_account_code = (customer.account_code if customer and customer.account_code else None) or get_default_account(db, "receivable")
     receivable_account = db.query(Account).filter(Account.code == receivable_account_code).first()
     if not receivable_account:
         raise HTTPException(400, f"الحساب المحاسبي المرتبط بالعميل ({receivable_account_code}) غير موجود بدليل الحسابات.")
@@ -430,12 +434,14 @@ def create_sales_order(payload: SalesOrderIn, db: Session = Depends(get_db)):
 # تكلفة البضاعة المباعة فوراً وقت خروج البضاعة الفعلي
 # =========================================================
 def _post_delivery_note_journal(db: Session, delivery: DeliveryNote, cogs_total: float):
-    cogs_account = db.query(Account).filter(Account.code == "51").first()
+    cogs_code = get_default_account(db, "cogs")
+    cogs_account = db.query(Account).filter(Account.code == cogs_code).first()
     if not cogs_account:
-        raise HTTPException(400, "حساب تكلفة البضاعة المباعة (51) غير موجود بدليل الحسابات.")
-    inventory_account = db.query(Account).filter(Account.code == "123").first()
+        raise HTTPException(400, f"حساب تكلفة البضاعة المباعة ({cogs_code}) غير موجود بدليل الحسابات.")
+    inventory_code = get_default_account(db, "inventory")
+    inventory_account = db.query(Account).filter(Account.code == inventory_code).first()
     if not inventory_account:
-        raise HTTPException(400, "حساب المخزون (123) غير موجود بدليل الحسابات.")
+        raise HTTPException(400, f"حساب المخزون ({inventory_code}) غير موجود بدليل الحسابات.")
     if not cogs_total:
         return None
 
@@ -766,18 +772,21 @@ def _post_sales_return_journal(db: Session, sales_return: SalesReturn, subtotal,
        لما استحق عليه.
     2) مدين المخزون / دائن تكلفة البضاعة المباعة — إرجاع البضاعة
        للمخزون بنفس تكلفتها وقت البيع الأصلي."""
-    revenue_account = db.query(Account).filter(Account.code == "41").first()
+    revenue_code = get_default_account(db, "sales_revenue")
+    revenue_account = db.query(Account).filter(Account.code == revenue_code).first()
     if not revenue_account:
-        raise HTTPException(400, "حساب إيرادات المبيعات (41) غير موجود بدليل الحسابات.")
-    cogs_account = db.query(Account).filter(Account.code == "51").first()
+        raise HTTPException(400, f"حساب إيرادات المبيعات ({revenue_code}) غير موجود بدليل الحسابات.")
+    cogs_code = get_default_account(db, "cogs")
+    cogs_account = db.query(Account).filter(Account.code == cogs_code).first()
     if not cogs_account:
-        raise HTTPException(400, "حساب تكلفة البضاعة المباعة (51) غير موجود بدليل الحسابات.")
-    inventory_account = db.query(Account).filter(Account.code == "123").first()
+        raise HTTPException(400, f"حساب تكلفة البضاعة المباعة ({cogs_code}) غير موجود بدليل الحسابات.")
+    inventory_code = get_default_account(db, "inventory")
+    inventory_account = db.query(Account).filter(Account.code == inventory_code).first()
     if not inventory_account:
-        raise HTTPException(400, "حساب المخزون (123) غير موجود بدليل الحسابات.")
+        raise HTTPException(400, f"حساب المخزون ({inventory_code}) غير موجود بدليل الحسابات.")
 
     customer = db.query(Customer).filter(Customer.code == sales_return.customer_code).first()
-    receivable_account_code = (customer.account_code if customer and customer.account_code else None) or "1121"
+    receivable_account_code = (customer.account_code if customer and customer.account_code else None) or get_default_account(db, "receivable")
     receivable_account = db.query(Account).filter(Account.code == receivable_account_code).first()
     if not receivable_account:
         raise HTTPException(400, f"الحساب المحاسبي المرتبط بالعميل ({receivable_account_code}) غير موجود بدليل الحسابات.")

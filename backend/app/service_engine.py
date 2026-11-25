@@ -19,6 +19,7 @@ from decimal import Decimal, ROUND_HALF_UP
 from fastapi import HTTPException
 from sqlalchemy.exc import IntegrityError
 
+from app.account_defaults import get_default_account
 from app.models.audit_log import AuditLog
 from app.models.models import (
     Account, CostCenter, Customer, JournalEntry, JournalEntryLine, Supplier, TaxType,
@@ -91,9 +92,9 @@ def resolve_counter_account(db, direction, payment_method, party, settlement_cod
     """حساب الطرف المقابل: ذمة العميل/المورد (آجل) أو الصندوق/البنك (نقدي/بنكي)."""
     if payment_method == "credit":
         if direction == SALES:
-            code = (party.account_code or None) or "1121"
+            code = (party.account_code or None) or get_default_account(db, "receivable")
             return _existing_active_account(db, code, "حساب العميل")
-        code = (party.account_code or None) or "211"
+        code = (party.account_code or None) or get_default_account(db, "payable", "211")
         return _existing_active_account(db, code, "حساب المورد")
     if not settlement_code:
         raise HTTPException(400, "اختر حساب الصندوق/البنك للدفع النقدي أو البنكي")

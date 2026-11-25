@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from app.account_defaults import get_default_account
 from app.database import get_db
 from app.models.models import (
     Account,
@@ -539,17 +540,20 @@ def _post_grn_journal(db: Session, grn: GoodsReceipt, total: float):
     if not total:
         return None
 
-    inventory_account = db.query(Account).filter(Account.code == "123").first()
+    inventory_code = get_default_account(db, "inventory")
+
+    inventory_account = db.query(Account).filter(Account.code == inventory_code).first()
     if not inventory_account:
         raise HTTPException(
             status_code=400,
-            detail="حساب المخزون (123) غير موجود بدليل الحسابات — لا يمكن ترحيل قيد الاستلام.",
+            detail=f"حساب المخزون ({inventory_code}) غير موجود بدليل الحسابات — لا يمكن ترحيل قيد الاستلام.",
         )
-    grni_account = db.query(Account).filter(Account.code == "217").first()
+    grni_code = get_default_account(db, "grni")
+    grni_account = db.query(Account).filter(Account.code == grni_code).first()
     if not grni_account:
         raise HTTPException(
             status_code=400,
-            detail="حساب (بضاعة مستلمة غير مفوترة - 217) غير موجود بدليل الحسابات — لا يمكن ترحيل قيد الاستلام. "
+            detail=f"حساب (بضاعة مستلمة غير مفوترة - {grni_code}) غير موجود بدليل الحسابات — لا يمكن ترحيل قيد الاستلام. "
                    "يرجى تطبيق تحديث دليل الحسابات أولاً.",
         )
 
@@ -1062,27 +1066,29 @@ def _post_purchase_invoice_journal(
       توجد فجوة زمنية حقيقية بين الاستلام والفوترة لأنهما يحدثان بنفس
       اللحظة)، يُرحَّل القيد بخطوة واحدة كما كان: مدين المخزون مباشرة
       / دائن حساب المورد."""
-    inventory_account = db.query(Account).filter(Account.code == "123").first()
+    inventory_code = get_default_account(db, "inventory")
+    inventory_account = db.query(Account).filter(Account.code == inventory_code).first()
     if not inventory_account:
         raise HTTPException(
             status_code=400,
-            detail="حساب المخزون (123) غير موجود بدليل الحسابات — لا يمكن ترحيل القيد المحاسبي للفاتورة. "
+            detail=f"حساب المخزون ({inventory_code}) غير موجود بدليل الحسابات — لا يمكن ترحيل القيد المحاسبي للفاتورة. "
                    "يرجى إنشاء الحساب أولاً من شاشة دليل الحسابات.",
         )
 
     use_grni = bool(grn and grn.journal_entry_id)
     grni_account = None
     if use_grni:
-        grni_account = db.query(Account).filter(Account.code == "217").first()
+        grni_code = get_default_account(db, "grni")
+        grni_account = db.query(Account).filter(Account.code == grni_code).first()
         if not grni_account:
             raise HTTPException(
                 status_code=400,
-                detail="حساب (بضاعة مستلمة غير مفوترة - 217) غير موجود بدليل الحسابات — "
+                detail=f"حساب (بضاعة مستلمة غير مفوترة - {grni_code}) غير موجود بدليل الحسابات — "
                        "لا يمكن ترحيل القيد المحاسبي للفاتورة. يرجى تطبيق تحديث دليل الحسابات أولاً.",
             )
 
     supplier = db.query(Supplier).filter(Supplier.code == invoice.supplier_code).first()
-    payable_account_code = (supplier.account_code if supplier and supplier.account_code else None) or "211"
+    payable_account_code = (supplier.account_code if supplier and supplier.account_code else None) or get_default_account(db, "payable", "211")
     payable_account = db.query(Account).filter(Account.code == payable_account_code).first()
     if not payable_account:
         raise HTTPException(
@@ -1585,15 +1591,16 @@ def _post_purchase_return_journal(
     الفاتورة الأصلية: مدين حساب المورد (تخفيض ما هو مستحق له) / دائن
     المخزون (123) [+ دائن حساب ضريبة المشتريات بنصيب المرتجع التناسبي
     إن كان نوع الضريبة مرتبطاً بحساب]."""
-    inventory_account = db.query(Account).filter(Account.code == "123").first()
+    inventory_code = get_default_account(db, "inventory")
+    inventory_account = db.query(Account).filter(Account.code == inventory_code).first()
     if not inventory_account:
         raise HTTPException(
             status_code=400,
-            detail="حساب المخزون (123) غير موجود بدليل الحسابات — لا يمكن ترحيل القيد المحاسبي للمرتجع.",
+            detail=f"حساب المخزون ({inventory_code}) غير موجود بدليل الحسابات — لا يمكن ترحيل القيد المحاسبي للمرتجع.",
         )
 
     supplier = db.query(Supplier).filter(Supplier.code == purchase_return.supplier_code).first()
-    payable_account_code = (supplier.account_code if supplier and supplier.account_code else None) or "211"
+    payable_account_code = (supplier.account_code if supplier and supplier.account_code else None) or get_default_account(db, "payable", "211")
     payable_account = db.query(Account).filter(Account.code == payable_account_code).first()
     if not payable_account:
         raise HTTPException(
@@ -1949,7 +1956,7 @@ def _post_supplier_payment_journal(db: Session, payment: SupplierPayment):
     """يرحّل قيد السداد: مدين حساب المورد (يُخفِّض المستحق) / دائن
     حساب النقدية أو البنك المُحدَّد للدفعة."""
     supplier = db.query(Supplier).filter(Supplier.code == payment.supplier_code).first()
-    payable_account_code = (supplier.account_code if supplier and supplier.account_code else None) or "211"
+    payable_account_code = (supplier.account_code if supplier and supplier.account_code else None) or get_default_account(db, "payable", "211")
     payable_account = db.query(Account).filter(Account.code == payable_account_code).first()
     if not payable_account:
         raise HTTPException(

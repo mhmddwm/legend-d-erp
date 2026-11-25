@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
+from app.account_defaults import get_default_account
 from app.opening_stock import create_opening_receipt, delete_item_with_opening, delete_plan
 from datetime import date as date_type
 from decimal import Decimal
@@ -601,7 +602,7 @@ def create_supplier(payload: SupplierIn, db: Session = Depends(get_db)):
     if db.query(Supplier).filter(Supplier.code == payload.code).first():
         raise HTTPException(400, "كود المورد مستخدم من قبل")
     data = payload.model_dump()
-    data["account_code"] = _validate_supplier_account(db, data.get("account_code") or DEFAULT_SUPPLIER_ACCOUNT)
+    data["account_code"] = _validate_supplier_account(db, data.get("account_code") or get_default_account(db, "payable", DEFAULT_SUPPLIER_ACCOUNT))
     s = Supplier(**data)
     db.add(s)
     db.commit()
@@ -619,7 +620,7 @@ def update_supplier(code: str, payload: SupplierUpdate, db: Session = Depends(ge
     data = payload.model_dump(exclude_unset=True)
     new_code = data.pop("code", None)
     if "account_code" in data:
-        data["account_code"] = _validate_supplier_account(db, data.get("account_code") or DEFAULT_SUPPLIER_ACCOUNT)
+        data["account_code"] = _validate_supplier_account(db, data.get("account_code") or get_default_account(db, "payable", DEFAULT_SUPPLIER_ACCOUNT))
 
     for k, v in data.items():
         setattr(s, k, v)

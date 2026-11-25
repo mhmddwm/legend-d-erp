@@ -973,3 +973,12 @@ class SalesReturnLine(Base):
     qty = Column(Numeric(18, 4), nullable=False)
     unit_price = Column(Numeric(18, 4), nullable=False)
     unit_cost = Column(Numeric(18, 4), nullable=False, default=0)
+
+
+class AccountSetting(Base):
+    """إعدادات الحسابات: مفتاح/قيمة (الحسابات الافتراضية للترحيل التلقائي + نمط التوافق مع ERP)."""
+    __tablename__ = "account_settings"
+
+    key = Column(String(60), primary_key=True)
+    value = Column(String(100), nullable=True)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
