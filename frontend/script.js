@@ -9701,3 +9701,65 @@ window.submitResetTransactions = submitResetTransactions;
     renderErpKeep: () => { const v = $('asExFmt').value; $('asExPad').style.display = v === 'sap' ? '' : 'none'; }
   };
 })();
+
+/* ===== PF-01.12: زر وحدة العرض العام في شاشة المنتجات (الوحدة الأعلى / الأدنى حسب قالب كل منتج) ===== */
+(function(){
+  const KEY = 'items_unit_mode';            // 'top' | 'base' | '' (حسب اختيار كل صف)
+  let mode = '';
+  try{ const v = localStorage.getItem(KEY); mode = (v === 'top' || v === 'base') ? v : ''; }catch(e){}
+  let rendering = false;
+
+  // الوحدة المطلوبة للمنتج حسب الوضع: الأدنى = أساسية القالب، الأعلى = أكبر معامل بين مستويات القالب
+  function unitForMode(item, m){
+    const tpl = (typeof getItemUnitTemplate === 'function') ? getItemUnitTemplate(item) : null;
+    if(!tpl) return null;                    // منتج بلا قالب: يبقى كما هو
+    const base = String(tpl.base || tpl.name || item.unit || '').trim();
+    if(m === 'base') return base || null;
+    const lv = unitLevelsOf(tpl);
+    if(!lv.length) return base || null;
+    return lv.reduce((a, b) => (Number(b.factor) > Number(a.factor) ? b : a)).unit;
+  }
+  function withMode(item){
+    if(!rendering || !mode || !item) return item;
+    const u = unitForMode(item, mode);
+    return u ? Object.assign({}, item, { display_unit: u }) : item;
+  }
+
+  // 1) تعديل دالتي العرض فقط أثناء رسم جدول المنتجات (لا تتأثر الشاشات الأخرى)
+  const _gdv = getItemDisplayValues;
+  window.getItemDisplayValues = getItemDisplayValues = function(item){ return _gdv.call(this, withMode(item)); };
+  const _rus = renderUnitSelector;
+  window.renderUnitSelector = renderUnitSelector = function(item){ return _rus.call(this, withMode(item)); };
+
+  // 2) تفعيل الوضع أثناء رسم الجدول
+  const _render = renderItemsTable;
+  window.renderItemsTable = renderItemsTable = function(){
+    rendering = true;
+    try{ return _render.apply(this, arguments); } finally{ rendering = false; }
+  };
+
+  // 3) اختيار وحدة يدوياً لصف معيّن يُلغي الوضع العام (وإلا لن يظهر أثر اختياره)
+  const _upd = updateItemDisplayUnit;
+  window.updateItemDisplayUnit = updateItemDisplayUnit = function(){
+    if(mode){ mode = ''; try{ localStorage.removeItem(KEY); }catch(e){} syncButtons(); }
+    return _upd.apply(this, arguments);
+  };
+
+  function syncButtons(){
+    document.querySelectorAll('#itemsUnitModeToggle button').forEach(b => {
+      const on = b.dataset.mode === mode;
+      b.classList.toggle('secondary', !on);
+      b.setAttribute('aria-pressed', on ? 'true' : 'false');
+    });
+  }
+  // الضغط على الزر النشط مرة ثانية يعيد العرض «حسب كل منتج»
+  window.setItemsUnitMode = function(m){
+    mode = (mode === m) ? '' : m;
+    try{ mode ? localStorage.setItem(KEY, mode) : localStorage.removeItem(KEY); }catch(e){}
+    syncButtons();
+    if(typeof renderItemsTable === 'function') renderItemsTable();
+  };
+  window.getItemsUnitMode = () => mode;
+  document.addEventListener('DOMContentLoaded', syncButtons);
+  syncButtons();
+})();

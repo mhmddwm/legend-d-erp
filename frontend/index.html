@@ -2095,6 +2095,10 @@ html[dir="ltr"] .brand-center{direction:ltr;}
     <div style="display:flex;justify-content:space-between;align-items:center;gap:10px">
       <h3>المنتجات</h3>
       <div>
+        <span id="itemsUnitModeToggle" style="display:inline-flex;gap:4px;margin-inline-end:6px" title="عرض كميات وأسعار كل المنتجات بوحدة واحدة حسب قالب كل منتج">
+          <button type="button" class="btn secondary" data-mode="top" onclick="setItemsUnitMode('top')">الوحدة الأعلى</button>
+          <button type="button" class="btn secondary" data-mode="base" onclick="setItemsUnitMode('base')">الوحدة الأدنى</button>
+        </span>
         <button type="button" class="btn" onclick="openNewItem()">＋ إضافة منتج</button>
         <button class="btn secondary" onclick="openItemImport()">⭱ استيراد Excel</button>
         <button class="btn secondary" onclick="activateTab('productsettings')">التصنيفات</button>
@@ -4298,7 +4302,7 @@ table.uz-matrix input[type=checkbox]{width:16px;height:16px;cursor:pointer;accen
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script src="i18n.js?v=20260806"></script>
-<script src="script.js?v=20261124"></script>
+<script src="script.js?v=20261125"></script>
 <script src="users_roles.js?v=20260806"></script>
 <script>
 
