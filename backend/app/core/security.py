@@ -147,6 +147,7 @@ ROUTE_MODULES = [
     ("/api/cost-centers", "accounts"),
     ("/api/tax-types", "accounts"),
     ("/api/account-settings", "accounts"),
+    ("/api/ai", "purchasing"),
     ("/api/purchase-orders", "purchasing"),
     ("/api/grn", "purchasing"),
     ("/api/purchase-invoices", "purchasing"),

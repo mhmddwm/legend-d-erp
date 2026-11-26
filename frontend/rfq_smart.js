@@ -216,6 +216,30 @@
     return h + '</div>';
   }
 
+  let lastLines = [], lastRes = [], aiState = { busy: false, text: '', error: '' };
+  const pct = v => (v == null ? null : Math.round(v * 1000) / 10);
+  root.rfqSmartAiSummary = async function () {
+    if (aiState.busy) return;
+    const lines = lastRes.map((a, k) => a.found ? ({
+      product: lastLines[k].productName, qty: a.qtyReq, unit: lastLines[k].unit || '', level: a.level, score: a.score,
+      stock: a.stock, avg_daily: Math.round(a.avgDaily * 100) / 100, cover_days: a.coverDays == null ? null : Math.round(a.coverDays),
+      cover_after: a.coverAfter == null ? null : Math.round(a.coverAfter), trend_pct: pct(a.trend), rec_qty: a.recQty == null ? null : a.recQty,
+      confidence: a.confidence, reasons: a.reasons, warnings: a.warnings,
+      suppliers: a.suppliers.slice(0, 6).map(r => ({ name: r.name, last: Math.round(r.last * 100) / 100, avg: Math.round(r.avg * 100) / 100, count: r.count, change_pct: pct(r.change) }))
+    }) : null).filter(Boolean);
+    if (!lines.length) { aiState = { busy: false, text: '', error: 'لا توجد بنود مرتبطة بسجل المنتجات لتحليلها.' }; return root.rfqSmartRender(); }
+    aiState = { busy: true, text: '', error: '' }; root.rfqSmartRender();
+    try {
+      const base = (root.LegendAuth && root.LegendAuth.API) || g('API') || '';
+      const r = await fetch(base + '/api/ai/rfq-insights', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ lines, lead_days: settings.leadDays, target_cover_days: settings.targetCoverDays }) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.detail || ('خطأ ' + r.status));
+      aiState = { busy: false, text: j.text || '', error: j.enabled === false ? '' : '' };
+    } catch (e) { aiState = { busy: false, text: '', error: String(e.message || e) }; }
+    root.rfqSmartRender();
+  };
+
   root.rfqSmartRender = function () {
     const card = ensureCard(); if (!card || !root.__rfqState) return;
     const lines = root.__rfqState.lines().filter(l => l.productName);
@@ -223,10 +247,15 @@
     try { res = analyzeAll(lines, data(), settings); } catch (e) { console.warn('RFQ smart', e); }
     const crit = res.filter(r => r.found && r.score >= 75).length;
     const sav = res.reduce((s, r) => s + (r.savings || 0), 0);
+    lastLines = lines; lastRes = res;
+    const aiBox = aiState.busy ? '<div class="rs-ai">⏳ جارٍ إعداد الملخص…</div>'
+      : aiState.error ? '<div class="rs-warn">⚠ ' + esc(aiState.error) + '</div>'
+      : aiState.text ? '<div class="rs-ai"><b>✨ ملخص الذكاء الاصطناعي</b><div>' + esc(aiState.text).replace(/\n/g, '<br>') + '</div><small>كُتب الملخص من الأرقام المعروضة أدناه؛ راجعها قبل اتخاذ القرار.</small></div>' : '';
     card.innerHTML = '<div class="rfq-section-head"><h3>🤖 التحليل الذكي للطلب (Data Research)</h3>'
+      + '<button class="btn" ' + (aiState.busy ? 'disabled ' : '') + 'onclick="rfqSmartAiSummary()">✨ ملخص بالذكاء الاصطناعي</button>'
       + '<div class="rs-set"><label>مدة التوريد <input type="number" min="1" value="' + settings.leadDays + '" onchange="rfqSmartSet(\'leadDays\',this.value)"> يوم</label>'
       + '<label>تغطية مستهدفة <input type="number" min="7" value="' + settings.targetCoverDays + '" onchange="rfqSmartSet(\'targetCoverDays\',this.value)"> يوم</label></div></div>'
-      + (lines.length ? '<div class="rs-summary">' + (crit ? '🔴 ' + crit + ' بند حرج · ' : '') + 'مبنيٌّ على مبيعات آخر ' + settings.salesWindow + ' يوم وفواتير الشراء السابقة' + (sav > 0 ? ' · فرق أسعار محتمل ' + money(sav) : '') + '</div>' : '<div class="hint">أضف منتجات لطلب العرض ليظهر التحليل.</div>')
+      + aiBox + (lines.length ? '<div class="rs-summary">' + (crit ? '🔴 ' + crit + ' بند حرج · ' : '') + 'مبنيٌّ على مبيعات آخر ' + settings.salesWindow + ' يوم وفواتير الشراء السابقة' + (sav > 0 ? ' · فرق أسعار محتمل ' + money(sav) : '') + '</div>' : '<div class="hint">أضف منتجات لطلب العرض ليظهر التحليل.</div>')
       + lines.map((l, k) => lineHtml(res[k], root.__rfqState.lines().indexOf(l), l)).join('');
   };
   root.rfqSmartSet = (k, v) => { const n = num(v); if (n > 0) settings[k] = n; root.rfqSmartRender(); };
@@ -240,7 +269,7 @@
     + '.rs-head small{color:#64748b;font-weight:700}.rs-badge{color:#fff;border-radius:999px;padding:4px 12px;font-weight:900;font-size:12px}'
     + '.rs-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin:10px 0}.rs-kpi{background:#f8fafc;border-radius:10px;padding:8px}.rs-kpi span{display:block;font-size:11px;color:#64748b;font-weight:800}.rs-kpi b{font-size:16px}.rs-kpi small{display:block;color:#64748b;font-size:11px}'
     + '.rs-reasons{margin:6px 0;padding-inline-start:18px;font-size:13px;color:#334155}.rs-warn{background:#fff7ed;border:1px solid #fed7aa;color:#9a3412;border-radius:10px;padding:6px 10px;margin:6px 0;font-size:13px;font-weight:700}'
-    + '.rs-table .rs-best td{background:#f0fdf4}.rs-tag{background:#16a34a;color:#fff;border-radius:6px;padding:1px 6px;font-size:10px;font-weight:900}.rs-tag.old{background:#94a3b8}.rs-note{margin-top:8px;font-size:13px;color:#166534;font-weight:700}';
+    + '.rs-table .rs-best td{background:#f0fdf4}.rs-tag{background:#16a34a;color:#fff;border-radius:6px;padding:1px 6px;font-size:10px;font-weight:900}.rs-tag.old{background:#94a3b8}.rs-ai{background:#faf5ff;border:1px solid #e9d5ff;border-radius:12px;padding:10px 14px;margin:8px 0;line-height:1.9;font-size:14px;color:#3b0764}.rs-ai small{display:block;color:#7e22ce;margin-top:6px}.rs-note{margin-top:8px;font-size:13px;color:#166534;font-weight:700}';
   document.head.appendChild(css);
   document.addEventListener('DOMContentLoaded', () => setTimeout(() => { try { root.rfqSmartRender(); } catch (e) { } }, 400));
 })(typeof window !== 'undefined' ? window : globalThis);

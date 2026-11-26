@@ -27,6 +27,7 @@ from app.routers import (
     system,
     service_catalog,
     account_settings,
+    ai_insights,
 )
 
 
@@ -338,6 +339,12 @@ BASE_DIR = Path(__file__).resolve().parents[2]
 FRONTEND_DIR = BASE_DIR / "frontend"
 
 
+# AI insights (RFQ)
+app.include_router(
+    ai_insights.router,
+    dependencies=PROTECTED,
+)
+
 if FRONTEND_DIR.exists():
 
     app.mount(
@@ -353,6 +360,7 @@ if FRONTEND_DIR.exists():
 # ============================================================
 # Local Run
 # ============================================================
+
 
 if __name__ == "__main__":
 

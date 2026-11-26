@@ -177,3 +177,7 @@
 - Fixed: unit dropdown no longer falls back to the smallest unit; it uses the product's unit template and always keeps the line's own unit.
 - Fixed: "إرسال لطلب عرض سعر" now opens the RFQ screen with the PR lines.
 - New: frontend/rfq_smart.js — per-line importance score (sales, stock, reorder level, trend, ABC), recommended quantity, and supplier price comparison from purchase history.
+
+## RFQ AI summary (v37)
+- New: POST /api/ai/rfq-insights (backend/app/routers/ai_insights.py), guarded by the central permission check (module: purchasing).
+- The frontend sends computed figures only; the model writes an Arabic summary and cannot invent numbers. Without ANTHROPIC_API_KEY the endpoint returns enabled=false and the numeric panel keeps working.
