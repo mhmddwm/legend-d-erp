@@ -171,3 +171,9 @@
 ## ACC-JRN-005 — Tax amount number formatting + cache-busting
 - Journal entry line tax panel: the "قيمة الضريبة" (tax amount) field now uses the same text-based numeric formatting as the debit/credit fields (comma-grouped Western digits) instead of a native `<input type="number">`, which was rendering as Arabic-Indic numerals and getting visually truncated in some browser/OS locale settings.
 - Added a cache-busting version query string to script.js/i18n.js/users_roles.js so browsers and any CDN/proxy in front of the app reliably pick up new frontend code after each deployment instead of serving a stale cached copy — relevant since the last couple of fixes reportedly weren't showing up immediately.
+
+## RFQ smart analysis (v36)
+- Fixed: choosing a purchase request in RFQ now loads its lines with the original quantity and unit (e.g. 20 كرتون); the live index.html had no loader.
+- Fixed: unit dropdown no longer falls back to the smallest unit; it uses the product's unit template and always keeps the line's own unit.
+- Fixed: "إرسال لطلب عرض سعر" now opens the RFQ screen with the PR lines.
+- New: frontend/rfq_smart.js — per-line importance score (sales, stock, reorder level, trend, ABC), recommended quantity, and supplier price comparison from purchase history.

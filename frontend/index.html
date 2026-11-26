@@ -6115,8 +6115,8 @@ table.uz-matrix input[type=checkbox]{width:16px;height:16px;cursor:pointer;accen
   function val(o,ks){for(const k of ks){if(o&&o[k]!=null&&String(o[k]).trim()!=='')return o[k];}return '';}
   function today(){return new Date().toISOString().slice(0,10);} 
   function getArr(keys){for(const key of keys){try{const v=JSON.parse(localStorage.getItem(key)||'[]'); if(Array.isArray(v)&&v.length)return v;}catch(e){}} return [];}
-  function getProducts(){return (Array.isArray(window.items)&&window.items.length?window.items:(Array.isArray(window.products)&&window.products.length?window.products:getArr(['items_cache','erp_items','items','products'])));}
-  function getSuppliers(){return (Array.isArray(window.suppliers)&&window.suppliers.length?window.suppliers:getArr(['suppliers','erp_suppliers','suppliers_cache']));}
+  function getProducts(){return (typeof items!=='undefined'&&Array.isArray(items)&&items.length?items:Array.isArray(window.items)&&window.items.length?window.items:(Array.isArray(window.products)&&window.products.length?window.products:getArr(['items_cache','erp_items','items','products'])));}
+  function getSuppliers(){return (typeof suppliers!=='undefined'&&Array.isArray(suppliers)&&suppliers.length?suppliers:Array.isArray(window.suppliers)&&window.suppliers.length?window.suppliers:getArr(['suppliers','erp_suppliers','suppliers_cache']));}
   function getPRs(){try{return JSON.parse(localStorage.getItem('purchase_requests')||'[]')||[];}catch(e){return [];}}
   function setPRs(a){try{localStorage.setItem('purchase_requests',JSON.stringify(a||[]));}catch(e){}}
   function getRFQs(){try{return JSON.parse(localStorage.getItem(KEY)||'[]')||[];}catch(e){return [];}}
@@ -6130,6 +6130,7 @@ table.uz-matrix input[type=checkbox]{width:16px;height:16px;cursor:pointer;accen
   }
   function rfqProductUnits(p){
     p=p||{}; let out=[];
+    if(typeof getTemplateUnitsForItem==='function' && Object.keys(p).length){try{const tu=getTemplateUnitsForItem(p).map(u=>u.value).filter(Boolean); if(tu.length)return [...new Set(tu)];}catch(e){}}
     if(Array.isArray(p.units)) out=p.units.map(u=>typeof u==='string'?u:(u.name||u.unit||u.label||u.base||u.higher)).filter(Boolean);
     const tplKey=val(p,['unit_template','unitTemplate','unit_template_id','unitTemplateId','unitTemplateName','unit_template_name']);
     if(tplKey){
@@ -6142,7 +6143,7 @@ table.uz-matrix input[type=checkbox]{width:16px;height:16px;cursor:pointer;accen
     return out.length?out:['حبة'];
   }
   function rfqLineProduct(l){return getProducts().find(p=>String(productCode(p))===String(l.productCode))||getProducts().find(p=>String(productName(p))===String(l.productName));}
-  function rfqUnitOptions(l,i){const units=(Array.isArray(l.unitOptions)&&l.unitOptions.length?l.unitOptions:rfqProductUnits(rfqLineProduct(l))); const cur=l.unit||units[0]||'حبة'; return `<select onchange="rfqLines[${i}].unit=this.value">${units.map(u=>`<option value="${esc(u)}" ${String(cur)===String(u)?'selected':''}>${esc(u)}</option>`).join('')}</select>`;}
+  function rfqUnitOptions(l,i){let units=(Array.isArray(l.unitOptions)&&l.unitOptions.length?l.unitOptions:rfqProductUnits(rfqLineProduct(l))).slice(); const cur=l.unit||units[0]||'حبة'; if(!units.some(u=>String(u)===String(cur)))units.unshift(cur); return `<select onchange="rfqSetLineField(${i},'unit',this.value)">${units.map(u=>`<option value="${esc(u)}" ${String(cur)===String(u)?'selected':''}>${esc(u)}</option>`).join('')}</select>`;}
   function prLineKey(l){return String(l?.productCode||l?.itemCode||l?.code||l?.productName||l?.name||'').trim().toLowerCase();}
   function syncAddedRfqLinesToPurchaseRequest(reason='إضافة بند من طلب عرض السعر'){
     const prNo=document.getElementById('rfqPrRef')?.value||'';
@@ -6192,7 +6193,7 @@ table.uz-matrix input[type=checkbox]{width:16px;height:16px;cursor:pointer;accen
   function syncRfqSuppliers(){document.querySelectorAll('#rfqSuppliersBox .rfq-supplier-row').forEach((r,i)=>{if(!rfqSuppliers[i])return; const inp=r.querySelector('input'); if(inp)rfqSuppliers[i].supplierName=inp.value;});}
   window.onRfqSupplierInput=function(i,input){if(!rfqSuppliers[i])rfqSuppliers[i]={}; rfqSuppliers[i].supplierName=input.value; rfqSuppliers[i].supplierCode=''; const box=document.getElementById('rfqSupplierSuggest'+i); const q=String(input.value||'').toLowerCase().trim(); if(!box||!q){if(box)box.style.display='none';return;} const words=q.split(/\s+/).filter(Boolean); const list=getSuppliers().filter(s=>words.every(w=>supplierBlob(s).includes(w))).slice(0,12); window.__rfqSupplierList=list; box.innerHTML=list.length?list.map((s,idx)=>`<button type="button" onclick="selectRfqSupplier(${i},${idx})"><b>${esc(supplierName(s))}</b><small>${esc([supplierCode(s),val(s,['mobile']),val(s,['phone'])].filter(Boolean).join(' - '))}</small></button>`).join(''):'<button disabled>لا توجد نتائج</button>'; box.style.display='block';};
   window.selectRfqSupplier=function(i,idx){const s=(window.__rfqSupplierList||[])[idx]; if(!s)return; rfqSuppliers[i].supplierCode=supplierCode(s); rfqSuppliers[i].supplierName=supplierName(s); renderRfqSuppliers();};
-  window.renderRfqLines=function(){const body=document.getElementById('rfqLinesBody'); if(!body)return; if(!rfqLines.length)rfqLines=[{productCode:'',productName:'',qty:1,unit:''}]; body.innerHTML=rfqLines.map((l,i)=>`<tr class="${l.addedFromRFQ?'rfq-added-line':''}"><td style="position:relative"><input value="${esc(l.productName||'')}" oninput="onRfqProductInput(${i},this)" placeholder="بحث سريع عن منتج"><div class="rfq-product-suggest" id="rfqProductSuggest${i}"></div>${l.addedFromRFQ?'<small class="rfq-line-note">أضيف من طلب عرض السعر وسيتم تحديث طلب الشراء</small>':''}</td><td><input type="text" inputmode="decimal" value="${esc(l.qty||'')}" oninput="this.value=this.value.replace(/[^0-9.,]/g,''); rfqLines[${i}].qty=this.value"></td><td>${rfqUnitOptions(l,i)}</td><td><button class="rfq-remove" onclick="removeRfqProductLine(${i})">🗑</button></td></tr>`).join(''); renderRfqFollow();};
+  window.renderRfqLines=function(){const body=document.getElementById('rfqLinesBody'); if(!body)return; if(!rfqLines.length)rfqLines=[{productCode:'',productName:'',qty:1,unit:''}]; body.innerHTML=rfqLines.map((l,i)=>`<tr class="${l.addedFromRFQ?'rfq-added-line':''}"><td style="position:relative"><input value="${esc(l.productName||'')}" oninput="onRfqProductInput(${i},this)" placeholder="بحث سريع عن منتج"><div class="rfq-product-suggest" id="rfqProductSuggest${i}"></div>${l.addedFromRFQ?'<small class="rfq-line-note">أضيف من طلب عرض السعر وسيتم تحديث طلب الشراء</small>':''}</td><td><input type="text" inputmode="decimal" value="${esc(l.qty||'')}" oninput="this.value=this.value.replace(/[^0-9.,]/g,''); rfqSetLineField(${i},'qty',this.value)"></td><td>${rfqUnitOptions(l,i)}</td><td><button class="rfq-remove" onclick="removeRfqProductLine(${i})">🗑</button></td></tr>`).join(''); renderRfqFollow();};
   window.addRfqProductLine=function(){syncRfqLines(); const linked=!!(document.getElementById('rfqPrRef')?.value); rfqLines.push({productCode:'',productName:'',qty:1,unit:'',addedFromRFQ:linked}); renderRfqLines();};
   window.removeRfqProductLine=function(i){syncRfqLines(); if(rfqLines.length<=1)rfqLines=[{productCode:'',productName:'',qty:1,unit:''}]; else rfqLines.splice(i,1); renderRfqLines();};
   function syncRfqLines(){document.querySelectorAll('#rfqLinesBody tr').forEach((r,i)=>{if(!rfqLines[i])return; const ins=r.querySelectorAll('input'); const sel=r.querySelector('select'); rfqLines[i].productName=ins[0]?.value||''; rfqLines[i].qty=ins[1]?.value||''; rfqLines[i].unit=sel?.value||rfqLines[i].unit||'';});}
@@ -6401,6 +6402,32 @@ table.uz-matrix input[type=checkbox]{width:16px;height:16px;cursor:pointer;accen
   document.addEventListener('click',function(e){if(!e.target.closest('.rfq-supplier-row'))document.querySelectorAll('.rfq-supplier-suggest').forEach(b=>b.style.display='none'); if(!e.target.closest('.rfq-lines-table'))document.querySelectorAll('.rfq-product-suggest').forEach(b=>b.style.display='none');});
   document.addEventListener('DOMContentLoaded',function(){setTimeout(()=>{if(document.getElementById('panel-quotation_request'))resetRfqForm();},80);});
   const oldActivate=window.activateTab; if(typeof oldActivate==='function' && !oldActivate.__v35rfq){window.activateTab.__v35rfq=true;}
+
+  /* ===== v36: RFQ smart layer hooks (qty/unit preserved, state API, PR -> RFQ transfer) ===== */
+  window.rfqSetLineField=function(i,k,v){ if(!rfqLines[i])return; if(k==='qty')v=String(v).replace(/[^0-9.,]/g,''); rfqLines[i][k]=v; try{window.rfqSmartRender&&window.rfqSmartRender();}catch(e){} };
+  window.__rfqState={
+    lines:()=>rfqLines, suppliers:()=>rfqSuppliers,
+    syncLines:()=>syncRfqLines(), syncSuppliers:()=>syncRfqSuppliers(),
+    rerender:()=>{renderRfqLines(); renderRfqSuppliers();},
+    addSupplier:(code,name)=>{syncRfqSuppliers(); if(rfqSuppliers.some(s=>(code&&String(s.supplierCode)===String(code))||(s.supplierName&&s.supplierName===name)))return false; const blank=rfqSuppliers.findIndex(s=>!s.supplierName); const row={supplierCode:code||'',supplierName:name||'',status:'لم يرسل',sentDate:'',reply:'لم يصل الرد',offer:[]}; if(blank>=0)rfqSuppliers[blank]=row; else rfqSuppliers.push(row); renderRfqSuppliers(); return true;},
+    setQty:(i,q)=>{ if(rfqLines[i]){rfqLines[i].qty=String(q); renderRfqLines();} }
+  };
+  const __v36Render=window.renderRfqLines;
+  window.renderRfqLines=function(){ const r=__v36Render.apply(this,arguments); try{window.rfqSmartRender&&window.rfqSmartRender();}catch(e){console.warn('rfqSmartRender',e);} return r; };
+  window.loadRfqFromPurchaseRequest=function(num){
+    const pr=getPRs().find(r=>String(r.number)===String(num)); if(!pr)return;
+    const t=document.getElementById('rfqTitle'); if(t&&!t.value)t.value='طلب عرض سعر بناءً على '+(pr.title||pr.number);
+    rfqLines=(pr.lines&&pr.lines.length?pr.lines:[]).filter(l=>l.productName).map(l=>({productCode:l.productCode||'',productName:l.productName||'',qty:(Number(String(l.qty??'').replace(',','.'))>0?l.qty:1),unit:l.unit||'',fromPr:true,prQty:l.qty,prUnit:l.unit||''}));
+    if(!rfqLines.length)rfqLines=[{productCode:'',productName:'',qty:1,unit:''}];
+    renderRfqLines();
+  };
+  window.sendPurchaseRequestToRFQ=function(num){
+    const pr=getPRs().find(r=>String(r.number)===String(num)); if(!pr)return;
+    if(typeof window.activateTab==='function')window.activateTab('quotation_request');
+    setTimeout(()=>{ populateRfqPrRefs(); const sel=document.getElementById('rfqPrRef'); if(sel)sel.value=pr.number; loadRfqFromPurchaseRequest(pr.number); },120);
+  };
+  
+
 })();
 </script>
 
@@ -8085,5 +8112,6 @@ input,select,textarea,button,table{font-family:inherit!important;}
 <script src="items_import_ext.js?v=20261127"></script>
 <script src="services.js?v=20261122"></script>
 <script src="form_focus.js?v=20261128"></script>
+<script src="rfq_smart.js?v=20261129"></script>
 </body>
 </html>
