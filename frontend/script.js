@@ -5848,7 +5848,7 @@ window.onSiDeliveryChange = onSiDeliveryChange;
 
 function addSiLine(){
   lineCounter++;
-  siLines.push({id:lineCounter, itemCode:'', qty:1, price:0});
+  siLines.push({id:lineCounter, itemCode:'', qty:1, price:0, unit:''});
   renderSiLines();
 }
 window.addSiLine = addSiLine;
@@ -5862,11 +5862,24 @@ window.removeSiLine = removeSiLine;
 function onSiLineChange(id, field, value){
   const l=siLines.find(x=>x.id===id);
   if(!l) return;
+  if(field==='unit'){
+    // تغيير وحدة البيع: يُحوَّل السعر بمعامل الوحدة (سعر الكرتون = سعر الحبة × المعامل)
+    const it=(items||[]).find(i=>i.code===l.itemCode);
+    if(it){
+      const oldF=getItemUnitFactor(it, l.unit)||1, newF=getItemUnitFactor(it, value)||1;
+      if(oldF!==newF) l.price = Math.round((l.price/oldF)*newF*10000)/10000;
+    }
+    l.unit=value;
+    renderSiLines();
+    return;
+  }
   if(field==='qty'||field==='price') l[field]=parseFloat(value)||0;
   else l[field]=value;
   if(field==='itemCode'){
     const it=(items||[]).find(i=>i.code===value);
     l.price = it ? Number(it.price)||0 : 0;
+    const _units = it ? getTemplateUnitsForItem(it) : [];
+    l.unit = _units[0] ? _units[0].value : (it ? (it.unit||'') : '');
   }
   renderSiLines();
 }
@@ -5878,11 +5891,20 @@ function renderSiLines(){
   const itemOpts='<option value="">— اختر صنف —</option>'+(items||[]).filter(i=>i.is_active!==false).map(i=>`<option value="${i.code}">${i.code} — ${i.name}</option>`).join('');
   body.innerHTML=siLines.map(l=>{
     const it=(items||[]).find(i=>i.code===l.itemCode);
-    const available = it ? Number(it.qty)||0 : 0;
+    // الوحدات من قالب وحدات الصنف (الأساسية + الأعلى). الرصيد مخزَّن بالوحدة الأساسية فيُعرض بالوحدة المختارة.
+    const units = it ? getTemplateUnitsForItem(it) : [];
+    const factor = it ? (getItemUnitFactor(it, l.unit)||1) : 1;
+    const availableBase = it ? Number(it.qty)||0 : 0;
+    const available = factor>1 ? availableBase/factor : availableBase;
+    const unitOpts = it
+      ? units.map(u=>`<option value="${String(u.value).replace(/"/g,'&quot;')}" ${String(u.value)===String(l.unit)?'selected':''}>${u.label}</option>`).join('')
+      : '<option value="">-</option>';
+    const baseName = it ? (((getItemUnitTemplate(it)||{}).base) || it.unit || '') : '';
     return `<tr>
       <td><select onchange="onSiLineChange(${l.id},'itemCode',this.value)">${itemOpts.replace(`value="${l.itemCode}"`,`value="${l.itemCode}" selected`)}</select></td>
       <td><input type="number" step="0.01" min="0" max="${available}" value="${l.qty}" onchange="onSiLineChange(${l.id},'qty',this.value)"></td>
-      <td class="num" style="color:${l.qty>available?'#c62828':'#7c8ba3'}">${fmt(available)}</td>
+      <td><select class="unit-line-select" onchange="onSiLineChange(${l.id},'unit',this.value)" ${it?'':'disabled'}>${unitOpts}</select></td>
+      <td class="num" title="${fmt(availableBase)} ${baseName}" style="color:${l.qty>available?'#c62828':'#7c8ba3'}">${fmt(available)}</td>
       <td><input type="number" step="0.01" min="0" value="${l.price}" onchange="onSiLineChange(${l.id},'price',this.value)"></td>
       <td class="linetotal">${fmt(l.qty*l.price)}</td>
       <td><button class="rm-line" onclick="removeSiLine(${l.id})">✕</button></td>
@@ -5931,7 +5953,12 @@ async function submitSalesInvoice(){
     await api('POST','/api/sales-invoices',{
       inv_date, customer_code, customer_ref_number, delivery_number, payment_terms_days, cost_center_code,
       warehouse_id, tax_type_code, tax_calc_method,
-      lines: delivery_number ? [] : valid.map(l=>({item_code:l.itemCode, qty:l.qty, unit_price:l.price})),
+      lines: delivery_number ? [] : valid.map(l=>{
+        // المخزون والقيود بالوحدة الأساسية: الكمية × المعامل، والسعر ÷ المعامل
+        const it=(items||[]).find(i=>i.code===l.itemCode);
+        const factor = it ? (getItemUnitFactor(it, l.unit)||1) : 1;
+        return {item_code:l.itemCode, qty:l.qty*factor, unit_price: factor ? l.price/factor : l.price};
+      }),
     });
     siLines=[];
     document.getElementById('siCustomerRef').value='';
@@ -9762,4 +9789,18 @@ window.submitResetTransactions = submitResetTransactions;
   window.getItemsUnitMode = () => mode;
   document.addEventListener('DOMContentLoaded', syncButtons);
   syncButtons();
+})();
+
+/* ===== PF-01.13: ربط window.items / window.suppliers / window.unitTemplates بالمتغيرات الحية =====
+   items و suppliers و unitTemplates معرّفة بـ let (ليست خصائص window)، وكان السطر
+   `window.items = window.items || []` ينشئ مصفوفة فارغة منفصلة؛ فكانت الشاشات التي
+   تقرأ window.items (طلب الشراء، عروض الأسعار...) لا ترى أي منتج. الخاصية الآن تقرأ/تكتب
+   المتغير الحقيقي مباشرةً. */
+(function(){
+  function link(name, get, set){
+    try{ Object.defineProperty(window, name, { configurable:true, enumerable:true, get:get, set:set }); }catch(e){}
+  }
+  link('items',         function(){ return items; },         function(v){ items = Array.isArray(v) ? v : []; });
+  link('suppliers',     function(){ return suppliers; },     function(v){ suppliers = Array.isArray(v) ? v : []; });
+  link('unitTemplates', function(){ return unitTemplates; }, function(v){ unitTemplates = Array.isArray(v) ? v : []; });
 })();
