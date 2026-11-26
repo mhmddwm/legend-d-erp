@@ -552,8 +552,7 @@
     return ITEM_SIZES.indexOf(v) >= 0 ? v : 50;
   }
   function itemsSource() { // نفس منطق الاختيار الأصلي لمصدر الصفوف (مفلتر أو الكل)
-    return itemFiltered.isFiltered ? itemFiltered :
-      (Array.isArray(itemFiltered) && itemFiltered.length ? itemFiltered : (items || []));
+    return itemFiltered.isFiltered ? itemFiltered : (items || []); // بلا بحث: القائمة الحيّة دائماً
   }
   function paintItemPager(page, pages, from, to, total) {
     var info = byId('itemPageInfo'); if (!info) return;

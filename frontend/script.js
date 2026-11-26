@@ -7823,7 +7823,7 @@ window.openSubModule=openSubModule;
 
   window.renderItemsTable = renderItemsTable = function(){
     const body=document.getElementById('itemsBody'); if(!body)return;
-    const arr=itemFiltered && itemFiltered.isFiltered ? itemFiltered : (Array.isArray(itemFiltered) && itemFiltered.length ? itemFiltered : (items||[]));
+    const arr=itemFiltered && itemFiltered.isFiltered ? itemFiltered : (items||[]); // بلا بحث: القائمة الحيّة دائماً (لا نسخة قديمة)
     if(!arr.length){
       body.innerHTML='<tr><td colspan="10" class="empty-msg">لا توجد منتجات مطابقة للبحث</td></tr>';
       const empty=document.getElementById('itemsEmpty'); if(empty) empty.style.display='none';
